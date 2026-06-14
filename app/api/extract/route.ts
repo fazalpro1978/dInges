@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 import * as xlsx from 'xlsx';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -8,7 +7,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const execAsync = promisify(exec);
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+
+const OR_URL   = 'https://openrouter.ai/api/v1/chat/completions';
+const OR_MODEL = 'anthropic/claude-sonnet-4-5';
 
 const SCHEMA_PROMPT = `You are a real estate data extraction specialist for Qatar property market.
 Extract ALL unit/property records from the provided file content.
@@ -32,6 +33,31 @@ Normalisation rules:
 
 Return raw JSON array only. No markdown, no explanation.`;
 
+async function callOpenRouter(messages: unknown[]): Promise<string> {
+  const res = await fetch(OR_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.ANTHROPIC_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://d-inges.vercel.app',
+      'X-Title': 'REIMS Ingestion Service',
+    },
+    body: JSON.stringify({ model: OR_MODEL, messages, max_tokens: 8096 }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`OpenRouter error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json() as { choices: { message: { content: string } }[] };
+  return data.choices?.[0]?.message?.content ?? '[]';
+}
+
+function parseUnits(text: string): Record<string, unknown>[] {
+  return JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+}
+
 export async function POST(req: NextRequest) {
   const form = await req.formData();
   const file = form.get('file') as File | null;
@@ -44,51 +70,48 @@ export async function POST(req: NextRequest) {
   try {
     let units: Record<string, unknown>[] = [];
 
-    // ── Image ───────────────────────────────────────────────────────────────
+    // ── Image ─────────────────────────────────────────────────────────────────
     if (['jpg','jpeg','png','webp'].includes(ext)) {
-      const b64 = buf.toString('base64');
+      const b64  = buf.toString('base64');
       const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-      const msg = await client.messages.create({
-        model: 'claude-sonnet-4-6', max_tokens: 8096,
-        messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: mime as 'image/jpeg', data: b64 } },
+      const text = await callOpenRouter([{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
           { type: 'text', text: SCHEMA_PROMPT },
-        ]}],
-      });
-      const text = msg.content.find(c => c.type === 'text')?.text ?? '[]';
-      units = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+        ],
+      }]);
+      units = parseUnits(text);
     }
 
-    // ── PDF ─────────────────────────────────────────────────────────────────
+    // ── PDF ───────────────────────────────────────────────────────────────────
     else if (ext === 'pdf') {
       const tmp = join(tmpdir(), `ingest-${Date.now()}.pdf`);
       writeFileSync(tmp, buf);
       const { stdout } = await execAsync(`pdftotext -layout "${tmp}" -`).catch(() => ({ stdout: '' }));
       unlinkSync(tmp);
-      const msg = await client.messages.create({
-        model: 'claude-sonnet-4-6', max_tokens: 8096,
-        messages: [{ role: 'user', content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${stdout}` }],
-      });
-      const text = msg.content.find(c => c.type === 'text')?.text ?? '[]';
-      units = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+      const text = await callOpenRouter([{
+        role: 'user',
+        content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${stdout}`,
+      }]);
+      units = parseUnits(text);
     }
 
-    // ── Excel / CSV ──────────────────────────────────────────────────────────
+    // ── Excel / CSV ───────────────────────────────────────────────────────────
     else if (['xlsx','xls','csv'].includes(ext)) {
-      const wb = xlsx.read(buf, { type: 'buffer', cellDates: true });
+      const wb   = xlsx.read(buf, { type: 'buffer', cellDates: true });
       const rows: string[] = [];
       wb.SheetNames.forEach(name => {
-        const ws = wb.Sheets[name];
+        const ws   = wb.Sheets[name];
         const data = xlsx.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' });
         rows.push(`=== Sheet: ${name} ===`);
         rows.push(data.map(r => (r as unknown[]).join('\t')).join('\n'));
       });
-      const msg = await client.messages.create({
-        model: 'claude-sonnet-4-6', max_tokens: 8096,
-        messages: [{ role: 'user', content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}` }],
-      });
-      const text = msg.content.find(c => c.type === 'text')?.text ?? '[]';
-      units = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+      const text = await callOpenRouter([{
+        role: 'user',
+        content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}`,
+      }]);
+      units = parseUnits(text);
     }
 
     else {
