@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       .in('id', ids);
 
     if (records) {
-      const runIds = [...new Set(records.map((r: { run_id: string }) => r.run_id).filter(Boolean))];
+      const runIds = Array.from(new Set(records.map((r: { run_id: string }) => r.run_id).filter(Boolean)));
       for (const rid of runIds) {
         const { count } = await admin
           .from('vetted_records')
