@@ -1,5 +1,7 @@
 'use client';
 import React, { useState, useRef, useCallback } from 'react';
+import StructuredMapper, { type MappedPayload } from './StructuredMapper';
+import StructuredValidator from './StructuredValidator';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -200,9 +202,50 @@ export default function IngestPipeline() {
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
   const [approveResult, setApproveResult] = useState<{ approved: number; rejected: number } | null>(null);
 
+  // Stage 0, structured (CSV/XLSX) sub-flow — deterministic Mapping → Validation, bypasses /api/extract
+  const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [mappedPayload, setMappedPayload] = useState<MappedPayload | null>(null);
+
   // ── Stage 0: Upload & Extract ─────────────────────────────────────────────
 
+  const runMatch = useCallback(async (units: Record<string, unknown>[]) => {
+    setIsProcessing(true);
+    setError(null);
+    try {
+      const matchRes = await fetch('/api/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records: units }),
+      });
+      const matchData = await matchRes.json();
+      if (!matchRes.ok) throw new Error(matchData.error ?? 'Match failed');
+
+      const records = (matchData.results as MatchedRecord[]).map(r => ({ ...r, _conflictResolved: {} }));
+      setMatched(records);
+      setSummary(matchData.summary);
+      setStructuredStage('idle');
+      setPendingFile(null);
+      setMappedPayload(null);
+      setStage(1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Match failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, []);
+
   const handleFile = useCallback(async (file: File) => {
+    const ext = file.name.toLowerCase().split('.').pop() ?? '';
+    if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') {
+      setError(null);
+      setFileName(file.name);
+      setFileSize(file.size);
+      setPendingFile(file);
+      setStructuredStage('mapping');
+      return;
+    }
+
     setError(null);
     setIsProcessing(true);
     setFileName(file.name);
@@ -216,26 +259,12 @@ export default function IngestPipeline() {
       if (!res.ok) throw new Error(data.error ?? 'Extraction failed');
 
       const { units } = data as { units: Record<string, unknown>[] };
-
-      // Match against existing REIMS units
-      const matchRes = await fetch('/api/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records: units }),
-      });
-      const matchData = await matchRes.json();
-      if (!matchRes.ok) throw new Error(matchData.error ?? 'Match failed');
-
-      const records = (matchData.results as MatchedRecord[]).map(r => ({ ...r, _conflictResolved: {} }));
-      setMatched(records);
-      setSummary(matchData.summary);
-      setStage(1);
+      await runMatch(units);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
-    } finally {
       setIsProcessing(false);
     }
-  }, []);
+  }, [runMatch]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -328,6 +357,7 @@ export default function IngestPipeline() {
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
     setDecisions({}); setDecisionNotes({}); setApproveResult(null);
     setFileName(''); setFileSize(0); setError(null);
+    setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -340,7 +370,7 @@ export default function IngestPipeline() {
           <h1 className="text-lg font-bold text-gray-900">REIMS Ingestion Service</h1>
           <p className="text-xs text-gray-500">Vanguard REOS · Data Ingestion & Approval Pipeline</p>
         </div>
-        {stage > 0 && (
+        {(stage > 0 || structuredStage !== 'idle') && (
           <button onClick={reset} className="text-xs text-gray-500 hover:text-gray-800 underline">
             Start Over
           </button>
@@ -374,7 +404,19 @@ export default function IngestPipeline() {
         )}
 
         {/* ── Stage 0: Upload ───────────────────────────────────────────── */}
-        {stage === 0 && (
+        {stage === 0 && structuredStage === 'mapping' && pendingFile && (
+          <StructuredMapper
+            fileName={fileName}
+            file={pendingFile}
+            onMapped={payload => { setMappedPayload(payload); setStructuredStage('validating'); }}
+          />
+        )}
+
+        {stage === 0 && structuredStage === 'validating' && mappedPayload && (
+          <StructuredValidator payload={mappedPayload} onValidated={runMatch} />
+        )}
+
+        {stage === 0 && structuredStage === 'idle' && (
           <div className="bg-white rounded-xl border border-gray-200 p-8">
             <h2 className="text-base font-semibold text-gray-900 mb-1">Upload Property Data File</h2>
             <p className="text-sm text-gray-500 mb-6">Supports XLSX, XLS, CSV, PDF, PNG, JPG, WEBP</p>
@@ -395,7 +437,7 @@ export default function IngestPipeline() {
                 <div>
                   <div className="text-4xl mb-3">📂</div>
                   <p className="text-sm font-medium text-gray-700">Drop file here or click to browse</p>
-                  <p className="text-xs text-gray-400 mt-1">Claude AI will extract and normalise all property records</p>
+                  <p className="text-xs text-gray-400 mt-1">CSV/XLSX → manual column mapping · PDF/Image → Claude AI extraction</p>
                 </div>
               )}
             </div>
