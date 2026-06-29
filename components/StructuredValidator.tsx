@@ -14,6 +14,15 @@ const DISPLAY_COLS = [
   'bathrooms', 'parking', 'kitchen', 'realtor_name',
 ] as const;
 
+// Percentages sum to 100 (minus 2.5 + 5 + 4 reserved for #, Status, Action below) — keeps every
+// column visible on one screen width via table-fixed, instead of horizontal scroll.
+const COL_WIDTH: Record<(typeof DISPLAY_COLS)[number], string> = {
+  unit_code: '8%', realtor_moci: '6%', property: '9%', unit_no: '5%',
+  zone_code: '3.5%', zone: '8%', type: '6%', config: '6%', furnishing: '7%',
+  rent: '5%', status: '7%', bathrooms: '3.5%', parking: '3.5%', kitchen: '4%',
+  realtor_name: '7%',
+};
+
 type ValidatedRow = {
   raw: Record<string, string>;
   cast: Record<string, unknown>;
@@ -159,75 +168,80 @@ export default function StructuredValidator({ payload, onValidated, onBack }: {
         ))}
       </div>
 
+      {/* table-fixed + percentage colgroup keeps every column on one screen width, no horizontal scroll */}
       <div className="rounded-lg border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="w-8 px-3 py-2.5 text-gray-400">#</th>
-                <th className="w-20 px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest whitespace-nowrap">Status</th>
-                {DISPLAY_COLS.map((k) => (
-                  <th key={k} className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest whitespace-nowrap">
-                    {k.replace(/_/g, ' ')}
-                  </th>
-                ))}
-                <th className="w-16 px-2 py-2.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const hasError = r.errors.length > 0;
-                return (
-                  <tr key={i} className={`border-b border-gray-100 group ${hasError ? 'bg-red-50' : ''}`}>
-                    <td className="px-3 py-2 text-gray-400 text-center">{i + 1}</td>
-                    <td className="px-2 py-2 whitespace-nowrap">
-                      {hasError ? (
-                        <span className="text-[9px] font-bold text-red-600 bg-red-100 border border-red-200 rounded-full px-1.5 py-0.5">Error</span>
-                      ) : (
-                        <span className="text-[9px] font-bold text-green-600 bg-green-100 border border-green-200 rounded-full px-1.5 py-0.5">Ready</span>
-                      )}
-                    </td>
-                    {DISPLAY_COLS.map((k) => {
-                      const derived = k === 'unit_code' || k === 'zone';
-                      const value = derived ? (k === 'unit_code' ? r.unit_code : r.zone) : r.cast[k];
-                      return (
-                        <td key={k} className="px-2 py-2 max-w-[140px]">
-                          {editingIdx === i && !derived ? (
-                            <input
-                              className="w-full bg-white border border-gray-300 rounded px-1.5 py-0.5 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
-                              value={r.raw[k] ?? ''}
-                              onChange={(e) => updateCell(i, k, e.target.value)}
-                            />
-                          ) : (
-                            <FieldCell value={value} />
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="px-2 py-2">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => setEditingIdx(editingIdx === i ? null : i)}
-                          className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                          title={editingIdx === i ? 'Done' : 'Edit'}
-                        >
-                          {editingIdx === i ? '✓' : '✎'}
-                        </button>
-                        <button
-                          onClick={() => removeRow(i)}
-                          className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Remove"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <table className="w-full text-xs table-fixed">
+          <colgroup>
+            <col style={{ width: '2.5%' }} />
+            <col style={{ width: '5%' }} />
+            {DISPLAY_COLS.map((k) => <col key={k} style={{ width: COL_WIDTH[k] }} />)}
+            <col style={{ width: '4%' }} />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50">
+              <th className="px-2 py-2.5 text-gray-400">#</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest">Status</th>
+              {DISPLAY_COLS.map((k) => (
+                <th key={k} className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest truncate">
+                  {k.replace(/_/g, ' ')}
+                </th>
+              ))}
+              <th className="px-2 py-2.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const hasError = r.errors.length > 0;
+              return (
+                <tr key={i} className={`border-b border-gray-100 group ${hasError ? 'bg-red-50' : ''}`}>
+                  <td className="px-2 py-2 text-gray-400 text-center">{i + 1}</td>
+                  <td className="px-2 py-2 overflow-hidden">
+                    {hasError ? (
+                      <span className="text-[9px] font-bold text-red-600 bg-red-100 border border-red-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">Error</span>
+                    ) : (
+                      <span className="text-[9px] font-bold text-green-600 bg-green-100 border border-green-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">Ready</span>
+                    )}
+                  </td>
+                  {DISPLAY_COLS.map((k) => {
+                    const derived = k === 'unit_code' || k === 'zone';
+                    const value = derived ? (k === 'unit_code' ? r.unit_code : r.zone) : r.cast[k];
+                    return (
+                      <td key={k} className="px-2 py-2 overflow-hidden">
+                        {editingIdx === i && !derived ? (
+                          <input
+                            className="w-full bg-white border border-gray-300 rounded px-1.5 py-0.5 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
+                            value={r.raw[k] ?? ''}
+                            onChange={(e) => updateCell(i, k, e.target.value)}
+                          />
+                        ) : (
+                          <FieldCell value={value} />
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td className="px-2 py-2 overflow-hidden">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => setEditingIdx(editingIdx === i ? null : i)}
+                        className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                        title={editingIdx === i ? 'Done' : 'Edit'}
+                      >
+                        {editingIdx === i ? '✓' : '✎'}
+                      </button>
+                      <button
+                        onClick={() => removeRow(i)}
+                        className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {errorCount > 0 && (

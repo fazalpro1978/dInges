@@ -39,7 +39,7 @@ export function FieldCell({ value }: { value: unknown }) {
   if (value === null || value === undefined || value === '') {
     return <span className="text-gray-300 italic text-[10px]">—</span>;
   }
-  return <span className="text-xs text-gray-700">{String(value)}</span>;
+  return <span className="text-xs text-gray-700 block truncate" title={String(value)}>{String(value)}</span>;
 }
 
 export function Badge({ label, color }: { label: string; color: string }) {

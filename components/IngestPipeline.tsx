@@ -303,7 +303,7 @@ export default function IngestPipeline() {
         </div>
       </div>
 
-      <main className="max-w-5xl mx-auto px-4 py-8">
+      <main className="max-w-[1700px] mx-auto px-4 py-8">
         {error && (
           <div className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
             {error}
@@ -372,7 +372,11 @@ export default function IngestPipeline() {
                 <h2 className="text-base font-semibold text-gray-900">Match Review</h2>
                 <p className="text-xs text-gray-500 mt-0.5">{fileName} · {matched.length} records extracted</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={reset}
+                  className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
+                >← Back to Upload</button>
                 <Badge label={`${summary.new} New`} color="#22c55e" />
                 <Badge label={`${summary.update} Update`} color="#3b82f6" />
                 {summary.conflict > 0 && <Badge label={`${summary.conflict} Conflict`} color="#a855f7" />}

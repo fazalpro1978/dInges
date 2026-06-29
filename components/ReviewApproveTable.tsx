@@ -43,10 +43,10 @@ function LinksCell({ mapUrl, mediaUrl }: { mapUrl: unknown; mediaUrl: unknown })
   const media = typeof mediaUrl === 'string' && mediaUrl ? mediaUrl : null;
   if (!map && !media) return <span className="text-gray-300 text-xs">—</span>;
   return (
-    <div className="flex items-center gap-1 text-xs">
-      {map && <a href={map} target="_blank" rel="noopener noreferrer" title={map} className="text-blue-600 hover:text-blue-700 underline">Map</a>}
-      {map && media && <span className="text-gray-300">·</span>}
-      {media && <a href={media} target="_blank" rel="noopener noreferrer" title={media} className="text-blue-600 hover:text-blue-700 underline">Media</a>}
+    <div className="flex items-center gap-1 text-xs whitespace-nowrap overflow-hidden">
+      {map && <a href={map} target="_blank" rel="noopener noreferrer" title={map} className="text-blue-600 hover:text-blue-700 underline shrink-0">Map</a>}
+      {map && media && <span className="text-gray-300 shrink-0">·</span>}
+      {media && <a href={media} target="_blank" rel="noopener noreferrer" title={media} className="text-blue-600 hover:text-blue-700 underline shrink-0">Media</a>}
     </div>
   );
 }
@@ -315,16 +315,16 @@ export default function ReviewApproveTable({
           <colgroup>
             <col style={{ width: '3.5%' }} />
             <col style={{ width: '7%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '11%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '10%' }} />
             <col style={{ width: '10%' }} />
             <col style={{ width: '7%' }} />
             <col style={{ width: '7%' }} />
             <col style={{ width: '8%' }} />
             <col style={{ width: '8.5%' }} />
             <col style={{ width: '7%' }} />
-            <col style={{ width: '6%' }} />
-            <col style={{ width: '12%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '13%' }} />
           </colgroup>
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
@@ -373,10 +373,10 @@ export default function ReviewApproveTable({
                     <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.config ?? '—')}</td>
                     <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.furnishing ?? '—')}</td>
                     <td className="px-2 py-2.5 text-xs font-semibold text-gray-900 truncate">{formatRent(d.rent)}</td>
-                    <td className="px-2 py-2.5"><StatusPill value={d.status} /></td>
-                    <td className="px-2 py-2.5"><LinksCell mapUrl={d.location_map_url} mediaUrl={d.media_url} /></td>
-                    <td className="px-2 py-2.5">
-                      <div className="flex items-center gap-1">
+                    <td className="px-2 py-2.5 overflow-hidden"><StatusPill value={d.status} /></td>
+                    <td className="px-2 py-2.5 overflow-hidden"><LinksCell mapUrl={d.location_map_url} mediaUrl={d.media_url} /></td>
+                    <td className="px-2 py-2.5 overflow-hidden">
+                      <div className="flex items-center gap-1 whitespace-nowrap">
                         <button
                           onClick={() => onDecide(r.id, 'approved')}
                           title="Approve"
