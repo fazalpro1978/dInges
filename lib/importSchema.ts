@@ -164,6 +164,11 @@ export function castAndValidateField(field: MasterFieldDef, rawValue: unknown): 
     }
 
     case 'numeric': {
+      if (field.key === 'parking') {
+        const lower = str.toLowerCase();
+        if (['yes', 'y', 'true', 'available'].includes(lower)) return { value: 1 };
+        if (['no', 'n', 'false', 'none', 'unavailable'].includes(lower)) return { value: 0 };
+      }
       const cleaned = str.replace(/[^\d.-]/g, '');
       const n = parseFloat(cleaned);
       if (isNaN(n)) return { value: null, error: `Non-numeric value for ${field.label}: "${str}"` };
