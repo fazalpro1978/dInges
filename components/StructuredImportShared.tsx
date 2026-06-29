@@ -41,3 +41,24 @@ export function FieldCell({ value }: { value: unknown }) {
   }
   return <span className="text-xs text-gray-700">{String(value)}</span>;
 }
+
+export function Badge({ label, color }: { label: string; color: string }) {
+  return (
+    <span style={{ background: color }} className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
+      {label}
+    </span>
+  );
+}
+
+export function actionBadge(action: string) {
+  if (action === 'new')      return <Badge label="NEW" color="#22c55e" />;
+  if (action === 'update')   return <Badge label="UPDATE" color="#3b82f6" />;
+  if (action === 'conflict') return <Badge label="CONFLICT" color="#a855f7" />;
+  return <Badge label="UNRESOLVED" color="#f59e0b" />;
+}
+
+export function statusBadge(status: string) {
+  if (status === 'approved') return <Badge label="APPROVED" color="#22c55e" />;
+  if (status === 'rejected') return <Badge label="REJECTED" color="#ef4444" />;
+  return <Badge label="PENDING" color="#6b7280" />;
+}

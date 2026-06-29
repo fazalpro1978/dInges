@@ -3,6 +3,8 @@ import React, { useState, useRef, useCallback } from 'react';
 import StructuredMapper, { type MappedPayload } from './StructuredMapper';
 import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
+import ReviewApproveTable, { type StagedRecord } from './ReviewApproveTable';
+import { Badge, actionBadge } from './StructuredImportShared';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,41 +26,9 @@ type MatchedRecord = {
   _conflictResolved: Record<string, unknown>;
 };
 
-type StagedRecord = {
-  id: string;
-  row_index: number;
-  raw_data: Record<string, unknown>;
-  resolved_data: Record<string, unknown>;
-  match_type: string;
-  conflict_fields: Record<string, ConflictField> | null;
-  status: 'pending' | 'approved' | 'rejected';
-  reviewer_notes?: string;
-};
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const STAGE_LABELS = ['Upload', 'Match & Review', 'Stage', 'Approve', 'Done'];
-
-function Badge({ label, color }: { label: string; color: string }) {
-  return (
-    <span style={{ background: color }} className="text-white text-xs font-bold px-2 py-0.5 rounded-full">
-      {label}
-    </span>
-  );
-}
-
-function actionBadge(action: string) {
-  if (action === 'new')      return <Badge label="NEW" color="#22c55e" />;
-  if (action === 'update')   return <Badge label="UPDATE" color="#3b82f6" />;
-  if (action === 'conflict') return <Badge label="CONFLICT" color="#a855f7" />;
-  return <Badge label="UNRESOLVED" color="#f59e0b" />;
-}
-
-function statusBadge(status: string) {
-  if (status === 'approved') return <Badge label="APPROVED" color="#22c55e" />;
-  if (status === 'rejected') return <Badge label="REJECTED" color="#ef4444" />;
-  return <Badge label="PENDING" color="#6b7280" />;
-}
 
 // ─── ConflictResolver ─────────────────────────────────────────────────────────
 
@@ -105,76 +75,6 @@ function ConflictResolver({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ─── ApprovalRow ──────────────────────────────────────────────────────────────
-
-function ApprovalRow({
-  record,
-  decision,
-  notes,
-  onDecide,
-  onNotes,
-}: {
-  record: StagedRecord;
-  decision: 'approved' | 'rejected' | null;
-  notes: string;
-  onDecide: (d: 'approved' | 'rejected') => void;
-  onNotes: (n: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const data = record.resolved_data as Record<string, unknown>;
-
-  return (
-    <div className={`border rounded-lg p-3 mb-2 transition-colors ${
-      decision === 'approved' ? 'border-green-300 bg-green-50'
-      : decision === 'rejected' ? 'border-red-300 bg-red-50'
-      : 'border-gray-200 bg-white'
-    }`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span className="text-xs text-gray-400 w-6">#{record.row_index + 1}</span>
-          {actionBadge(record.match_type)}
-          <span className="font-medium text-sm truncate">{String(data.property ?? data.unit_code ?? '—')}</span>
-          <span className="text-xs text-gray-500 truncate">{String(data.unit_no ?? '')}</span>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => setOpen(o => !o)}
-            className="text-xs text-blue-600 underline"
-          >{open ? 'Hide' : 'Details'}</button>
-          <button
-            onClick={() => onDecide('approved')}
-            className={`text-xs px-3 py-1 rounded-full font-semibold border transition-colors ${decision === 'approved' ? 'bg-green-600 text-white border-green-600' : 'border-green-500 text-green-700 hover:bg-green-50'}`}
-          >Approve</button>
-          <button
-            onClick={() => onDecide('rejected')}
-            className={`text-xs px-3 py-1 rounded-full font-semibold border transition-colors ${decision === 'rejected' ? 'bg-red-600 text-white border-red-600' : 'border-red-400 text-red-600 hover:bg-red-50'}`}
-          >Reject</button>
-        </div>
-      </div>
-
-      {open && (
-        <div className="mt-3 text-xs text-gray-700 grid grid-cols-2 gap-x-4 gap-y-1">
-          {Object.entries(data).map(([k, v]) => (
-            <React.Fragment key={k}>
-              <span className="text-gray-400 capitalize">{k.replace(/_/g, ' ')}</span>
-              <span className="font-medium truncate">{String(v ?? '—')}</span>
-            </React.Fragment>
-          ))}
-        </div>
-      )}
-
-      {decision && (
-        <input
-          className="mt-2 w-full border border-gray-300 rounded px-2 py-1 text-xs"
-          placeholder="Reviewer notes (optional)"
-          value={notes}
-          onChange={e => onNotes(e.target.value)}
-        />
-      )}
     </div>
   );
 }
@@ -359,10 +259,6 @@ export default function IngestPipeline() {
       setIsProcessing(false);
     }
   };
-
-  const decidedCount  = Object.values(decisions).filter(d => d !== null).length;
-  const pendingCount  = stagedRecords.length - decidedCount;
-  const approvedCount = Object.values(decisions).filter(d => d === 'approved').length;
 
   const reset = () => {
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
@@ -572,65 +468,26 @@ export default function IngestPipeline() {
 
         {/* ── Stage 2: Approve ──────────────────────────────────────────── */}
         {stage === 2 && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900">Review & Approve</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Run ID: <span className="font-mono">{runId}</span>
-                </p>
-              </div>
-              <div className="flex gap-2 text-xs">
-                <span className="text-gray-500">{pendingCount} pending</span>
-                <span className="text-green-600 font-semibold">{approvedCount} approved</span>
-                <span className="text-red-500 font-semibold">{decidedCount - approvedCount} rejected</span>
-              </div>
-            </div>
-
-            {/* Bulk actions */}
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={() => {
-                  const all: Record<string, 'approved'> = {};
-                  stagedRecords.forEach(r => { all[r.id] = 'approved'; });
-                  setDecisions(all);
-                }}
-                className="text-xs px-3 py-1.5 border border-green-500 text-green-700 rounded-lg hover:bg-green-50"
-              >Approve All</button>
-              <button
-                onClick={() => {
-                  const all: Record<string, 'rejected'> = {};
-                  stagedRecords.forEach(r => { all[r.id] = 'rejected'; });
-                  setDecisions(all);
-                }}
-                className="text-xs px-3 py-1.5 border border-red-400 text-red-600 rounded-lg hover:bg-red-50"
-              >Reject All</button>
-            </div>
-
-            <div className="max-h-[55vh] overflow-y-auto">
-              {stagedRecords.map(r => (
-                <ApprovalRow
-                  key={r.id}
-                  record={r}
-                  decision={decisions[r.id] ?? null}
-                  notes={decisionNotes[r.id] ?? ''}
-                  onDecide={d => setDecisions(prev => ({ ...prev, [r.id]: d }))}
-                  onNotes={n => setDecisionNotes(prev => ({ ...prev, [r.id]: n }))}
-                />
-              ))}
-            </div>
-
-            <div className="mt-6 flex items-center justify-between">
-              <p className="text-xs text-gray-400">{decidedCount}/{stagedRecords.length} decided</p>
-              <button
-                disabled={decidedCount === 0 || isProcessing}
-                onClick={handleApprove}
-                className="px-5 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg disabled:opacity-40 hover:bg-green-700 transition-colors"
-              >
-                {isProcessing ? 'Submitting…' : `Submit ${decidedCount} Decision${decidedCount !== 1 ? 's' : ''} →`}
-              </button>
-            </div>
-          </div>
+          <ReviewApproveTable
+            runId={runId}
+            records={stagedRecords}
+            decisions={decisions}
+            notes={decisionNotes}
+            onDecide={(id, d) => setDecisions(prev => ({ ...prev, [id]: d }))}
+            onNotes={(id, n) => setDecisionNotes(prev => ({ ...prev, [id]: n }))}
+            onApproveAll={() => {
+              const all: Record<string, 'approved'> = {};
+              stagedRecords.forEach(r => { all[r.id] = 'approved'; });
+              setDecisions(all);
+            }}
+            onRejectAll={() => {
+              const all: Record<string, 'rejected'> = {};
+              stagedRecords.forEach(r => { all[r.id] = 'rejected'; });
+              setDecisions(all);
+            }}
+            onSubmit={handleApprove}
+            isProcessing={isProcessing}
+          />
         )}
 
         {/* ── Stage 3: Done ─────────────────────────────────────────────── */}
