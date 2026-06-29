@@ -486,6 +486,7 @@ export default function IngestPipeline() {
               setDecisions(all);
             }}
             onSubmit={handleApprove}
+            onBack={() => { setStage(1); setDecisions({}); setDecisionNotes({}); }}
             isProcessing={isProcessing}
           />
         )}

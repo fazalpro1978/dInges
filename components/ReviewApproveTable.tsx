@@ -66,6 +66,7 @@ export default function ReviewApproveTable({
   onApproveAll,
   onRejectAll,
   onSubmit,
+  onBack,
   isProcessing,
 }: {
   runId: string | null;
@@ -77,6 +78,7 @@ export default function ReviewApproveTable({
   onApproveAll: () => void;
   onRejectAll: () => void;
   onSubmit: () => void;
+  onBack: () => void;
   isProcessing: boolean;
 }) {
   const [search, setSearch] = useState('');
@@ -203,6 +205,10 @@ export default function ReviewApproveTable({
         </div>
         <div className="flex gap-2">
           <button
+            onClick={onBack}
+            className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
+          >← Back to Match & Review</button>
+          <button
             onClick={onApproveAll}
             className="text-xs px-3 py-1.5 border border-green-500 text-green-700 rounded-lg hover:bg-green-50 font-semibold"
           >Approve All</button>
@@ -233,7 +239,7 @@ export default function ReviewApproveTable({
         <input
           value={search}
           onChange={(e) => { setSearch(e.target.value); resetToFirstPage(); }}
-          placeholder="Search property, unit, MOCI…"
+          placeholder="Search property, unit, realtor…"
           className="flex-1 min-w-[200px] bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500"
         />
         <select
@@ -318,7 +324,7 @@ export default function ReviewApproveTable({
                 <th className="w-8 px-2 py-3 text-gray-400 text-[10px] font-bold uppercase tracking-wider">#</th>
                 <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Match</th>
                 <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Property / Unit</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Realtor MOCI ID</th>
+                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Realtor</th>
                 <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Zone / District</th>
                 <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Type</th>
                 <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Config</th>
@@ -349,7 +355,10 @@ export default function ReviewApproveTable({
                         <p className="font-semibold text-gray-900 text-sm truncate">{String(d.property ?? '—')}</p>
                         <p className="text-[11px] text-gray-400 truncate">{String(d.unit_code ?? d.unit_no ?? '—')}</p>
                       </td>
-                      <td className="px-3 py-3 text-xs font-mono text-gray-600 whitespace-nowrap">{String(d.realtor_moci ?? '—')}</td>
+                      <td className="px-3 py-3 max-w-[160px]">
+                        <p className="text-gray-800 text-xs font-medium truncate">{String(d.realtor_name ?? '—')}</p>
+                        <p className="text-[11px] text-gray-400 font-mono truncate">{d.realtor_moci ? String(d.realtor_moci) : '—'}</p>
+                      </td>
                       <td className="px-3 py-3 max-w-[160px]">
                         <p className="text-gray-800 text-xs font-medium">{String(d.zone_code ?? '—')}</p>
                         <p className="text-[11px] text-gray-400 truncate">{String(d.zone ?? '')}</p>
@@ -385,7 +394,7 @@ export default function ReviewApproveTable({
                       <tr className="border-b border-gray-100 bg-gray-50/60">
                         <td colSpan={15} className="px-6 py-4">
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs mb-3">
-                            {['realtor_name', 'bathrooms', 'kitchen', 'parking'].map((k) => (
+                            {['bathrooms', 'kitchen', 'parking'].map((k) => (
                               <div key={k}>
                                 <p className="text-gray-400 capitalize">{k.replace(/_/g, ' ')}</p>
                                 <p className="font-medium text-gray-800">{String(d[k] ?? '—')}</p>
