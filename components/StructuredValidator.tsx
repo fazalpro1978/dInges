@@ -73,6 +73,9 @@ export default function StructuredValidator({ payload, onValidated }: {
             const sourceCol = payload.mapping[f.key];
             raw[f.key] = sourceCol ? String(row[sourceCol] ?? '') : '';
           }
+          if (!raw.zone_code && payload.batch['zone_fallback']) {
+            raw.zone_code = payload.batch['zone_fallback'];
+          }
           for (const f of BATCH_FIELDS) {
             raw[f.key] = payload.batch[f.key] ?? '';
           }

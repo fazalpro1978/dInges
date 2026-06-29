@@ -4,6 +4,8 @@ import * as XLSX from 'xlsx';
 import { MASTER_FIELDS, BATCH_FIELDS, suggestMapping } from '@/lib/importSchema';
 import RealtorNameField from './RealtorNameField';
 import type { Realtor } from './RealtorField';
+import ZoneField from './ZoneField';
+import type { Zone } from './ZoneField';
 
 export type MappedPayload = {
   fileName: string;
@@ -44,9 +46,11 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
   const [parseError, setParseError] = useState('');
   const loadedRef = useRef(false);
   const [realtors, setRealtors] = useState<Realtor[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
 
   useEffect(() => {
     fetch('/api/realtors').then((r) => r.json()).then((d) => setRealtors(d.realtors ?? [])).catch(() => {});
+    fetch('/api/zones').then((r) => r.json()).then((d) => setZones(d.zones ?? [])).catch(() => {});
   }, []);
 
   const loadFile = useCallback(async (f: File) => {
@@ -208,9 +212,9 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
       <div className="rounded-lg border border-gray-200 overflow-hidden">
         <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
           <p className="text-xs font-bold text-gray-600 uppercase tracking-widest">Batch Details</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Fields not present in the master schema — applied to every row, overridable per-row in Validation.</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Fallback values used when a row doesn&apos;t already have this from the uploaded file — applied to every row, overridable per-row in Validation.</p>
         </div>
-        <div className="grid grid-cols-2 gap-4 p-4 max-w-xs">
+        <div className="grid grid-cols-2 gap-4 p-4">
           {BATCH_FIELDS.map((f) => (
             <div key={f.key}>
               <label className="text-[11px] text-gray-500">{f.label} {f.required && <span className="text-red-500">*</span>}</label>
@@ -240,6 +244,15 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
               )}
             </div>
           ))}
+          <div>
+            <label className="text-[11px] text-gray-500">Zoning Location</label>
+            <ZoneField
+              value={batch['zone_fallback'] ?? ''}
+              zones={zones}
+              onChange={(zoneCode) => setBatch((b) => ({ ...b, zone_fallback: zoneCode }))}
+              onZoneAdded={(added) => setZones((prev) => [...prev, added].sort((a, b) => a.zone_code - b.zone_code))}
+            />
+          </div>
         </div>
       </div>
 
