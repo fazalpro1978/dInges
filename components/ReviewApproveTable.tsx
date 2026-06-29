@@ -1,7 +1,7 @@
 'use client';
 import React, { useMemo, useState } from 'react';
 import { ENUM_PROPERTY_TYPE, ENUM_FURNISHING, ENUM_STATUS, UNIT_CONFIGS_FULL } from '@/lib/importSchema';
-import { actionBadge, statusBadge } from './StructuredImportShared';
+import { actionBadge } from './StructuredImportShared';
 
 export type ConflictField = { existing: unknown; incoming: unknown };
 
@@ -38,19 +38,16 @@ function formatRent(value: unknown): string {
   return `QAR ${n.toLocaleString()}`;
 }
 
-function UrlCell({ url }: { url: unknown }) {
-  const href = typeof url === 'string' && url ? url : null;
-  if (!href) return <span className="text-gray-300 text-xs">—</span>;
+function LinksCell({ mapUrl, mediaUrl }: { mapUrl: unknown; mediaUrl: unknown }) {
+  const map = typeof mapUrl === 'string' && mapUrl ? mapUrl : null;
+  const media = typeof mediaUrl === 'string' && mediaUrl ? mediaUrl : null;
+  if (!map && !media) return <span className="text-gray-300 text-xs">—</span>;
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={href}
-      className="text-blue-600 hover:text-blue-700 underline text-xs whitespace-nowrap"
-    >
-      Open ↗
-    </a>
+    <div className="flex items-center gap-1 text-xs">
+      {map && <a href={map} target="_blank" rel="noopener noreferrer" title={map} className="text-blue-600 hover:text-blue-700 underline">Map</a>}
+      {map && media && <span className="text-gray-300">·</span>}
+      {media && <a href={media} target="_blank" rel="noopener noreferrer" title={media} className="text-blue-600 hover:text-blue-700 underline">Media</a>}
+    </div>
   );
 }
 
@@ -312,115 +309,122 @@ export default function ReviewApproveTable({
         </div>
       )}
 
-      {/* Table */}
+      {/* Table — table-fixed + percentage colgroup keeps every field on screen, no horizontal scroll */}
       <div className="rounded-lg border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="w-8 px-3 py-3">
-                  <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAllFiltered} />
-                </th>
-                <th className="w-8 px-2 py-3 text-gray-400 text-[10px] font-bold uppercase tracking-wider">#</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Match</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Property / Unit</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Realtor</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Zone / District</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Type</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Config</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Furnishing</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Rent (QAR/mo)</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Status</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Map</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Media</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Review</th>
-                <th className="px-3 py-3 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageRecords.map((r) => {
-                const d = r.resolved_data;
-                const decision = decisions[r.id] ?? null;
-                const expanded = expandedIds.has(r.id);
-                const rowTint = decision === 'approved' ? 'bg-green-50/40' : decision === 'rejected' ? 'bg-red-50/40' : '';
-                return (
-                  <React.Fragment key={r.id}>
-                    <tr className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${rowTint}`}>
-                      <td className="px-3 py-3">
-                        <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelect(r.id)} />
-                      </td>
-                      <td className="px-2 py-3 text-gray-400 text-xs">{r.row_index + 1}</td>
-                      <td className="px-3 py-3">{actionBadge(r.match_type)}</td>
-                      <td className="px-3 py-3 max-w-[180px]">
-                        <p className="font-semibold text-gray-900 text-sm truncate">{String(d.property ?? '—')}</p>
-                        <p className="text-[11px] text-gray-400 truncate">{String(d.unit_code ?? d.unit_no ?? '—')}</p>
-                      </td>
-                      <td className="px-3 py-3 max-w-[160px]">
-                        <p className="text-gray-800 text-xs font-medium truncate">{String(d.realtor_name ?? '—')}</p>
-                        <p className="text-[11px] text-gray-400 font-mono truncate">{d.realtor_moci ? String(d.realtor_moci) : '—'}</p>
-                      </td>
-                      <td className="px-3 py-3 max-w-[160px]">
-                        <p className="text-gray-800 text-xs font-medium">{String(d.zone_code ?? '—')}</p>
-                        <p className="text-[11px] text-gray-400 truncate">{String(d.zone ?? '')}</p>
-                      </td>
-                      <td className="px-3 py-3 text-xs text-gray-700 whitespace-nowrap">{String(d.type ?? '—')}</td>
-                      <td className="px-3 py-3 text-xs text-gray-700 whitespace-nowrap">{String(d.config ?? '—')}</td>
-                      <td className="px-3 py-3 text-xs text-gray-700 max-w-[120px] truncate">{String(d.furnishing ?? '—')}</td>
-                      <td className="px-3 py-3 text-xs font-semibold text-gray-900 whitespace-nowrap">{formatRent(d.rent)}</td>
-                      <td className="px-3 py-3"><StatusPill value={d.status} /></td>
-                      <td className="px-3 py-3"><UrlCell url={d.location_map_url} /></td>
-                      <td className="px-3 py-3"><UrlCell url={d.media_url} /></td>
-                      <td className="px-3 py-3">{statusBadge(decision ?? 'pending')}</td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => onDecide(r.id, 'approved')}
-                            title="Approve"
-                            className={`w-7 h-7 rounded-full flex items-center justify-center border font-bold text-xs transition-colors ${decision === 'approved' ? 'bg-green-600 text-white border-green-600' : 'border-green-500 text-green-600 hover:bg-green-50'}`}
-                          >✓</button>
-                          <button
-                            onClick={() => onDecide(r.id, 'rejected')}
-                            title="Reject"
-                            className={`w-7 h-7 rounded-full flex items-center justify-center border font-bold text-xs transition-colors ${decision === 'rejected' ? 'bg-red-600 text-white border-red-600' : 'border-red-400 text-red-500 hover:bg-red-50'}`}
-                          >✕</button>
-                          <button
-                            onClick={() => toggleExpand(r.id)}
-                            className="text-xs text-blue-600 underline ml-1 whitespace-nowrap"
-                          >{expanded ? 'Hide' : 'Details'}</button>
+        <table className="w-full text-xs table-fixed">
+          <colgroup>
+            <col style={{ width: '3.5%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '11%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '8.5%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '12%' }} />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50">
+              <th className="px-2 py-2.5">
+                <input type="checkbox" checked={allFilteredSelected} onChange={toggleSelectAllFiltered} />
+              </th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Match</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Property / Unit</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Realtor</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Zone / District</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Type</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Config</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Furnish.</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Rent/mo</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Links</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageRecords.map((r) => {
+              const d = r.resolved_data;
+              const decision = decisions[r.id] ?? null;
+              const expanded = expandedIds.has(r.id);
+              const rowTint = decision === 'approved' ? 'bg-green-50/40' : decision === 'rejected' ? 'bg-red-50/40' : '';
+              return (
+                <React.Fragment key={r.id}>
+                  <tr className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${rowTint}`}>
+                    <td className="px-2 py-2.5">
+                      <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelect(r.id)} />
+                    </td>
+                    <td className="px-2 py-2.5">{actionBadge(r.match_type)}</td>
+                    <td className="px-2 py-2.5 overflow-hidden">
+                      <p className="font-semibold text-gray-900 text-xs truncate">{String(d.property ?? '—')}</p>
+                      <p className="text-[10px] text-gray-400 truncate">{String(d.unit_code ?? d.unit_no ?? '—')}</p>
+                    </td>
+                    <td className="px-2 py-2.5 overflow-hidden">
+                      <p className="text-gray-800 text-xs font-medium truncate">{String(d.realtor_name ?? '—')}</p>
+                      <p className="text-[10px] text-gray-400 font-mono truncate">{d.realtor_moci ? String(d.realtor_moci) : '—'}</p>
+                    </td>
+                    <td className="px-2 py-2.5 overflow-hidden">
+                      <p className="text-gray-800 text-xs font-medium truncate">{String(d.zone_code ?? '—')}</p>
+                      <p className="text-[10px] text-gray-400 truncate">{String(d.zone ?? '')}</p>
+                    </td>
+                    <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.type ?? '—')}</td>
+                    <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.config ?? '—')}</td>
+                    <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.furnishing ?? '—')}</td>
+                    <td className="px-2 py-2.5 text-xs font-semibold text-gray-900 truncate">{formatRent(d.rent)}</td>
+                    <td className="px-2 py-2.5"><StatusPill value={d.status} /></td>
+                    <td className="px-2 py-2.5"><LinksCell mapUrl={d.location_map_url} mediaUrl={d.media_url} /></td>
+                    <td className="px-2 py-2.5">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => onDecide(r.id, 'approved')}
+                          title="Approve"
+                          className={`w-6 h-6 rounded-full flex items-center justify-center border font-bold text-[11px] transition-colors ${decision === 'approved' ? 'bg-green-600 text-white border-green-600' : 'border-green-500 text-green-600 hover:bg-green-50'}`}
+                        >✓</button>
+                        <button
+                          onClick={() => onDecide(r.id, 'rejected')}
+                          title="Reject"
+                          className={`w-6 h-6 rounded-full flex items-center justify-center border font-bold text-[11px] transition-colors ${decision === 'rejected' ? 'bg-red-600 text-white border-red-600' : 'border-red-400 text-red-500 hover:bg-red-50'}`}
+                        >✕</button>
+                        <button
+                          onClick={() => toggleExpand(r.id)}
+                          title={expanded ? 'Hide details' : 'Show details'}
+                          className="text-[10px] text-blue-600 underline ml-0.5"
+                        >{expanded ? 'Hide' : 'More'}</button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expanded && (
+                    <tr className="border-b border-gray-100 bg-gray-50/60">
+                      <td colSpan={12} className="px-6 py-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs mb-3">
+                          {['bathrooms', 'kitchen', 'parking'].map((k) => (
+                            <div key={k}>
+                              <p className="text-gray-400 capitalize">{k.replace(/_/g, ' ')}</p>
+                              <p className="font-medium text-gray-800">{String(d[k] ?? '—')}</p>
+                            </div>
+                          ))}
                         </div>
+                        <input
+                          className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-xs bg-white"
+                          placeholder="Reviewer notes (optional)"
+                          value={notes[r.id] ?? ''}
+                          onChange={(e) => onNotes(r.id, e.target.value)}
+                        />
                       </td>
                     </tr>
-                    {expanded && (
-                      <tr className="border-b border-gray-100 bg-gray-50/60">
-                        <td colSpan={15} className="px-6 py-4">
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs mb-3">
-                            {['bathrooms', 'kitchen', 'parking'].map((k) => (
-                              <div key={k}>
-                                <p className="text-gray-400 capitalize">{k.replace(/_/g, ' ')}</p>
-                                <p className="font-medium text-gray-800">{String(d[k] ?? '—')}</p>
-                              </div>
-                            ))}
-                          </div>
-                          <input
-                            className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-xs bg-white"
-                            placeholder="Reviewer notes (optional)"
-                            value={notes[r.id] ?? ''}
-                            onChange={(e) => onNotes(r.id, e.target.value)}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-              {pageRecords.length === 0 && (
-                <tr>
-                  <td colSpan={15} className="px-6 py-10 text-center text-xs text-gray-400">No records match the current filters.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+            {pageRecords.length === 0 && (
+              <tr>
+                <td colSpan={12} className="px-6 py-10 text-center text-xs text-gray-400">No records match the current filters.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
       {/* Pagination */}
