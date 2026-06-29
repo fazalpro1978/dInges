@@ -18,7 +18,6 @@ export default function RealtorField({
 }) {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newMoci, setNewMoci] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -35,7 +34,7 @@ export default function RealtorField({
       const res = await fetch('/api/realtors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), moci_id: newMoci.trim() || null }),
+        body: JSON.stringify({ name: newName.trim(), moci_id: null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save realtor');
@@ -43,7 +42,6 @@ export default function RealtorField({
       onChange({ name: data.realtor.name, moci: data.realtor.moci_id ?? '' });
       setAdding(false);
       setNewName('');
-      setNewMoci('');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save realtor');
     } finally {
@@ -54,24 +52,16 @@ export default function RealtorField({
   return (
     <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
       <p className="text-xs font-semibold text-gray-700 mb-2">Realtor</p>
-      <div className="grid grid-cols-2 gap-2">
-        <select
-          value={name}
-          onChange={(e) => pickRealtor(e.target.value)}
-          className="bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
-        >
-          <option value="">— Select realtor —</option>
-          {realtors.map((r) => (
-            <option key={r.id} value={r.name}>{r.name}</option>
-          ))}
-        </select>
-        <input
-          value={moci}
-          onChange={(e) => onChange({ name, moci: e.target.value })}
-          placeholder="MOCI ID"
-          className="bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
-        />
-      </div>
+      <select
+        value={name}
+        onChange={(e) => pickRealtor(e.target.value)}
+        className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
+      >
+        <option value="">— Select realtor —</option>
+        {realtors.map((r) => (
+          <option key={r.id} value={r.name}>{r.name}</option>
+        ))}
+      </select>
 
       {!adding ? (
         <button
@@ -80,20 +70,12 @@ export default function RealtorField({
         >+ Add new realtor</button>
       ) : (
         <div className="mt-2 border-t border-gray-200 pt-2 space-y-1.5">
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Realtor name"
-              className="bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
-            />
-            <input
-              value={newMoci}
-              onChange={(e) => setNewMoci(e.target.value)}
-              placeholder="MOCI ID"
-              className="bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
-            />
-          </div>
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Realtor name"
+            className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
+          />
           {saveError && <p className="text-[11px] text-red-600">{saveError}</p>}
           <div className="flex gap-2">
             <button

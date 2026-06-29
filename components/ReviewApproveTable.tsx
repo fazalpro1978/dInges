@@ -313,18 +313,21 @@ export default function ReviewApproveTable({
       <div className="rounded-lg border border-gray-200 overflow-hidden">
         <table className="w-full text-xs table-fixed">
           <colgroup>
-            <col style={{ width: '3.5%' }} />
-            <col style={{ width: '7%' }} />
+            <col style={{ width: '3%' }} />
+            <col style={{ width: '6%' }} />
             <col style={{ width: '12%' }} />
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '7%' }} />
-            <col style={{ width: '7%' }} />
             <col style={{ width: '8%' }} />
-            <col style={{ width: '8.5%' }} />
+            <col style={{ width: '9%' }} />
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '6%' }} />
             <col style={{ width: '7%' }} />
+            <col style={{ width: '4.5%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '4.5%' }} />
             <col style={{ width: '7%' }} />
-            <col style={{ width: '13%' }} />
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '10%' }} />
           </colgroup>
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
@@ -338,6 +341,9 @@ export default function ReviewApproveTable({
               <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Type</th>
               <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Config</th>
               <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Furnish.</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Bath</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Kitchen</th>
+              <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Parking</th>
               <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Rent/mo</th>
               <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Status</th>
               <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider">Links</th>
@@ -363,7 +369,6 @@ export default function ReviewApproveTable({
                     </td>
                     <td className="px-2 py-2.5 overflow-hidden">
                       <p className="text-gray-800 text-xs font-medium truncate">{String(d.realtor_name ?? '—')}</p>
-                      <p className="text-[10px] text-gray-400 font-mono truncate">{d.realtor_moci ? String(d.realtor_moci) : '—'}</p>
                     </td>
                     <td className="px-2 py-2.5 overflow-hidden">
                       <p className="text-gray-800 text-xs font-medium truncate">{String(d.zone_code ?? '—')}</p>
@@ -372,6 +377,9 @@ export default function ReviewApproveTable({
                     <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.type ?? '—')}</td>
                     <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.config ?? '—')}</td>
                     <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.furnishing ?? '—')}</td>
+                    <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.bathrooms ?? '—')}</td>
+                    <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.kitchen ?? '—')}</td>
+                    <td className="px-2 py-2.5 text-xs text-gray-700 truncate">{String(d.parking ?? '—')}</td>
                     <td className="px-2 py-2.5 text-xs font-semibold text-gray-900 truncate">{formatRent(d.rent)}</td>
                     <td className="px-2 py-2.5 overflow-hidden"><StatusPill value={d.status} /></td>
                     <td className="px-2 py-2.5 overflow-hidden"><LinksCell mapUrl={d.location_map_url} mediaUrl={d.media_url} /></td>
@@ -397,15 +405,7 @@ export default function ReviewApproveTable({
                   </tr>
                   {expanded && (
                     <tr className="border-b border-gray-100 bg-gray-50/60">
-                      <td colSpan={12} className="px-6 py-4">
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs mb-3">
-                          {['bathrooms', 'kitchen', 'parking'].map((k) => (
-                            <div key={k}>
-                              <p className="text-gray-400 capitalize">{k.replace(/_/g, ' ')}</p>
-                              <p className="font-medium text-gray-800">{String(d[k] ?? '—')}</p>
-                            </div>
-                          ))}
-                        </div>
+                      <td colSpan={15} className="px-6 py-4">
                         <input
                           className="w-full border border-gray-300 rounded px-2.5 py-1.5 text-xs bg-white"
                           placeholder="Reviewer notes (optional)"
@@ -420,7 +420,7 @@ export default function ReviewApproveTable({
             })}
             {pageRecords.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-6 py-10 text-center text-xs text-gray-400">No records match the current filters.</td>
+                <td colSpan={15} className="px-6 py-10 text-center text-xs text-gray-400">No records match the current filters.</td>
               </tr>
             )}
           </tbody>

@@ -9,7 +9,7 @@ import type { MappedPayload } from './StructuredMapper';
 const ALL_FIELDS = [...MASTER_FIELDS, ...BATCH_FIELDS];
 
 const DISPLAY_COLS = [
-  'unit_code', 'realtor_moci', 'property', 'unit_no', 'zone_code', 'zone',
+  'unit_code', 'property', 'unit_no', 'zone_code', 'zone',
   'type', 'config', 'furnishing', 'rent', 'status',
   'bathrooms', 'parking', 'kitchen', 'realtor_name',
 ] as const;
@@ -17,10 +17,10 @@ const DISPLAY_COLS = [
 // Percentages sum to 100 (minus 2.5 + 5 + 4 reserved for #, Status, Action below) — keeps every
 // column visible on one screen width via table-fixed, instead of horizontal scroll.
 const COL_WIDTH: Record<(typeof DISPLAY_COLS)[number], string> = {
-  unit_code: '8%', realtor_moci: '6%', property: '9%', unit_no: '5%',
+  unit_code: '8%', property: '12%', unit_no: '5%',
   zone_code: '3.5%', zone: '8%', type: '6%', config: '6%', furnishing: '7%',
   rent: '5%', status: '7%', bathrooms: '3.5%', parking: '3.5%', kitchen: '4%',
-  realtor_name: '7%',
+  realtor_name: '10%',
 };
 
 type ValidatedRow = {

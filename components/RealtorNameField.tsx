@@ -15,7 +15,6 @@ export default function RealtorNameField({
 }) {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newMoci, setNewMoci] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -27,7 +26,7 @@ export default function RealtorNameField({
       const res = await fetch('/api/realtors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), moci_id: newMoci.trim() || null }),
+        body: JSON.stringify({ name: newName.trim(), moci_id: null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save realtor');
@@ -35,7 +34,6 @@ export default function RealtorNameField({
       onChange(data.realtor.name);
       setAdding(false);
       setNewName('');
-      setNewMoci('');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save realtor');
     } finally {
@@ -68,12 +66,6 @@ export default function RealtorNameField({
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Realtor name"
-            className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
-          />
-          <input
-            value={newMoci}
-            onChange={(e) => setNewMoci(e.target.value)}
-            placeholder="MOCI ID (optional)"
             className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
           />
           {saveError && <p className="text-[11px] text-red-600">{saveError}</p>}

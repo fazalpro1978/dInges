@@ -29,11 +29,6 @@ export const UNIT_CONFIGS_FULL: string[] = [
 
 export const MASTER_FIELDS: MasterFieldDef[] = [
   {
-    key: 'realtor_moci', label: 'Realtor MOCI ID',
-    kind: 'string', required: false,
-    aliases: ['realtor moci id', 'realtor moci', 'moci', 'moci number', 'license number', 'realtor license'],
-  },
-  {
     key: 'property', label: 'Property Name',
     kind: 'string', required: true,
     aliases: ['property name', 'property', 'building', 'building name', 'project', 'project name', 'tower', 'tower name'],
