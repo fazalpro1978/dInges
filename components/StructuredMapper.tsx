@@ -87,7 +87,7 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
   }
 
   const requiredUnmapped = MASTER_FIELDS.filter((f) => f.required && !mapping[f.key]).length;
-  const batchMissing     = BATCH_FIELDS.filter((f) => !batch[f.key]?.trim()).length;
+  const batchMissing     = BATCH_FIELDS.filter((f) => f.required && !batch[f.key]?.trim()).length;
 
   function proceed() {
     if (!grid) return;
@@ -206,7 +206,7 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
         <div className="grid grid-cols-2 gap-4 p-4">
           {BATCH_FIELDS.map((f) => (
             <div key={f.key}>
-              <label className="text-[11px] text-gray-500">{f.label} <span className="text-red-500">*</span></label>
+              <label className="text-[11px] text-gray-500">{f.label} {f.required && <span className="text-red-500">*</span>}</label>
               {f.enumValues ? (
                 <select
                   value={batch[f.key] ?? ''}
