@@ -2,6 +2,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import StructuredMapper, { type MappedPayload } from './StructuredMapper';
 import StructuredValidator from './StructuredValidator';
+import RealtorField, { type Realtor } from './RealtorField';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -192,6 +193,7 @@ export default function IngestPipeline() {
   // Stage 1 → extracted + matched records
   const [matched, setMatched] = useState<MatchedRecord[]>([]);
   const [summary, setSummary] = useState({ new: 0, update: 0, conflict: 0, total: 0 });
+  const [realtors, setRealtors] = useState<Realtor[]>([]);
 
   // Stage 2 → staged run
   const [runId, setRunId] = useState<string | null>(null);
@@ -228,6 +230,11 @@ export default function IngestPipeline() {
       setPendingFile(null);
       setMappedPayload(null);
       setStage(1);
+
+      fetch('/api/realtors')
+        .then(r => r.json())
+        .then(d => setRealtors(d.realtors ?? []))
+        .catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Match failed');
     } finally {
@@ -492,6 +499,15 @@ export default function IngestPipeline() {
                       onChange={updated => setMatched(prev => prev.map((m, mi) => mi === i ? updated : m))}
                     />
                   )}
+                  <RealtorField
+                    name={String(r._conflictResolved.realtor_name ?? r.resolvedData.realtor_name ?? '')}
+                    moci={String(r._conflictResolved.realtor_moci ?? r.resolvedData.realtor_moci ?? '')}
+                    realtors={realtors}
+                    onChange={next => setMatched(prev => prev.map((m, mi) => mi === i
+                      ? { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: next.name, realtor_moci: next.moci } }
+                      : m))}
+                    onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
+                  />
                 </div>
               ))}
             </div>
