@@ -30,7 +30,7 @@ export const UNIT_CONFIGS_FULL: string[] = [
 export const MASTER_FIELDS: MasterFieldDef[] = [
   {
     key: 'realtor_moci', label: 'Realtor MOCI ID',
-    kind: 'string', required: true,
+    kind: 'string', required: false,
     aliases: ['realtor moci id', 'realtor moci', 'moci', 'moci number', 'license number', 'realtor license'],
   },
   {
@@ -83,7 +83,7 @@ export const MASTER_FIELDS: MasterFieldDef[] = [
 // ─── Batch-level fields — required downstream, absent from the master list ────
 
 export const BATCH_FIELDS: MasterFieldDef[] = [
-  { key: 'realtor_name', label: 'Realtor Name',  kind: 'string',  required: true, aliases: [] },
+  { key: 'realtor_name', label: 'Realtor Name',  kind: 'string',  required: false, aliases: [] },
   { key: 'property',     label: 'Property Name', kind: 'string',  required: true, aliases: [] },
   { key: 'bathrooms',    label: 'Bathrooms',     kind: 'numeric', required: true, aliases: [] },
   { key: 'kitchen',      label: 'Kitchen',       kind: 'enum',    required: true, enumValues: ENUM_KITCHEN, aliases: [] },
