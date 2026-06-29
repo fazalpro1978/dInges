@@ -208,9 +208,9 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
       <div className="rounded-lg border border-gray-200 overflow-hidden">
         <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200">
           <p className="text-xs font-bold text-gray-600 uppercase tracking-widest">Batch Details</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Required fields not present in the master schema — applied to every row, overridable per-row in Validation.</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Fields not present in the master schema — applied to every row, overridable per-row in Validation.</p>
         </div>
-        <div className="grid grid-cols-2 gap-4 p-4">
+        <div className="grid grid-cols-2 gap-4 p-4 max-w-xs">
           {BATCH_FIELDS.map((f) => (
             <div key={f.key}>
               <label className="text-[11px] text-gray-500">{f.label} {f.required && <span className="text-red-500">*</span>}</label>

@@ -34,6 +34,11 @@ export const MASTER_FIELDS: MasterFieldDef[] = [
     aliases: ['realtor moci id', 'realtor moci', 'moci', 'moci number', 'license number', 'realtor license'],
   },
   {
+    key: 'property', label: 'Property Name',
+    kind: 'string', required: true,
+    aliases: ['property name', 'property', 'building', 'building name', 'project', 'project name', 'tower', 'tower name'],
+  },
+  {
     key: 'unit_no', label: 'Property Unit No',
     kind: 'string', required: true,
     aliases: ['property unit no', 'unit no', 'unit number', 'room', 'room no', 'room number', 'unit'],
@@ -62,6 +67,11 @@ export const MASTER_FIELDS: MasterFieldDef[] = [
     key: 'bathrooms', label: 'Bathrooms',
     kind: 'numeric', required: true,
     aliases: ['bathrooms', 'bath', 'baths', 'no. of bathrooms', 'washrooms'],
+  },
+  {
+    key: 'kitchen', label: 'Kitchen',
+    kind: 'enum', required: true, enumValues: ENUM_KITCHEN,
+    aliases: ['kitchen', 'kitchen type'],
   },
   {
     key: 'parking', label: 'Parking',
@@ -94,8 +104,6 @@ export const MASTER_FIELDS: MasterFieldDef[] = [
 
 export const BATCH_FIELDS: MasterFieldDef[] = [
   { key: 'realtor_name', label: 'Realtor Name',  kind: 'string',  required: false, aliases: [] },
-  { key: 'property',     label: 'Property Name', kind: 'string',  required: true, aliases: [] },
-  { key: 'kitchen',      label: 'Kitchen',       kind: 'enum',    required: true, enumValues: ENUM_KITCHEN, aliases: [] },
 ];
 
 // ─── Header normalization + mapping suggestion ────────────────────────────────
