@@ -194,6 +194,8 @@ export default function IngestPipeline() {
   const [matched, setMatched] = useState<MatchedRecord[]>([]);
   const [summary, setSummary] = useState({ new: 0, update: 0, conflict: 0, total: 0 });
   const [realtors, setRealtors] = useState<Realtor[]>([]);
+  const [excludedIdx, setExcludedIdx] = useState<Set<number>>(new Set());
+  const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
 
   // Stage 2 → staged run
   const [runId, setRunId] = useState<string | null>(null);
@@ -225,6 +227,8 @@ export default function IngestPipeline() {
 
       const records = (matchData.results as MatchedRecord[]).map(r => ({ ...r, _conflictResolved: {} }));
       setMatched(records);
+      setExcludedIdx(new Set());
+      setBulkRealtor({ name: '', moci: '' });
       setSummary(matchData.summary);
       setStructuredStage('idle');
       setPendingFile(null);
@@ -485,10 +489,46 @@ export default function IngestPipeline() {
               </div>
             )}
 
+            <div className="mb-4 border border-blue-200 bg-blue-50 rounded-lg p-3">
+              <label className="flex items-center gap-2 text-xs font-semibold text-blue-800 mb-2">
+                <input
+                  type="checkbox"
+                  checked={excludedIdx.size === 0}
+                  onChange={e => setExcludedIdx(e.target.checked ? new Set() : new Set(matched.map((_, i) => i)))}
+                />
+                Select all — bulk apply Realtor to {matched.length - excludedIdx.size} of {matched.length} records
+              </label>
+              <RealtorField
+                name={bulkRealtor.name}
+                moci={bulkRealtor.moci}
+                realtors={realtors}
+                onChange={setBulkRealtor}
+                onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
+              />
+              <button
+                disabled={!bulkRealtor.name.trim() || matched.length === excludedIdx.size}
+                onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                  ? m
+                  : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }))}
+                className="mt-2 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold"
+              >
+                Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
+              </button>
+            </div>
+
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => (
                 <div key={i} className="border border-gray-200 rounded-lg p-3">
                   <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={!excludedIdx.has(i)}
+                      onChange={e => setExcludedIdx(prev => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.delete(i); else next.add(i);
+                        return next;
+                      })}
+                    />
                     <span className="text-xs text-gray-400 w-6">#{r.rowIndex + 1}</span>
                     {actionBadge(r.action)}
                     <span className="font-medium text-sm truncate flex-1">{String(r.resolvedData.property ?? r.resolvedData.unit_code ?? '—')}</span>
