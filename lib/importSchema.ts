@@ -59,6 +59,16 @@ export const MASTER_FIELDS: MasterFieldDef[] = [
     aliases: ['furnishing status', 'furnishing', 'furnished'],
   },
   {
+    key: 'bathrooms', label: 'Bathrooms',
+    kind: 'numeric', required: true,
+    aliases: ['bathrooms', 'bath', 'baths', 'no. of bathrooms', 'washrooms'],
+  },
+  {
+    key: 'parking', label: 'Parking',
+    kind: 'numeric', required: false,
+    aliases: ['parking', 'parking spaces', 'parking spot', 'car park', 'car parking', 'no. of parking', 'parking slots'],
+  },
+  {
     key: 'rent', label: 'Rent (QAR / Monthly)',
     kind: 'numeric', required: false,
     aliases: ['rent qar monthly', 'rent', 'monthly rent', 'rate', 'price', 'rate no comm', 'rate no comm.'],
@@ -85,7 +95,6 @@ export const MASTER_FIELDS: MasterFieldDef[] = [
 export const BATCH_FIELDS: MasterFieldDef[] = [
   { key: 'realtor_name', label: 'Realtor Name',  kind: 'string',  required: false, aliases: [] },
   { key: 'property',     label: 'Property Name', kind: 'string',  required: true, aliases: [] },
-  { key: 'bathrooms',    label: 'Bathrooms',     kind: 'numeric', required: true, aliases: [] },
   { key: 'kitchen',      label: 'Kitchen',       kind: 'enum',    required: true, enumValues: ENUM_KITCHEN, aliases: [] },
 ];
 

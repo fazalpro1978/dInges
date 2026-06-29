@@ -11,7 +11,7 @@ const ALL_FIELDS = [...MASTER_FIELDS, ...BATCH_FIELDS];
 const DISPLAY_COLS = [
   'unit_code', 'realtor_moci', 'property', 'unit_no', 'zone_code', 'zone',
   'type', 'config', 'furnishing', 'rent', 'status',
-  'bathrooms', 'kitchen', 'realtor_name',
+  'bathrooms', 'parking', 'kitchen', 'realtor_name',
 ] as const;
 
 type ValidatedRow = {

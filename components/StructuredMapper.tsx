@@ -1,7 +1,9 @@
 'use client';
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { MASTER_FIELDS, BATCH_FIELDS, suggestMapping } from '@/lib/importSchema';
+import RealtorNameField from './RealtorNameField';
+import type { Realtor } from './RealtorField';
 
 export type MappedPayload = {
   fileName: string;
@@ -41,6 +43,11 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
   const [batch, setBatch]         = useState<Record<string, string>>({});
   const [parseError, setParseError] = useState('');
   const loadedRef = useRef(false);
+  const [realtors, setRealtors] = useState<Realtor[]>([]);
+
+  useEffect(() => {
+    fetch('/api/realtors').then((r) => r.json()).then((d) => setRealtors(d.realtors ?? [])).catch(() => {});
+  }, []);
 
   const loadFile = useCallback(async (f: File) => {
     setParseError('');
@@ -207,7 +214,14 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
           {BATCH_FIELDS.map((f) => (
             <div key={f.key}>
               <label className="text-[11px] text-gray-500">{f.label} {f.required && <span className="text-red-500">*</span>}</label>
-              {f.enumValues ? (
+              {f.key === 'realtor_name' ? (
+                <RealtorNameField
+                  value={batch[f.key] ?? ''}
+                  realtors={realtors}
+                  onChange={(name) => setBatch((b) => ({ ...b, [f.key]: name }))}
+                  onRealtorAdded={(added) => setRealtors((prev) => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
+                />
+              ) : f.enumValues ? (
                 <select
                   value={batch[f.key] ?? ''}
                   onChange={(e) => setBatch((b) => ({ ...b, [f.key]: e.target.value }))}
