@@ -416,11 +416,17 @@ export default function IngestPipeline() {
             fileName={fileName}
             file={pendingFile}
             onMapped={payload => { setMappedPayload(payload); setStructuredStage('validating'); }}
+            initialMapping={mappedPayload?.mapping}
+            initialBatch={mappedPayload?.batch}
           />
         )}
 
         {stage === 0 && structuredStage === 'validating' && mappedPayload && (
-          <StructuredValidator payload={mappedPayload} onValidated={runMatch} />
+          <StructuredValidator
+            payload={mappedPayload}
+            onValidated={runMatch}
+            onBack={() => setStructuredStage('mapping')}
+          />
         )}
 
         {stage === 0 && structuredStage === 'idle' && (

@@ -32,10 +32,12 @@ function guessHeaderRow(grid: string[][]): number {
   return best;
 }
 
-export default function StructuredMapper({ fileName: initialFileName, file, onMapped }: {
+export default function StructuredMapper({ fileName: initialFileName, file, onMapped, initialMapping, initialBatch }: {
   fileName: string;
   file: File;
   onMapped: (payload: MappedPayload) => void;
+  initialMapping?: Record<string, string | null>;
+  initialBatch?: Record<string, string>;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName]   = useState(initialFileName);
@@ -64,12 +66,12 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
       setGrid(g);
       setHeaderRow(hRow);
       const headers = g[hRow].map((h, i) => h || `Column ${i + 1}`);
-      setMapping(suggestMapping(headers));
-      setBatch({});
+      setMapping(initialMapping ?? suggestMapping(headers));
+      setBatch(initialBatch ?? {});
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Could not read this file.');
     }
-  }, []);
+  }, [initialMapping, initialBatch]);
 
   if (!loadedRef.current) {
     loadedRef.current = true;

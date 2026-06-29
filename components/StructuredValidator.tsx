@@ -47,9 +47,10 @@ function computeRow(raw: Record<string, string>, zoneMap: Map<number, string>): 
   return { raw, cast, zone, unit_code, errors };
 }
 
-export default function StructuredValidator({ payload, onValidated }: {
+export default function StructuredValidator({ payload, onValidated, onBack }: {
   payload: MappedPayload;
   onValidated: (records: Record<string, unknown>[]) => void;
+  onBack: () => void;
 }) {
   const [phase, setPhase] = useState<'validating' | 'review'>('validating');
   const [rows, setRows] = useState<ValidatedRow[]>([]);
@@ -128,13 +129,21 @@ export default function StructuredValidator({ payload, onValidated }: {
     <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <StageIndicator current={1} steps={['Mapping', 'Validation', 'Match & Review']} />
-        <button
-          onClick={proceed}
-          disabled={validCount === 0}
-          className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors"
-        >
-          Proceed to Match — {validCount} Records →
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onBack}
+            className="px-4 py-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-semibold rounded-lg transition-colors"
+          >
+            ← Back to Mapping
+          </button>
+          <button
+            onClick={proceed}
+            disabled={validCount === 0}
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            Proceed to Match — {validCount} Records →
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
