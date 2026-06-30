@@ -11,12 +11,31 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { runId: string } },
 ) {
-  const { data, error } = await admin
+  const { runId } = params;
+
+  const { data: run, error } = await admin
     .from('upload_runs')
     .select('status, approved_count, exported_count')
-    .eq('id', params.runId)
+    .eq('id', runId)
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data);
+
+  // Also check vetted_records directly — upload_runs.status may lag if REIMS
+  // acknowledged records from a mixed queue containing multiple runs.
+  const { count: totalVetted } = await admin
+    .from('vetted_records')
+    .select('id', { count: 'exact', head: true })
+    .eq('run_id', runId);
+
+  const { count: ackedVetted } = await admin
+    .from('vetted_records')
+    .select('id', { count: 'exact', head: true })
+    .eq('run_id', runId)
+    .not('acknowledged_at', 'is', null);
+
+  const allAcknowledged =
+    (totalVetted ?? 0) > 0 && (ackedVetted ?? 0) >= (totalVetted ?? 0);
+
+  return NextResponse.json({ ...run, allAcknowledged });
 }

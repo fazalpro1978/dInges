@@ -161,8 +161,8 @@ export default function IngestPipeline() {
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/runs/${runId}/status`);
-        const data = await res.json() as { status: string; exported_count: number };
-        if (data.status === 'exported') {
+        const data = await res.json() as { status: string; exported_count: number; allAcknowledged: boolean };
+        if (data.status === 'exported' || data.allAcknowledged) {
           clearInterval(pollRef.current!);
           setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: data.exported_count ?? 0 }));
           setStage(3);
