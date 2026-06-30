@@ -43,3 +43,7 @@ DROP TRIGGER IF EXISTS trg_batch_log_updated_at ON ingest.batch_logs;
 CREATE TRIGGER trg_batch_log_updated_at
   BEFORE UPDATE ON ingest.batch_logs
   FOR EACH ROW EXECUTE FUNCTION ingest.set_batch_log_updated_at();
+
+-- Grants (service_role bypasses RLS but still needs table-level permissions)
+GRANT SELECT, INSERT, UPDATE, DELETE ON ingest.batch_logs TO service_role;
+GRANT SELECT ON ingest.batch_logs TO authenticated, anon;
