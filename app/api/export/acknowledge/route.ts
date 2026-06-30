@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     const now = new Date().toISOString();
     const { error } = await admin
       .from('vetted_records')
-      .update({ acknowledged_at: now })
+      .update({ exported_at: now, acknowledged_at: now })
       .in('id', ids);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -22,10 +22,12 @@ export async function GET(req: NextRequest) {
   const limit    = Math.min(parseInt(url.searchParams.get('limit') ?? '100'), 500);
   const offset   = parseInt(url.searchParams.get('offset') ?? '0');
 
+  // Only exclude records already acknowledged (fully imported by REIMS).
+  // Do NOT filter on exported_at here — that is set only at acknowledge time.
+  // This ensures records remain visible in REIMS IngestQueue until Import All is clicked.
   let query = admin
     .from('vetted_records')
     .select('id, staged_id, run_id, payload, source_file, match_type, approved_at, approved_by')
-    .is('exported_at', null)         // only un-exported records
     .is('acknowledged_at', null)
     .order('approved_at', { ascending: true })
     .range(offset, offset + limit - 1);
@@ -34,15 +36,6 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Mark as exported
-  if (data && data.length > 0) {
-    const ids = data.map((r: { id: string }) => r.id);
-    await admin
-      .from('vetted_records')
-      .update({ exported_at: new Date().toISOString() })
-      .in('id', ids);
-  }
 
   return NextResponse.json({ records: data ?? [], count: data?.length ?? 0 });
 }
