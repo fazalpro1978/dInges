@@ -32,6 +32,10 @@ type MatchedRecord = {
 
 const STAGE_LABELS = ['Upload', 'Match & Review', 'Stage', 'REIMS Queue', 'Done'];
 
+// "Stage" (index 2) is a silent auto-step; map code stages 0-3 to the visual step index
+// that should appear active: 0→0, 1→1, 2→3 (REIMS Queue), 3→4 (Done)
+const STAGE_TO_STEP = [0, 1, 3, 4] as const;
+
 // ─── ConflictResolver ─────────────────────────────────────────────────────────
 
 function ConflictResolver({
@@ -300,19 +304,24 @@ export default function IngestPipeline() {
       {/* Stage indicator */}
       <div className="bg-white border-b border-gray-100 px-6 py-3">
         <div className="flex items-center gap-0 max-w-3xl">
-          {STAGE_LABELS.map((label, i) => (
-            <React.Fragment key={i}>
-              <div className={`flex items-center gap-1.5 ${i <= stage ? 'text-blue-700' : 'text-gray-400'}`}>
-                <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center ${i < stage ? 'bg-blue-600 text-white' : i === stage ? 'bg-blue-100 text-blue-700 border-2 border-blue-600' : 'bg-gray-100 text-gray-400'}`}>
-                  {i < stage ? '✓' : i + 1}
-                </span>
-                <span className="text-xs font-medium hidden sm:inline">{label}</span>
-              </div>
-              {i < STAGE_LABELS.length - 1 && (
-                <div className={`flex-1 h-0.5 mx-2 ${i < stage ? 'bg-blue-600' : 'bg-gray-200'}`} />
-              )}
-            </React.Fragment>
-          ))}
+          {STAGE_LABELS.map((label, i) => {
+            const currentStep = STAGE_TO_STEP[stage];
+            const done    = i < currentStep;
+            const active  = i === currentStep;
+            return (
+              <React.Fragment key={i}>
+                <div className={`flex items-center gap-1.5 ${done || active ? 'text-blue-700' : 'text-gray-400'}`}>
+                  <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center ${done ? 'bg-blue-600 text-white' : active ? 'bg-blue-100 text-blue-700 border-2 border-blue-600' : 'bg-gray-100 text-gray-400'}`}>
+                    {done ? '✓' : i + 1}
+                  </span>
+                  <span className="text-xs font-medium hidden sm:inline">{label}</span>
+                </div>
+                {i < STAGE_LABELS.length - 1 && (
+                  <div className={`flex-1 h-0.5 mx-2 ${done ? 'bg-blue-600' : 'bg-gray-200'}`} />
+                )}
+              </React.Fragment>
+            );
+          })}
         </div>
       </div>
 
