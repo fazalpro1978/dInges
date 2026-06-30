@@ -104,6 +104,17 @@ export async function POST(req: NextRequest) {
       .update({ approved_count: approvedCount, status: newStatus })
       .eq('id', runId);
 
+    // Advance batch audit log
+    await admin
+      .from('batch_logs')
+      .update({
+        phase:                'review_approve',
+        review_approve_at:    new Date().toISOString(),
+        record_count_success: approvedCount,
+        record_count_failed:  rejectedCount,
+      })
+      .eq('run_id', runId);
+
     return NextResponse.json({ runId, approved: approvedCount, rejected: rejectedCount });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Approve failed' }, { status: 500 });

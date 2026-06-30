@@ -22,11 +22,13 @@ interface MatchResult {
 
 export async function POST(req: NextRequest) {
   try {
-    const { fileName, fileSize, results, uploadedBy } = (await req.json()) as {
+    const { fileName, fileSize, results, uploadedBy, totalRecords, errorSummary } = (await req.json()) as {
       fileName: string;
       fileSize?: number;
       results: MatchResult[];
       uploadedBy?: string;
+      totalRecords?: number;
+      errorSummary?: { row: number; field: string; value: unknown; error: string }[];
     };
 
     if (!fileName || !Array.isArray(results) || results.length === 0) {
@@ -70,7 +72,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: stageErr.message }, { status: 500 });
     }
 
-    return NextResponse.json({ runId: run.id, staged: results.length });
+    // Create batch audit log entry
+    const total   = totalRecords ?? results.length;
+    const failed  = Math.max(0, total - results.length);
+    const { data: batchLog } = await admin
+      .from('batch_logs')
+      .insert({
+        run_id:               run.id,
+        file_name:            fileName,
+        uploaded_by:          uploadedBy ?? 'Administrator',
+        phase:                'uploaded',
+        record_count_total:   total,
+        record_count_success: results.length,
+        record_count_failed:  failed,
+        error_summary_payload: errorSummary ?? [],
+      })
+      .select('batch_id')
+      .single();
+
+    return NextResponse.json({ runId: run.id, staged: results.length, batchId: batchLog?.batch_id ?? null });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Stage failed' }, { status: 500 });
   }

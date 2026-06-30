@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
 
     if (records) {
       const runIds = Array.from(new Set(records.map((r: { run_id: string }) => r.run_id).filter(Boolean)));
+      const doneAt = new Date().toISOString();
       for (const rid of runIds) {
         const { count } = await admin
           .from('vetted_records')
@@ -48,6 +49,11 @@ export async function POST(req: NextRequest) {
           .from('upload_runs')
           .update({ exported_count: count ?? 0, status: 'exported' })
           .eq('id', rid);
+        // Mark batch log as done
+        await admin
+          .from('batch_logs')
+          .update({ phase: 'done', done_at: doneAt })
+          .eq('run_id', rid);
       }
     }
 

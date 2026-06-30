@@ -56,9 +56,11 @@ function computeRow(raw: Record<string, string>, zoneMap: Map<number, string>): 
   return { raw, cast, zone, unit_code, errors };
 }
 
+export type ValidationErrorEntry = { row: number; field: string; value: unknown; error: string };
+
 export default function StructuredValidator({ payload, onValidated, onBack }: {
   payload: MappedPayload;
-  onValidated: (records: Record<string, unknown>[]) => void;
+  onValidated: (records: Record<string, unknown>[], errorSummary: ValidationErrorEntry[], totalRows: number) => void;
   onBack: () => void;
 }) {
   const [phase, setPhase] = useState<'validating' | 'review'>('validating');
@@ -113,9 +115,16 @@ export default function StructuredValidator({ payload, onValidated, onBack }: {
   }
 
   function proceed() {
-    const validRows = rows.filter((r) => r.errors.length === 0);
+    const validRows   = rows.filter((r) => r.errors.length === 0);
+    const invalidRows = rows.filter((r) => r.errors.length > 0);
     const records = validRows.map((r) => toIngestRecord({ ...r.cast, zone: r.zone, unit_code: r.unit_code }));
-    onValidated(records);
+    const errorSummary: ValidationErrorEntry[] = invalidRows.flatMap((r, i) =>
+      r.errors.map((err) => {
+        const field = err.split(' ')[0] ?? 'unknown';
+        return { row: rows.indexOf(r) + 1, field, value: r.raw[field] ?? null, error: err };
+      })
+    );
+    onValidated(records, errorSummary, rows.length);
   }
 
   const errorCount = rows.filter((r) => r.errors.length > 0).length;

@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import StructuredMapper, { type MappedPayload } from './StructuredMapper';
 import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
@@ -111,6 +112,10 @@ export default function IngestPipeline() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [mappedPayload, setMappedPayload] = useState<MappedPayload | null>(null);
 
+  // Batch audit log — captured from StructuredValidator for inclusion in /api/stage payload
+  const [batchErrorSummary, setBatchErrorSummary] = useState<{ row: number; field: string; value: unknown; error: string }[]>([]);
+  const [batchTotalRows, setBatchTotalRows] = useState(0);
+
   // ── Stage 0: Upload & Extract ─────────────────────────────────────────────
 
   const runMatch = useCallback(async (units: Record<string, unknown>[]) => {
@@ -205,7 +210,13 @@ export default function IngestPipeline() {
       const res = await fetch('/api/stage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName, fileSize, results: finalRecords }),
+        body: JSON.stringify({
+          fileName,
+          fileSize,
+          results:      finalRecords,
+          totalRecords: batchTotalRows || finalRecords.length,
+          errorSummary: batchErrorSummary,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Stage failed');
@@ -261,6 +272,7 @@ export default function IngestPipeline() {
   };
 
   const reset = () => {
+    setBatchErrorSummary([]); setBatchTotalRows(0);
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
     setDecisions({}); setDecisionNotes({}); setApproveResult(null);
     setFileName(''); setFileSize(0); setError(null);
@@ -277,11 +289,16 @@ export default function IngestPipeline() {
           <h1 className="text-lg font-bold text-gray-900">REIMS Ingestion Service</h1>
           <p className="text-xs text-gray-500">Vanguard REOS · Data Ingestion & Approval Pipeline</p>
         </div>
-        {(stage > 0 || structuredStage !== 'idle') && (
-          <button onClick={reset} className="text-xs text-gray-500 hover:text-gray-800 underline">
-            Start Over
-          </button>
-        )}
+        <div className="flex items-center gap-4">
+          <Link href="/batch-logs" className="text-xs text-blue-600 hover:text-blue-800 font-medium underline">
+            Batch History
+          </Link>
+          {(stage > 0 || structuredStage !== 'idle') && (
+            <button onClick={reset} className="text-xs text-gray-500 hover:text-gray-800 underline">
+              Start Over
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Stage indicator */}
@@ -324,7 +341,11 @@ export default function IngestPipeline() {
         {stage === 0 && structuredStage === 'validating' && mappedPayload && (
           <StructuredValidator
             payload={mappedPayload}
-            onValidated={runMatch}
+            onValidated={(records, errorSummary, totalRows) => {
+              setBatchErrorSummary(errorSummary);
+              setBatchTotalRows(totalRows);
+              runMatch(records);
+            }}
             onBack={() => setStructuredStage('mapping')}
           />
         )}
