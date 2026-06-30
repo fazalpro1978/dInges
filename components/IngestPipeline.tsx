@@ -1,11 +1,12 @@
 'use client';
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import StructuredMapper, { type MappedPayload } from './StructuredMapper';
 import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
-import ReviewApproveTable, { type StagedRecord } from './ReviewApproveTable';
 import { Badge, actionBadge } from './StructuredImportShared';
+
+type StagedRecord = { id: string; [key: string]: unknown };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,7 +30,7 @@ type MatchedRecord = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const STAGE_LABELS = ['Upload', 'Match & Review', 'Stage', 'Approve', 'Done'];
+const STAGE_LABELS = ['Upload', 'Match & Review', 'Stage', 'REIMS Queue', 'Done'];
 
 // ─── ConflictResolver ─────────────────────────────────────────────────────────
 
@@ -102,10 +103,9 @@ export default function IngestPipeline() {
   const [runId, setRunId] = useState<string | null>(null);
   const [stagedRecords, setStagedRecords] = useState<StagedRecord[]>([]);
 
-  // Stage 3 → approval decisions
-  const [decisions, setDecisions] = useState<Record<string, 'approved' | 'rejected' | null>>({});
-  const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
-  const [approveResult, setApproveResult] = useState<{ approved: number; rejected: number } | null>(null);
+  // Stage 2 → REIMS Queue polling
+  const [approveResult, setApproveResult] = useState<{ approved: number; exported: number } | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Stage 0, structured (CSV/XLSX) sub-flow — deterministic Mapping → Validation, bypasses /api/extract
   const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
@@ -151,6 +151,23 @@ export default function IngestPipeline() {
     }
   }, []);
 
+  // Poll run status when at REIMS Queue stage — auto-advance when REIMS acknowledges
+  useEffect(() => {
+    if (stage !== 2 || !runId) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/runs/${runId}/status`);
+        const data = await res.json() as { status: string; exported_count: number };
+        if (data.status === 'exported') {
+          clearInterval(pollRef.current!);
+          setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: data.exported_count ?? 0 }));
+          setStage(3);
+        }
+      } catch {}
+    }, 4000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [stage, runId]);
+
   const handleFile = useCallback(async (file: File) => {
     const ext = file.name.toLowerCase().split('.').pop() ?? '';
     if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') {
@@ -195,19 +212,18 @@ export default function IngestPipeline() {
     return fields.some(f => r._conflictResolved[f] === undefined);
   }).length;
 
-  // ── Stage 1 → Stage (save to Supabase) ───────────────────────────────────
+  // ── Stage 1 → Stage + Auto-approve → REIMS Queue ────────────────────────
 
   const handleStage = async () => {
     setIsProcessing(true);
     setError(null);
     try {
-      // Merge resolutions back into resolvedData
       const finalRecords = matched.map(r => ({
         ...r,
         resolvedData: { ...r.resolvedData, ...r._conflictResolved },
       }));
 
-      const res = await fetch('/api/stage', {
+      const stageRes = await fetch('/api/stage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -218,20 +234,31 @@ export default function IngestPipeline() {
           errorSummary: batchErrorSummary,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Stage failed');
+      const stageData = await stageRes.json();
+      if (!stageRes.ok) throw new Error(stageData.error ?? 'Stage failed');
 
-      setRunId(data.runId);
+      setRunId(stageData.runId);
 
-      // Load staged records
-      const sRes = await fetch(`/api/runs/${data.runId}/staged`);
+      // Load staged records then auto-approve all
+      const sRes = await fetch(`/api/runs/${stageData.runId}/staged`);
       const sData = await sRes.json();
       setStagedRecords(sData.records ?? []);
 
-      const initDecisions: Record<string, 'approved' | 'rejected' | null> = {};
-      (sData.records ?? []).forEach((r: StagedRecord) => { initDecisions[r.id] = null; });
-      setDecisions(initDecisions);
-      setStage(2);
+      const approvals = (sData.records ?? []).map((r: StagedRecord) => ({
+        stagedId: r.id,
+        decision: 'approved',
+      }));
+
+      const approveRes = await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runId: stageData.runId, approvals }),
+      });
+      const approveData = await approveRes.json();
+      if (!approveRes.ok) throw new Error(approveData.error ?? 'Auto-approve failed');
+
+      setApproveResult({ approved: approveData.approved ?? approvals.length, exported: 0 });
+      setStage(2); // REIMS Queue — polls until REIMS acknowledges
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Stage failed');
     } finally {
@@ -239,42 +266,11 @@ export default function IngestPipeline() {
     }
   };
 
-  // ── Stage 2 → Approve ─────────────────────────────────────────────────────
-
-  const handleApprove = async () => {
-    if (!runId) return;
-    setIsProcessing(true);
-    setError(null);
-    try {
-      const approvals = stagedRecords
-        .filter(r => decisions[r.id] !== null)
-        .map(r => ({
-          stagedId: r.id,
-          decision: decisions[r.id] as 'approved' | 'rejected',
-          notes: decisionNotes[r.id] ?? undefined,
-        }));
-
-      const res = await fetch('/api/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ runId, approvals }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Approve failed');
-
-      setApproveResult({ approved: data.approved, rejected: data.rejected });
-      setStage(3);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Approve failed');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const reset = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
     setBatchErrorSummary([]); setBatchTotalRows(0);
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
-    setDecisions({}); setDecisionNotes({}); setApproveResult(null);
+    setApproveResult(null);
     setFileName(''); setFileSize(0); setError(null);
     setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
   };
@@ -491,57 +487,56 @@ export default function IngestPipeline() {
           </div>
         )}
 
-        {/* ── Stage 2: Approve ──────────────────────────────────────────── */}
+        {/* ── Stage 2: REIMS Queue (polling) ────────────────────────────── */}
         {stage === 2 && (
-          <ReviewApproveTable
-            runId={runId}
-            records={stagedRecords}
-            decisions={decisions}
-            notes={decisionNotes}
-            onDecide={(id, d) => setDecisions(prev => ({ ...prev, [id]: d }))}
-            onNotes={(id, n) => setDecisionNotes(prev => ({ ...prev, [id]: n }))}
-            onApproveAll={() => {
-              const all: Record<string, 'approved'> = {};
-              stagedRecords.forEach(r => { all[r.id] = 'approved'; });
-              setDecisions(all);
-            }}
-            onRejectAll={() => {
-              const all: Record<string, 'rejected'> = {};
-              stagedRecords.forEach(r => { all[r.id] = 'rejected'; });
-              setDecisions(all);
-            }}
-            onSubmit={handleApprove}
-            onBack={() => { setStage(1); setDecisions({}); setDecisionNotes({}); }}
-            isProcessing={isProcessing}
-          />
+          <div className="bg-white rounded-xl border border-gray-200 p-10 text-center max-w-2xl mx-auto">
+            <div className="w-14 h-14 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-5" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Queued for REIMS Export</h2>
+            <p className="text-sm text-gray-500 mb-1">
+              Run <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{runId}</span>
+            </p>
+            <p className="text-sm text-gray-500 mb-8">
+              <span className="font-semibold text-blue-600">{approveResult?.approved ?? stagedRecords.length}</span> records are in the vetted queue, ready for REIMS
+            </p>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-left mb-6">
+              <p className="text-xs font-bold text-blue-700 uppercase tracking-widest mb-2">Next Step — REIMS IngestQueue</p>
+              <ol className="text-xs text-blue-700 space-y-1.5 list-decimal list-inside">
+                <li>Open <span className="font-semibold">REIMS</span> and click <span className="font-mono bg-blue-100 px-1 rounded">dInges Queue</span> in the sidebar</li>
+                <li>Preview the records and click <span className="font-semibold">Import All →</span></li>
+                <li>This screen will automatically advance to Done once REIMS confirms</li>
+              </ol>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              Watching for REIMS acknowledgement…
+            </div>
+          </div>
         )}
 
         {/* ── Stage 3: Done ─────────────────────────────────────────────── */}
         {stage === 3 && approveResult && (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center max-w-xl mx-auto">
             <div className="text-5xl mb-4">✅</div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Ingestion Complete</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Imported to REIMS</h2>
             <p className="text-sm text-gray-500 mb-6">
-              Run <span className="font-mono text-xs">{runId}</span> submitted.
+              Run <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{runId}</span> · acknowledged by REIMS
             </p>
 
-            <div className="flex justify-center gap-6 mb-8">
+            <div className="flex justify-center gap-8 mb-8">
               <div className="text-center">
-                <p className="text-3xl font-bold text-green-600">{approveResult.approved}</p>
-                <p className="text-xs text-gray-500 mt-1">Approved</p>
+                <p className="text-3xl font-bold text-blue-600">{approveResult.approved}</p>
+                <p className="text-xs text-gray-500 mt-1">Staged</p>
               </div>
               <div className="text-center">
-                <p className="text-3xl font-bold text-red-500">{approveResult.rejected}</p>
-                <p className="text-xs text-gray-500 mt-1">Rejected</p>
+                <p className="text-3xl font-bold text-green-600">{approveResult.exported || approveResult.approved}</p>
+                <p className="text-xs text-gray-500 mt-1">Imported to REIMS</p>
               </div>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left mb-6">
-              <p className="text-xs font-semibold text-blue-700 mb-1">What happens next?</p>
-              <p className="text-xs text-blue-600">
-                Approved records are now in the vetted queue. The REIMS Inventory module can pull them
-                via the export API using <span className="font-mono">GET /api/export/vetted</span>.
-              </p>
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700 mb-6">
+              Records are now live in the REIMS Units Inventory.
             </div>
 
             <button
