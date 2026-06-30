@@ -156,21 +156,29 @@ export default function IngestPipeline() {
   }, []);
 
   // Poll run status when at REIMS Queue stage — auto-advance when REIMS acknowledges
+  const [pollStatus, setPollStatus] = useState<{ total: number; acked: number } | null>(null);
+
+  const checkStatus = useCallback(async () => {
+    if (!runId) return;
+    try {
+      const res = await fetch(`/api/runs/${runId}/status`);
+      if (!res.ok) return;
+      const data = await res.json() as { status: string; exported_count: number; allAcknowledged: boolean; total: number; acked: number };
+      setPollStatus({ total: data.total ?? 0, acked: data.acked ?? 0 });
+      if (data.status === 'exported' || data.allAcknowledged) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: data.exported_count ?? 0 }));
+        setStage(3);
+      }
+    } catch {}
+  }, [runId]);
+
   useEffect(() => {
     if (stage !== 2 || !runId) return;
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/runs/${runId}/status`);
-        const data = await res.json() as { status: string; exported_count: number; allAcknowledged: boolean };
-        if (data.status === 'exported' || data.allAcknowledged) {
-          clearInterval(pollRef.current!);
-          setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: data.exported_count ?? 0 }));
-          setStage(3);
-        }
-      } catch {}
-    }, 4000);
+    checkStatus();
+    pollRef.current = setInterval(checkStatus, 4000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [stage, runId]);
+  }, [stage, runId, checkStatus]);
 
   const handleFile = useCallback(async (file: File) => {
     const ext = file.name.toLowerCase().split('.').pop() ?? '';
@@ -517,9 +525,19 @@ export default function IngestPipeline() {
               </ol>
             </div>
 
-            <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              Watching for REIMS acknowledgement…
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                {pollStatus
+                  ? `${pollStatus.acked} / ${pollStatus.total} records acknowledged`
+                  : 'Watching for REIMS acknowledgement…'}
+              </div>
+              <button
+                onClick={checkStatus}
+                className="text-xs text-blue-500 hover:text-blue-700 underline mt-1"
+              >
+                Check now
+              </button>
             </div>
           </div>
         )}

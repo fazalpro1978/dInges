@@ -21,21 +21,16 @@ export async function GET(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Also check vetted_records directly — upload_runs.status may lag if REIMS
-  // acknowledged records from a mixed queue containing multiple runs.
-  const { count: totalVetted } = await admin
+  // Fetch vetted records for this run directly — avoids silent failures from
+  // count-only HEAD queries when acknowledged_at IS NOT NULL filter misbehaves.
+  const { data: vetted, error: vErr } = await admin
     .from('vetted_records')
-    .select('id', { count: 'exact', head: true })
+    .select('id, acknowledged_at')
     .eq('run_id', runId);
 
-  const { count: ackedVetted } = await admin
-    .from('vetted_records')
-    .select('id', { count: 'exact', head: true })
-    .eq('run_id', runId)
-    .not('acknowledged_at', 'is', null);
+  const total = vetted?.length ?? 0;
+  const acked = vetted?.filter((r: { acknowledged_at: string | null }) => r.acknowledged_at !== null).length ?? 0;
+  const allAcknowledged = !vErr && total > 0 && acked >= total;
 
-  const allAcknowledged =
-    (totalVetted ?? 0) > 0 && (ackedVetted ?? 0) >= (totalVetted ?? 0);
-
-  return NextResponse.json({ ...run, allAcknowledged });
+  return NextResponse.json({ ...run, total, acked, allAcknowledged });
 }
