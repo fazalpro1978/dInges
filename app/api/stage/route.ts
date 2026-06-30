@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     // Create batch audit log entry
     const total   = totalRecords ?? results.length;
     const failed  = Math.max(0, total - results.length);
-    const { data: batchLog } = await admin
+    const { data: batchLog, error: batchErr } = await admin
       .from('batch_logs')
       .insert({
         run_id:               run.id,
@@ -89,6 +89,8 @@ export async function POST(req: NextRequest) {
       })
       .select('batch_id')
       .single();
+
+    if (batchErr) console.error('[stage] batch_log insert failed:', batchErr.message);
 
     return NextResponse.json({ runId: run.id, staged: results.length, batchId: batchLog?.batch_id ?? null });
   } catch (err) {
