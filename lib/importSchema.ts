@@ -10,8 +10,8 @@ export type MasterFieldDef = {
 };
 
 export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office'] as const;
-export const ENUM_FURNISHING    = ['Fully Furnished', 'Semi-Furnished', 'Unfurnished'] as const;
-export const ENUM_STATUS        = ['Available', 'Leased', 'Reserved', 'Under_Maintenance'] as const;
+export const ENUM_FURNISHING    = ['Furnished', 'Semi-Furnished', 'Unfurnished'] as const;
+export const ENUM_STATUS        = ['Available', 'Not Available', 'Reserved', 'Under Preparation'] as const;
 export const ENUM_KITCHEN       = ['Open', 'Closed', 'Yes', 'Pantry'] as const;
 
 // Duplicated from REIMS' lib/propertySchema.ts (UNIT_CONFIGS_FULL) — dInges is a
@@ -60,12 +60,12 @@ export const MASTER_FIELDS: MasterFieldDef[] = [
   },
   {
     key: 'bathrooms', label: 'Bathrooms',
-    kind: 'numeric', required: true,
+    kind: 'numeric', required: false,
     aliases: ['bathrooms', 'bath', 'baths', 'no. of bathrooms', 'washrooms'],
   },
   {
     key: 'kitchen', label: 'Kitchen',
-    kind: 'enum', required: true, enumValues: ENUM_KITCHEN,
+    kind: 'enum', required: false, enumValues: ENUM_KITCHEN,
     aliases: ['kitchen', 'kitchen type'],
   },
   {
@@ -80,7 +80,7 @@ export const MASTER_FIELDS: MasterFieldDef[] = [
   },
   {
     key: 'status', label: 'Status',
-    kind: 'enum', required: false, enumValues: ENUM_STATUS,
+    kind: 'string', required: false, enumValues: ENUM_STATUS,
     aliases: ['status', 'availability'],
   },
   {
@@ -135,6 +135,22 @@ export function slugifyProperty(name: string): string {
 
 export type CastResult = { value: unknown; error?: string };
 
+function normalizeFieldAlias(fieldKey: string, str: string): string {
+  const s = str.toUpperCase().replace(/\s+/g, ' ').trim();
+  if (fieldKey === 'furnishing') {
+    if (['FF', 'FULLY FURNISHED', 'FULLY-FURNISHED', 'LUXURY FULLY FURNISHED', 'FULL FURNISHED'].includes(s)) return 'Furnished';
+    if (['SF', 'SEMI FURNISHED', 'SEMI-FURNISHED', 'SEMIFURNISHED'].includes(s) || s.startsWith('SEMI')) return 'Semi-Furnished';
+    if (['UF', 'UNFURNISHED', 'UN-FURNISHED'].includes(s)) return 'Unfurnished';
+  }
+  if (fieldKey === 'type') {
+    if (['APT', 'APT.', 'FLAT', 'APARTMENT'].includes(s)) return 'Apartment';
+    if (['VIL', 'VILLA'].includes(s) || s === 'V') return 'Villa';
+    if (s === 'OFFICE' || s.endsWith('OFFICE')) return 'Office';
+    if (s === 'STUDIO') return 'Studio';
+  }
+  return str;
+}
+
 export function castAndValidateField(field: MasterFieldDef, rawValue: unknown): CastResult {
   const str = rawValue === null || rawValue === undefined ? '' : String(rawValue).trim();
 
@@ -142,12 +158,17 @@ export function castAndValidateField(field: MasterFieldDef, rawValue: unknown): 
     return { value: null, error: field.required ? `${field.label} is required` : undefined };
   }
 
+  // Pre-normalize known aliases for furnishing and type
+  const normalizedStr = normalizeFieldAlias(field.key, str);
+
   switch (field.kind) {
     case 'string': {
-      if (field.enumValues && !field.enumValues.some((v) => v.toLowerCase() === str.toLowerCase())) {
-        return { value: str, error: `Unrecognized ${field.label}: "${str}"` };
+      if (field.enumValues && !field.enumValues.some((v) => v.toLowerCase() === normalizedStr.toLowerCase())) {
+        // For string-kind enums (e.g. status), accept unrecognized values without error
+        // so freeform documents can reach the Validation screen for manual correction
+        return { value: str };
       }
-      const canonical = field.enumValues?.find((v) => v.toLowerCase() === str.toLowerCase());
+      const canonical = field.enumValues?.find((v) => v.toLowerCase() === normalizedStr.toLowerCase());
       return { value: canonical ?? str };
     }
 
@@ -172,7 +193,7 @@ export function castAndValidateField(field: MasterFieldDef, rawValue: unknown): 
     }
 
     case 'enum': {
-      const canonical = field.enumValues?.find((v) => v.toLowerCase() === str.toLowerCase());
+      const canonical = field.enumValues?.find((v) => v.toLowerCase() === normalizedStr.toLowerCase());
       if (!canonical) return { value: str, error: `Unmatched enum for ${field.label}: "${str}"` };
       return { value: canonical };
     }

@@ -1,18 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as xlsx from 'xlsx';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { writeFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
 import Anthropic from '@anthropic-ai/sdk';
-
-const execAsync = promisify(exec);
 
 const MODEL = 'claude-sonnet-4-6';
 
 const SCHEMA_PROMPT = `You are a real estate data extraction specialist for Qatar property market.
-Extract ALL unit/property records from the provided file content.
+Extract ALL unit/property records from the provided document.
 
 Return ONLY a JSON array of objects. Each object must use these exact field names:
 unit_code, property, unit_no, zone, zone_code, type, config, furnishing, kitchen,
@@ -22,14 +15,30 @@ moci_contract_status, moci_contract_number, legal_duration,
 contract_start_date, contract_end_date, location_map_url, notes
 
 Normalisation rules:
-- status: map to one of Available | Leased | Reserved | Under_Maintenance
-- furnishing: Fully Furnished | Semi-Furnished | Unfurnished
+- property: for merged cells / repeated property names, copy to every unit row that belongs to it
+- unit_no: strip area/size notation — "5- (362 sqm)" → "5", keep alphanumeric identifiers as-is
+- type: Apartment | Villa | Office | Studio
+  * Infer from unit_no: "APT." prefix → Apartment; "V"/"VIL" prefix → Villa
+  * OFFICE / AL KHOR OFFICE → Office; STUDIO → Studio; bare number → Apartment default
+- config: use format "N BHK" (e.g. "2 BHK", "3 BHK"); Studio → "Studio"; Office → "Office"
+  * Strip spacing: "2BHK" → "2 BHK"; "1BHK" → "1 BHK"
+- furnishing: Furnished | Semi-Furnished | Unfurnished
+  * FF / FULLY FURNISHED / LUXURY FULLY FURNISHED / FULLY-FURNISHED → Furnished
+  * SF / SEMI-FURNISHED / SEMI FURNISHED → Semi-Furnished
+  * UF / UNFURNISHED / UN-FURNISHED → Unfurnished
+- status: normalise to one of these exact values:
+  * "Available" — READY FOR VIEWING, Vacant, vacant, AVAILABLE
+  * "Not Available" — CONTRACT, LEASED, Leased, CONTRACTED
+  * "Reserved" — BOOKED, RESERVED
+  * "Under Preparation" — UNDER MAINTENANCE, UNDER PREPARATION, UNDER RENOVATION
+  * "Awaiting Activation on {dd/mm/yy}" — when a date is present in the status cell; format date as dd/mm/yy (e.g. "Awaiting Activation on 03/07/26")
+  * Skip the entire row if a property-level status is "FULL" with no unit data
 - listing_type: Rent | Sale
-- dates: YYYY-MM-DD format
-- rent/charges: numbers only, no currency symbols
-- If a field is not present, omit it (do not include null values)
-- For side-by-side multi-unit layouts, extract each unit as a separate record
-- Ignore headers, logos, footers, marketing text — only extract actual unit data
+- rent: numbers only, no currency — strip "QAR", commas, ".00" (e.g. "QAR 6,500.00" → 6500)
+- dates: YYYY-MM-DD format (for contract dates etc.; status dates use dd/mm/yy as above)
+- Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, booking agent names, BALCONY, VIEW columns
+- If a field is not present in the source, omit it entirely (do not include null values)
+- For multi-column layouts (units side by side), extract each unit as a separate record
 
 Return raw JSON array only. No markdown, no explanation.`;
 
@@ -56,7 +65,7 @@ export async function POST(req: NextRequest) {
 
     // ── Image ──────────────────────────────────────────────────────────────────
     if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
-      const b64      = buf.toString('base64');
+      const b64       = buf.toString('base64');
       const mediaType = (ext === 'jpg' ? 'image/jpeg' : `image/${ext}`) as 'image/jpeg' | 'image/png' | 'image/webp';
 
       const msg = await client.messages.create({
@@ -75,19 +84,20 @@ export async function POST(req: NextRequest) {
       units = parseUnits(text);
     }
 
-    // ── PDF ────────────────────────────────────────────────────────────────────
+    // ── PDF — use Claude's native document reading (handles both text & image PDFs) ──
     else if (ext === 'pdf') {
-      const tmp = join(tmpdir(), `ingest-${Date.now()}.pdf`);
-      writeFileSync(tmp, buf);
-      const { stdout } = await execAsync(`pdftotext -layout "${tmp}" -`).catch(() => ({ stdout: '' }));
-      unlinkSync(tmp);
+      const b64 = buf.toString('base64');
 
       const msg = await client.messages.create({
         model: MODEL,
         max_tokens: 8096,
         messages: [{
           role: 'user',
-          content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${stdout}`,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          content: [
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
+            { type: 'text', text: SCHEMA_PROMPT },
+          ] as any,
         }],
       });
 
