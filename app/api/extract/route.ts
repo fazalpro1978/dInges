@@ -93,7 +93,6 @@ export async function POST(req: NextRequest) {
         max_tokens: 8096,
         messages: [{
           role: 'user',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           content: [
             { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
             { type: 'text', text: SCHEMA_PROMPT },
