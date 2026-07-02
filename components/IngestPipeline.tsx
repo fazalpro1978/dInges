@@ -115,7 +115,8 @@ export default function IngestPipeline() {
 
   // Stage 4 → REIMS Queue polling
   const [approveResult, setApproveResult] = useState<{ approved: number; exported: number } | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pollCount, setPollCount] = useState(0);
 
   // Stage 0, structured (CSV/XLSX) sub-flow
   const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
@@ -179,6 +180,7 @@ export default function IngestPipeline() {
 
   const checkStatus = useCallback(async () => {
     if (!runId) return;
+    setPollCount(n => n + 1);
     try {
       const res = await fetch(`/api/runs/${runId}/status`);
       if (!res.ok) return;
@@ -194,6 +196,7 @@ export default function IngestPipeline() {
 
   useEffect(() => {
     if (stage !== 4 || !runId) return;
+    setPollCount(0);
     checkStatus();
     pollRef.current = setInterval(checkStatus, 4000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
@@ -801,42 +804,77 @@ export default function IngestPipeline() {
         )}
 
         {/* ── Stage 4: REIMS Queue (polling) ────────────────────────────── */}
-        {stage === 4 && (
-          <div className="bg-white rounded-xl border border-gray-200 p-10 text-center max-w-2xl mx-auto">
-            <div className="w-14 h-14 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-5" />
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Queued for REIMS Export</h2>
-            <p className="text-sm text-gray-500 mb-1">
-              Run <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{runId}</span>
-            </p>
-            <p className="text-sm text-gray-500 mb-8">
-              <span className="font-semibold text-blue-600">{approveResult?.approved ?? activeMatched.length}</span> records are in the vetted queue, ready for REIMS
-            </p>
+        {stage === 4 && (() => {
+          const isTimedOut  = pollCount > 75;  // ~5 min
+          const isSlowWarn  = pollCount > 30 && !isTimedOut; // ~2 min
+          return (
+            <div className={`bg-white rounded-xl border p-10 text-center max-w-2xl mx-auto ${isTimedOut ? 'border-orange-300' : 'border-gray-200'}`}>
+              {isTimedOut ? (
+                <div className="text-4xl mb-4">⚠️</div>
+              ) : (
+                <div className="w-14 h-14 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-5" />
+              )}
 
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-left mb-6">
-              <p className="text-xs font-bold text-blue-700 uppercase tracking-widest mb-2">Next Step — REIMS IngestQueue</p>
-              <ol className="text-xs text-blue-700 space-y-1.5 list-decimal list-inside">
-                <li>Open <span className="font-semibold">REIMS</span> and click <span className="font-mono bg-blue-100 px-1 rounded">dInges Queue</span> in the sidebar</li>
-                <li>Preview the records and click <span className="font-semibold">Import All →</span></li>
-                <li>This screen will automatically advance to Done once REIMS confirms</li>
-              </ol>
-            </div>
+              <h2 className={`text-xl font-bold mb-2 ${isTimedOut ? 'text-orange-700' : 'text-gray-900'}`}>
+                {isTimedOut ? 'Still Waiting — Action Required' : 'Queued for REIMS Export'}
+              </h2>
+              <p className="text-sm text-gray-500 mb-1">
+                Run <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{runId}</span>
+              </p>
+              <p className="text-sm text-gray-500 mb-8">
+                <span className="font-semibold text-blue-600">{approveResult?.approved ?? activeMatched.length}</span> records are in the vetted queue, ready for REIMS
+              </p>
 
-            <div className="flex flex-col items-center gap-2">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                {pollStatus
-                  ? `${pollStatus.acked} / ${pollStatus.total} records acknowledged`
-                  : 'Watching for REIMS acknowledgement…'}
+              {isTimedOut ? (
+                <div className="bg-orange-50 border border-orange-200 rounded-xl p-5 text-left mb-6">
+                  <p className="text-xs font-bold text-orange-700 uppercase tracking-widest mb-2">REIMS has not confirmed — check manually</p>
+                  <ol className="text-xs text-orange-700 space-y-1.5 list-decimal list-inside">
+                    <li>Open REIMS → dInges Queue → if records appear, click <strong>Import All</strong></li>
+                    <li>If REIMS already shows &ldquo;Import Complete&rdquo;, the pipeline is Done — click <strong>Start Over</strong> above to reset</li>
+                    <li>If REIMS shows an error, re-upload this file from the beginning</li>
+                  </ol>
+                </div>
+              ) : (
+                <div className={`${isSlowWarn ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'} border rounded-xl p-5 text-left mb-6`}>
+                  {isSlowWarn && (
+                    <p className="text-xs text-amber-700 font-semibold mb-2">Taking longer than expected — go to REIMS and check the dInges Queue</p>
+                  )}
+                  <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${isSlowWarn ? 'text-amber-700' : 'text-blue-700'}`}>Next Step — REIMS IngestQueue</p>
+                  <ol className={`text-xs space-y-1.5 list-decimal list-inside ${isSlowWarn ? 'text-amber-700' : 'text-blue-700'}`}>
+                    <li>Open <span className="font-semibold">REIMS</span> and click <span className="font-mono bg-blue-100 px-1 rounded">dInges Queue</span> in the sidebar</li>
+                    <li>Preview the records and click <span className="font-semibold">Import All →</span></li>
+                    <li>This screen will automatically advance to Done once REIMS confirms</li>
+                  </ol>
+                </div>
+              )}
+
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${isTimedOut ? 'bg-orange-400' : 'bg-green-400'}`} />
+                  {pollStatus
+                    ? `${pollStatus.acked} / ${pollStatus.total} records acknowledged`
+                    : 'Watching for REIMS acknowledgement…'}
+                </div>
+                <div className="flex items-center gap-4 mt-1">
+                  <button
+                    onClick={checkStatus}
+                    className="text-xs text-blue-500 hover:text-blue-700 underline"
+                  >
+                    Check now
+                  </button>
+                  {isTimedOut && (
+                    <button
+                      onClick={reset}
+                      className="text-xs px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition-colors"
+                    >
+                      Start Over
+                    </button>
+                  )}
+                </div>
               </div>
-              <button
-                onClick={checkStatus}
-                className="text-xs text-blue-500 hover:text-blue-700 underline mt-1"
-              >
-                Check now
-              </button>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── Stage 5: Done ─────────────────────────────────────────────── */}
         {stage === 5 && approveResult && (

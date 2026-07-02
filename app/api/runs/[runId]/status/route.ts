@@ -21,8 +21,13 @@ export async function GET(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Fetch vetted records for this run directly — avoids silent failures from
-  // count-only HEAD queries when acknowledged_at IS NOT NULL filter misbehaves.
+  // Primary check: upload_runs.status='exported' means REIMS acknowledged successfully.
+  // This is the authoritative signal — if it's set, advance regardless of vetted_records.
+  if (run?.status === 'exported') {
+    return NextResponse.json({ ...run, total: run.exported_count ?? 0, acked: run.exported_count ?? 0, allAcknowledged: true });
+  }
+
+  // Fallback: count acknowledged vetted records directly
   const { data: vetted, error: vErr } = await admin
     .from('vetted_records')
     .select('id, acknowledged_at')
