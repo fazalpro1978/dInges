@@ -15,8 +15,16 @@ moci_contract_status, moci_contract_number, legal_duration,
 contract_start_date, contract_end_date, location_map_url, notes
 
 Normalisation rules:
-- property: for merged cells / repeated property names, copy to every unit row that belongs to it
-- unit_no: strip area/size notation — "5- (362 sqm)" → "5", keep alphanumeric identifiers as-is
+- property (MANDATORY — every record must have this):
+  * Look in: a dedicated "Property", "Building", "Project", "Tower" column; OR a merged cell / heading above the data table; OR the document title; OR a label like "Property:", "Building:", "Project:" anywhere in the document.
+  * Copy the same property name to every unit record that belongs to it.
+  * If the document covers multiple properties, assign each unit to the correct one.
+  * If you cannot find any property name, use the file's title or heading text as the value — never leave it blank.
+- unit_no (MANDATORY — every record must have this):
+  * Look for any column that uniquely identifies a unit: "Unit No.", "Apt No.", "Flat No.", "Room", "Room No.", "Suite", "Villa No.", "Office No.", "No.", "Ref.", "#", "SN", "S.N.", "Sl. No.", "Unit ID", "Unit", "APT", or any sequential identifier column.
+  * Strip area/size notation only: "5- (362 sqm)" → "5", keep alphanumeric IDs as-is (e.g. "A-101" stays "A-101").
+  * If the only identifier is a serial/row number (1, 2, 3...), use that number as unit_no.
+  * Never omit this field — if uncertain, use the row's position number.
 - type: Apartment | Villa | Office | Studio
   * Infer from unit_no: "APT." prefix → Apartment; "V"/"VIL" prefix → Villa
   * OFFICE / AL KHOR OFFICE → Office; STUDIO → Studio; bare number → Apartment default
