@@ -16,15 +16,19 @@ contract_start_date, contract_end_date, location_map_url, notes
 
 Normalisation rules:
 - property (MANDATORY — every record must have this):
-  * Look in: a dedicated "Property", "Building", "Project", "Tower" column; OR a merged cell / heading above the data table; OR the document title; OR a label like "Property:", "Building:", "Project:" anywhere in the document.
+  * COMPOUND UNIT NUMBER FORMAT (common in Qatar leasing sheets): When a "Unit Number" or "Unit No." column contains a compound code like "EARP01-B00-F00-AA02" or "PROJ-B01-F03-C205" — i.e. a string with multiple segments separated by hyphens where one segment starts with "F" followed by digits (the floor) — split it at the LAST hyphen:
+      - property = everything before the last hyphen  →  "EARP01-B00-F00"
+      - unit_no  = the final segment after the last hyphen  →  "AA02"
+  * If the compound code does NOT follow this pattern, use the standard rules below.
+  * Standard rules: Look in a dedicated "Property", "Building", "Project", "Tower" column; OR a merged cell / heading above the data table; OR the document title; OR a label like "Property:", "Building:", "Project:" anywhere.
   * Copy the same property name to every unit record that belongs to it.
-  * If the document covers multiple properties, assign each unit to the correct one.
-  * If you cannot find any property name, use the file's title or heading text as the value — never leave it blank.
+  * If you cannot find any property name, use the file's title or heading text — never leave it blank.
 - unit_no (MANDATORY — every record must have this):
-  * Look for any column that uniquely identifies a unit: "Unit No.", "Apt No.", "Flat No.", "Room", "Room No.", "Suite", "Villa No.", "Office No.", "No.", "Ref.", "#", "SN", "S.N.", "Sl. No.", "Unit ID", "Unit", "APT", or any sequential identifier column.
-  * Strip area/size notation only: "5- (362 sqm)" → "5", keep alphanumeric IDs as-is (e.g. "A-101" stays "A-101").
-  * If the only identifier is a serial/row number (1, 2, 3...), use that number as unit_no.
-  * Never omit this field — if uncertain, use the row's position number.
+  * If the UNIT NUMBER column is a compound code (see property rule above), unit_no = the last hyphen-delimited segment (e.g. "AA02", "A1708").
+  * Otherwise look for any column: "Unit No.", "Apt No.", "Flat No.", "Room", "Room No.", "Suite", "Villa No.", "Office No.", "No.", "Ref.", "#", "SN", "S.N.", "Sl. No.", "Unit ID", "Unit", "APT".
+  * Strip area/size notation only: "5- (362 sqm)" → "5". Keep alphanumeric IDs as-is.
+  * If the only identifier is a serial/row number (1, 2, 3...), use that number.
+  * Never omit this field.
 - type: Apartment | Villa | Office | Studio
   * Infer from unit_no: "APT." prefix → Apartment; "V"/"VIL" prefix → Villa
   * OFFICE / AL KHOR OFFICE → Office; STUDIO → Studio; bare number → Apartment default
