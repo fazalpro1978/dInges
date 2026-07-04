@@ -36,6 +36,7 @@ const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS 
 
 const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
+const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
 
 // ─── ConflictResolver ─────────────────────────────────────────────────────────
 
@@ -103,6 +104,7 @@ export default function IngestPipeline() {
   const [realtors, setRealtors] = useState<Realtor[]>([]);
   const [excludedIdx, setExcludedIdx] = useState<Set<number>>(new Set());
   const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
+  const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
 
   // Stage 2 → Validation: per-row reject + inline cell editing
   const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
@@ -146,6 +148,7 @@ export default function IngestPipeline() {
       setExcludedIdx(new Set());
       setRejectedInValidation(new Set());
       setBulkRealtor({ name: '', moci: '' });
+      setBulkZone({ code: '', name: '' });
       setSummary(matchData.summary);
       setStructuredStage('idle');
       setPendingFile(null);
@@ -166,9 +169,12 @@ export default function IngestPipeline() {
   // ── Inline cell editing for Validation table ──────────────────────────────
 
   const handleCellEdit = useCallback((rowIndex: number, field: string, value: string) => {
+    const coerced: unknown = (field === 'zone_code' || field === 'bathrooms')
+      ? (value === '' ? undefined : Number(value))
+      : value;
     setMatched(prev => prev.map(m =>
       m.rowIndex === rowIndex
-        ? { ...m, _conflictResolved: { ...m._conflictResolved, [field]: value } }
+        ? { ...m, _conflictResolved: { ...m._conflictResolved, [field]: coerced } }
         : m,
     ));
     setEditingCell(null);
@@ -518,6 +524,42 @@ export default function IngestPipeline() {
               </button>
             </div>
 
+            <div className="mb-4 border border-teal-200 bg-teal-50 rounded-lg p-3">
+              <p className="text-xs font-semibold text-teal-800 mb-2">Zone — bulk apply to all records</p>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={bulkZone.code}
+                  onChange={e => setBulkZone(prev => ({ ...prev, code: e.target.value }))}
+                  placeholder="Zone code (e.g. 25)"
+                  className="w-32 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
+                />
+                <input
+                  type="text"
+                  value={bulkZone.name}
+                  onChange={e => setBulkZone(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Zone name (e.g. Al Sadd)"
+                  className="flex-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
+                />
+              </div>
+              <button
+                disabled={(!bulkZone.code && !bulkZone.name) || matched.length === excludedIdx.size}
+                onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                  ? m
+                  : {
+                      ...m,
+                      _conflictResolved: {
+                        ...m._conflictResolved,
+                        ...(bulkZone.code ? { zone_code: Number(bulkZone.code) } : {}),
+                        ...(bulkZone.name ? { zone: bulkZone.name } : {}),
+                      },
+                    }))}
+                className="mt-2 text-xs px-3 py-1.5 rounded bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold"
+              >
+                Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
+              </button>
+            </div>
+
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => (
                 <div key={i} className="border border-gray-200 rounded-lg p-3">
@@ -556,6 +598,29 @@ export default function IngestPipeline() {
                       : m))}
                     onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
                   />
+                  <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Zone</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        value={String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '')}
+                        onChange={e => setMatched(prev => prev.map((m, mi) => mi === i
+                          ? { ...m, _conflictResolved: { ...m._conflictResolved, zone_code: e.target.value ? Number(e.target.value) : undefined } }
+                          : m))}
+                        placeholder="Code"
+                        className="w-24 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
+                      />
+                      <input
+                        type="text"
+                        value={String(r._conflictResolved.zone ?? r.resolvedData.zone ?? '')}
+                        onChange={e => setMatched(prev => prev.map((m, mi) => mi === i
+                          ? { ...m, _conflictResolved: { ...m._conflictResolved, zone: e.target.value } }
+                          : m))}
+                        placeholder="Zone name"
+                        className="flex-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -596,19 +661,23 @@ export default function IngestPipeline() {
             </div>
 
             <div className="overflow-x-auto rounded-lg border border-gray-200">
-              <table className="w-full text-xs min-w-[800px]">
+              <table className="w-full text-xs min-w-[1200px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold">
                     <th className="px-3 py-2 text-left w-8">#</th>
                     <th className="px-2 py-2 text-left">Match</th>
-                    <th className="px-2 py-2 text-left min-w-[140px]">Property</th>
-                    <th className="px-2 py-2 text-left w-20">Unit No.</th>
-                    <th className="px-2 py-2 text-left w-24">Type</th>
-                    <th className="px-2 py-2 text-left w-20">Config</th>
-                    <th className="px-2 py-2 text-left w-28">Furnishing</th>
-                    <th className="px-2 py-2 text-left min-w-[140px]">Status</th>
-                    <th className="px-2 py-2 text-right w-24">Rent (QAR)</th>
-                    <th className="px-2 py-2 text-center w-20">Action</th>
+                    <th className="px-2 py-2 text-left min-w-[120px]">Property</th>
+                    <th className="px-2 py-2 text-left w-16">Unit No.</th>
+                    <th className="px-2 py-2 text-left w-14">Zone #</th>
+                    <th className="px-2 py-2 text-left min-w-[100px]">Zone</th>
+                    <th className="px-2 py-2 text-left w-20">Type</th>
+                    <th className="px-2 py-2 text-left w-16">Config</th>
+                    <th className="px-2 py-2 text-left w-12">Bath</th>
+                    <th className="px-2 py-2 text-left w-20">Kitchen</th>
+                    <th className="px-2 py-2 text-left w-24">Furnishing</th>
+                    <th className="px-2 py-2 text-left min-w-[120px]">Status</th>
+                    <th className="px-2 py-2 text-right w-20">Rent (QAR)</th>
+                    <th className="px-2 py-2 text-center w-16">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -640,6 +709,20 @@ export default function IngestPipeline() {
                             : <span className={!getVal('unit_no') ? 'text-red-400 font-semibold' : ''}>{getVal('unit_no') || '!'}</span>}
                         </td>
 
+                        {/* Zone # */}
+                        <td className={td('zone_code')} onClick={() => startEdit('zone_code')}>
+                          {isEdit('zone_code')
+                            ? <input autoFocus type="number" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('zone_code')} onBlur={e => handleCellEdit(r.rowIndex, 'zone_code', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'zone_code', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('zone_code') ? 'text-amber-500 font-semibold' : ''}>{getVal('zone_code') || '?'}</span>}
+                        </td>
+
+                        {/* Zone */}
+                        <td className={td('zone')} onClick={() => startEdit('zone')}>
+                          {isEdit('zone')
+                            ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('zone')} onBlur={e => handleCellEdit(r.rowIndex, 'zone', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'zone', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('zone') ? 'text-amber-500 font-semibold' : ''}>{getVal('zone') || '?'}</span>}
+                        </td>
+
                         {/* Type (select) */}
                         <td className={td('type')} onClick={() => startEdit('type')}>
                           {isEdit('type')
@@ -652,6 +735,20 @@ export default function IngestPipeline() {
                           {isEdit('config')
                             ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('config')} onBlur={e => handleCellEdit(r.rowIndex, 'config', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'config', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
                             : <span className={!getVal('config') ? 'text-amber-500 font-semibold' : ''}>{getVal('config') || '?'}</span>}
+                        </td>
+
+                        {/* Bath */}
+                        <td className={td('bathrooms')} onClick={() => startEdit('bathrooms')}>
+                          {isEdit('bathrooms')
+                            ? <input autoFocus type="number" step="0.5" min="0" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('bathrooms')} onBlur={e => handleCellEdit(r.rowIndex, 'bathrooms', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'bathrooms', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('bathrooms') ? 'text-amber-500 font-semibold' : ''}>{getVal('bathrooms') || '?'}</span>}
+                        </td>
+
+                        {/* Kitchen (select) */}
+                        <td className={td('kitchen')} onClick={() => startEdit('kitchen')}>
+                          {isEdit('kitchen')
+                            ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('kitchen')} onChange={e => handleCellEdit(r.rowIndex, 'kitchen', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'kitchen', e.target.value)}><option value="">—</option>{KITCHEN_OPTIONS.map(o => <option key={o}>{o}</option>)}</select>
+                            : <span className={!getVal('kitchen') ? 'text-amber-500 font-semibold' : ''}>{getVal('kitchen') || '?'}</span>}
                         </td>
 
                         {/* Furnishing (select) */}
