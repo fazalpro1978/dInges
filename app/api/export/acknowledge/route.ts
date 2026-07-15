@@ -7,15 +7,7 @@ const admin = createClient(
   { db: { schema: 'ingest' } },
 );
 
-function requireApiKey(req: NextRequest): boolean {
-  return req.headers.get('x-api-key') === process.env.INGEST_API_KEY;
-}
-
 export async function POST(req: NextRequest) {
-  if (!requireApiKey(req)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   try {
     const { ids } = (await req.json()) as { ids: string[] };
     if (!Array.isArray(ids) || ids.length === 0) {

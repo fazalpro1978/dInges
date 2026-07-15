@@ -1,6 +1,8 @@
 'use client';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import TopBar from './TopBar';
+import { useNav } from './AppShell';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -11,7 +13,7 @@ type BatchLog = {
   run_id:                string | null;
   file_name:             string;
   uploaded_by:           string;
-  phase:                 'uploaded' | 'review_approve' | 'done' | 'failed';
+  phase:                 'uploaded' | 'review_approve' | 'done' | 'failed' | 'cancelled';
   record_count_total:    number;
   record_count_success:  number;
   record_count_failed:   number;
@@ -29,7 +31,7 @@ type BatchLog = {
 
 type PipelineIssue = {
   batch_id:              string;
-  run_id:                string;
+  run_id:                string | null;
   file_name:             string;
   uploaded_by:           string;
   created_at:            string;
@@ -52,6 +54,7 @@ const PHASE_META: Record<string, { label: string; cls: string }> = {
   review_approve: { label: 'Review & Approve', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
   done:           { label: 'Done',             cls: 'bg-green-50 text-green-700 border-green-200' },
   failed:         { label: 'Failed',           cls: 'bg-red-50 text-red-700 border-red-200' },
+  cancelled:      { label: 'Cancelled',        cls: 'bg-gray-50 text-gray-500 border-gray-200' },
 };
 
 function PhasePill({ phase }: { phase: string }) {
@@ -103,12 +106,22 @@ function IssueRow({
   type,
   onReinstate,
   reinstating,
+  onKill,
+  killing,
+  onMarkDone,
+  markingDone,
 }: {
   issue: PipelineIssue;
   type: 'abandoned' | 'stalled' | 'failed';
   onReinstate?: (runId: string) => void;
   reinstating?: boolean;
+  onKill?: (runId: string | null, batchId: string) => void;
+  killing?: boolean;
+  onMarkDone?: (runId: string) => void;
+  markingDone?: boolean;
 }) {
+  const [confirmKill, setConfirmKill] = useState(false);
+  const [confirmDone, setConfirmDone] = useState(false);
   const age = timeAgo(type === 'stalled' && issue.review_approve_at ? issue.review_approve_at : issue.created_at);
   return (
     <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-white border border-gray-100 shadow-sm">
@@ -117,24 +130,75 @@ function IssueRow({
       <span className="text-[10px] text-gray-400 shrink-0">{issue.record_count_total} records</span>
       <span className="text-[10px] text-gray-400 shrink-0">{age}</span>
       <span className="text-[10px] text-gray-500 shrink-0">{issue.uploaded_by}</span>
-      {type === 'abandoned' && onReinstate && (
+      {type === 'abandoned' && onReinstate && issue.run_id && (
         <button
-          onClick={() => onReinstate(issue.run_id)}
+          onClick={() => onReinstate(issue.run_id!)}
           disabled={reinstating}
           className="shrink-0 text-[11px] font-semibold px-3 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white transition-colors"
         >
           {reinstating ? 'Re-queuing…' : 'Re-queue →'}
         </button>
       )}
-      {type === 'stalled' && (
-        <span className="shrink-0 text-[11px] text-amber-600 font-semibold px-2 py-1 rounded-lg bg-amber-50 border border-amber-200">
-          Check REIMS
-        </span>
+      {type === 'stalled' && onMarkDone && issue.run_id && (
+        confirmDone ? (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[10px] font-semibold text-green-700">REIMS imported?</span>
+            <button
+              onClick={() => { onMarkDone(issue.run_id!); setConfirmDone(false); }}
+              disabled={markingDone}
+              className="text-[10px] font-bold px-2 py-1 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white transition-colors"
+            >
+              {markingDone ? '…' : 'Yes, Mark Done'}
+            </button>
+            <button
+              onClick={() => setConfirmDone(false)}
+              className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+            >
+              No
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDone(true)}
+            disabled={markingDone}
+            className="shrink-0 text-[11px] text-green-700 font-semibold px-2 py-1 rounded-lg bg-green-50 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
+          >
+            Mark Done ✓
+          </button>
+        )
       )}
       {type === 'failed' && (
         <Link href="/" className="shrink-0 text-[11px] font-semibold px-3 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition-colors">
           Re-upload
         </Link>
+      )}
+      {(type === 'abandoned' || type === 'stalled') && onKill && (
+        confirmKill ? (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[10px] font-semibold text-red-700">Kill?</span>
+            <button
+              onClick={() => { onKill(issue.run_id, issue.batch_id); setConfirmKill(false); }}
+              disabled={killing}
+              className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white transition-colors"
+            >
+              {killing ? '…' : 'Yes'}
+            </button>
+            <button
+              onClick={() => setConfirmKill(false)}
+              className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+            >
+              No
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmKill(true)}
+            disabled={killing}
+            className="shrink-0 text-[10px] font-semibold px-2 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors"
+          >
+            Kill ✕
+          </button>
+        )
       )}
     </div>
   );
@@ -143,17 +207,29 @@ function IssueRow({
 function PipelineStatusPanel({
   status,
   loading,
+  checkError,
   onRefresh,
   onReinstate,
   reinstatingId,
+  onKill,
+  killingId,
+  onMarkDone,
+  markingDoneId,
   toast,
+  toastIsError,
 }: {
   status: PipelineStatus | null;
   loading: boolean;
+  checkError: string | null;
   onRefresh: () => void;
   onReinstate: (runId: string) => void;
   reinstatingId: string | null;
+  onKill: (runId: string | null, batchId: string) => void;
+  killingId: string | null;
+  onMarkDone: (runId: string) => void;
+  markingDoneId: string | null;
   toast: string | null;
+  toastIsError: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -170,12 +246,14 @@ function PipelineStatusPanel({
       {/* Header row */}
       <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className={`w-2.5 h-2.5 rounded-full ${loading ? 'bg-gray-300 animate-pulse' : totalIssues > 0 ? 'bg-orange-500' : 'bg-green-500'}`} />
+          <span className={`w-2.5 h-2.5 rounded-full ${loading ? 'bg-gray-300 animate-pulse' : checkError ? 'bg-red-500' : totalIssues > 0 ? 'bg-orange-500' : 'bg-green-500'}`} />
           <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">Pipeline Health</span>
         </div>
 
         {loading ? (
           <span className="text-xs text-gray-400">Running system check…</span>
+        ) : checkError ? (
+          <span className="text-xs text-red-600 font-medium">Check failed — see error below</span>
         ) : status ? (
           <div className="flex items-center gap-2 flex-wrap">
             <StatusPill count={status.abandoned.length} label="Abandoned" color={status.abandoned.length > 0 ? 'orange' : 'green'} />
@@ -209,9 +287,15 @@ function PipelineStatusPanel({
         </div>
       </div>
 
+      {/* Check error */}
+      {checkError && (
+        <div className="mx-4 mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+          Run Check failed: {checkError}
+        </div>
+      )}
       {/* Toast */}
       {toast && (
-        <div className="mx-4 mb-3 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-xs text-green-700 font-medium">
+        <div className={`mx-4 mb-3 px-3 py-2 rounded-lg text-xs font-medium ${toastIsError ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-green-50 border border-green-200 text-green-700'}`}>
           {toast}
         </div>
       )}
@@ -236,6 +320,8 @@ function PipelineStatusPanel({
                     type="abandoned"
                     onReinstate={onReinstate}
                     reinstating={reinstatingId === issue.run_id}
+                    onKill={onKill}
+                    killing={killingId === issue.batch_id}
                   />
                 ))}
               </div>
@@ -252,7 +338,15 @@ function PipelineStatusPanel({
               </p>
               <div className="space-y-1.5">
                 {status.stalled.map(issue => (
-                  <IssueRow key={issue.batch_id} issue={issue} type="stalled" />
+                  <IssueRow
+                    key={issue.batch_id}
+                    issue={issue}
+                    type="stalled"
+                    onKill={onKill}
+                    killing={killingId === issue.batch_id}
+                    onMarkDone={onMarkDone}
+                    markingDone={markingDoneId === issue.run_id}
+                  />
                 ))}
               </div>
             </div>
@@ -316,8 +410,13 @@ export default function BatchLogsGrid() {
   // Pipeline status state
   const [pipelineStatus, setPipelineStatus]     = useState<PipelineStatus | null>(null);
   const [statusLoading, setStatusLoading]       = useState(true);
+  const [statusError, setStatusError]           = useState<string | null>(null);
   const [reinstatingId, setReinstatingId]       = useState<string | null>(null);
   const [reinstateToast, setReinstateToast]     = useState<string | null>(null);
+  const [killingId, setKillingId]               = useState<string | null>(null);
+  const [killToast, setKillToast]               = useState<string | null>(null);
+  const [confirmKillId, setConfirmKillId]       = useState<string | null>(null);
+  const [markingDoneId, setMarkingDoneId]       = useState<string | null>(null);
 
   const load = useCallback(async (p: number, s: string, phase: string, from: string, to: string) => {
     setLoading(true);
@@ -345,19 +444,29 @@ export default function BatchLogsGrid() {
 
   const loadPipelineStatus = useCallback(async () => {
     setStatusLoading(true);
+    setStatusError(null);
     try {
-      const res  = await fetch('/api/pipeline-status', { cache: 'no-store' });
+      const res  = await fetch(`/api/pipeline-status?_t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json() as PipelineStatus & { error?: string };
-      if (!res.ok || data.error) return;
+      if (!res.ok || data.error) {
+        setStatusError(data.error ?? `HTTP ${res.status}`);
+        return;
+      }
       setPipelineStatus(data);
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : 'Network error');
     } finally {
       setStatusLoading(false);
     }
   }, []);
 
+  const [reinstateToastIsError, setReinstateToastIsError] = useState(false);
+  const [killToastIsError, setKillToastIsError]           = useState(false);
+
   const reinstateRun = useCallback(async (runId: string) => {
     setReinstatingId(runId);
     setReinstateToast(null);
+    setReinstateToastIsError(false);
     try {
       const res  = await fetch('/api/pipeline-status/reinstate', {
         method: 'POST',
@@ -366,7 +475,8 @@ export default function BatchLogsGrid() {
       });
       const data = await res.json() as { reinstated?: number; message?: string; error?: string };
       if (!res.ok || data.error) {
-        setReinstateToast(`Error: ${data.error}`);
+        setReinstateToast(data.error ?? `HTTP ${res.status}`);
+        setReinstateToastIsError(true);
       } else {
         const n = data.reinstated ?? 0;
         setReinstateToast(
@@ -374,14 +484,53 @@ export default function BatchLogsGrid() {
             ? `${n} record${n !== 1 ? 's' : ''} re-queued successfully. REIMS will pick them up shortly.`
             : (data.message ?? 'Records already in queue.')
         );
-        // Refresh both lists
         await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
       }
-    } catch {
-      setReinstateToast('Network error — please try again.');
+    } catch (e) {
+      setReinstateToast(e instanceof Error ? e.message : 'Network error — please try again.');
+      setReinstateToastIsError(true);
     } finally {
       setReinstatingId(null);
-      setTimeout(() => setReinstateToast(null), 8000);
+      setTimeout(() => { setReinstateToast(null); setReinstateToastIsError(false); }, 10000);
+    }
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+
+  const markDone = useCallback(async (runId: string) => {
+    setMarkingDoneId(runId);
+    try {
+      const res = await fetch(`/api/runs/${runId}/force-complete`, { method: 'POST' });
+      if (res.ok) {
+        await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
+      }
+    } catch {}
+    setMarkingDoneId(null);
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+
+  const killRun = useCallback(async (runId: string | null, batchId: string) => {
+    setKillingId(batchId);
+    setKillToast(null);
+    setKillToastIsError(false);
+    setConfirmKillId(null);
+    try {
+      const res  = await fetch('/api/pipeline-status/kill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runId: runId ?? undefined, batchId }),
+      });
+      const data = await res.json() as { cancelled?: boolean; error?: string };
+      if (!res.ok || data.error) {
+        setKillToast(data.error ?? `HTTP ${res.status}`);
+        setKillToastIsError(true);
+      } else {
+        setKillToast('Run cancelled and removed from the pipeline health panel.');
+        await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
+      }
+    } catch (e) {
+      setKillToast(e instanceof Error ? e.message : 'Network error — please try again.');
+      setKillToastIsError(true);
+    } finally {
+      setKillingId(null);
+      setTimeout(() => { setKillToast(null); setKillToastIsError(false); }, 10000);
     }
   }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
 
@@ -405,18 +554,26 @@ export default function BatchLogsGrid() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  const { openNav } = useNav();
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-gray-900">Batch History</h1>
-          <p className="text-xs text-gray-500">Administrative log of every ingestion batch across the full pipeline lifecycle</p>
-        </div>
-        <Link href="/" className="text-xs text-blue-600 hover:text-blue-800 underline font-medium">
-          ← Back to Pipeline
-        </Link>
-      </header>
+    <div className="min-h-screen" style={{ background: '#1b1e23' }}>
+      <TopBar
+        onMenuClick={openNav}
+        title="Batch History"
+        subtitle="Ingestion log across the full pipeline lifecycle"
+        right={
+          <Link
+            href="/"
+            className="text-xs font-medium hidden sm:flex items-center gap-1"
+            style={{ color: '#7c8694' }}
+            onMouseOver={e => ((e.currentTarget as HTMLAnchorElement).style.color = '#eff0f1')}
+            onMouseOut={e => ((e.currentTarget as HTMLAnchorElement).style.color = '#7c8694')}
+          >
+            ← Pipeline
+          </Link>
+        }
+      />
 
       <div className="max-w-[1700px] mx-auto px-6 py-6 space-y-4">
 
@@ -424,10 +581,16 @@ export default function BatchLogsGrid() {
         <PipelineStatusPanel
           status={pipelineStatus}
           loading={statusLoading}
+          checkError={statusError}
           onRefresh={loadPipelineStatus}
           onReinstate={reinstateRun}
           reinstatingId={reinstatingId}
-          toast={reinstateToast}
+          onKill={killRun}
+          killingId={killingId}
+          onMarkDone={markDone}
+          markingDoneId={markingDoneId}
+          toast={reinstateToast ?? killToast}
+          toastIsError={reinstateToastIsError || killToastIsError}
         />
 
         {/* Filters */}
@@ -448,6 +611,7 @@ export default function BatchLogsGrid() {
             <option value="review_approve">Review &amp; Approve</option>
             <option value="done">Done</option>
             <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
           </select>
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <span>From</span>
@@ -567,18 +731,58 @@ export default function BatchLogsGrid() {
                         {/* Alert / Action */}
                         <td className="px-3 py-2.5 overflow-hidden">
                           {flag === 'abandoned' && (
-                            <button
-                              onClick={() => log.run_id && reinstateRun(log.run_id)}
-                              disabled={reinstatingId === log.run_id}
-                              className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white transition-colors whitespace-nowrap"
-                            >
-                              {reinstatingId === log.run_id ? 'Re-queuing…' : 'Re-queue →'}
-                            </button>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                onClick={() => log.run_id && reinstateRun(log.run_id)}
+                                disabled={reinstatingId === log.run_id}
+                                className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white transition-colors whitespace-nowrap"
+                              >
+                                {reinstatingId === log.run_id ? 'Re-queuing…' : 'Re-queue →'}
+                              </button>
+                              {confirmKillId === log.batch_id ? (
+                                <>
+                                  <button
+                                    onClick={() => killRun(log.run_id, log.batch_id)}
+                                    disabled={killingId === log.batch_id}
+                                    className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white transition-colors whitespace-nowrap"
+                                  >Yes</button>
+                                  <button
+                                    onClick={() => setConfirmKillId(null)}
+                                    className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 whitespace-nowrap"
+                                  >No</button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => setConfirmKillId(log.batch_id)}
+                                  className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 whitespace-nowrap"
+                                >Kill ✕</button>
+                              )}
+                            </div>
                           )}
                           {flag === 'stalled' && (
-                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg whitespace-nowrap">
-                              ⚠ Check REIMS
-                            </span>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg whitespace-nowrap">
+                                ⚠ Check REIMS
+                              </span>
+                              {confirmKillId === log.batch_id ? (
+                                <>
+                                  <button
+                                    onClick={() => killRun(log.run_id, log.batch_id)}
+                                    disabled={killingId === log.batch_id}
+                                    className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white transition-colors whitespace-nowrap"
+                                  >Yes</button>
+                                  <button
+                                    onClick={() => setConfirmKillId(null)}
+                                    className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 whitespace-nowrap"
+                                  >No</button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => setConfirmKillId(log.batch_id)}
+                                  className="text-[10px] font-semibold px-2 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 whitespace-nowrap"
+                                >Kill ✕</button>
+                              )}
+                            </div>
                           )}
                           {flag === 'failed' && (
                             <Link href="/" className="text-[10px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-1 rounded-lg hover:bg-red-100 transition-colors whitespace-nowrap">

@@ -1,9 +1,12 @@
 'use client';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
+import TopBar from './TopBar';
+import { useNav } from './AppShell';
 import StructuredMapper, { type MappedPayload } from './StructuredMapper';
 import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
+import ZoneField, { type ZoneEntry } from './ZoneField';
 import { Badge, actionBadge } from './StructuredImportShared';
 
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
@@ -123,7 +126,7 @@ export default function IngestPipeline() {
   const [excludedIdx, setExcludedIdx] = useState<Set<number>>(new Set());
   const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
-  const [zones, setZones] = useState<{ zone_code: number; district_name: string }[]>([]);
+  const [zones, setZones] = useState<ZoneEntry[]>([]);
 
   // Stage 2 → Validation: per-row reject + inline cell editing + dynamic bulk fill
   const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
@@ -139,6 +142,23 @@ export default function IngestPipeline() {
   const [approveResult, setApproveResult] = useState<{ approved: number; exported: number } | null>(null);
   const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
   const [pollCount, setPollCount] = useState(0);
+  const [forceCompleting, setForceCompleting] = useState(false);
+
+  // Restore stage 4 session if user navigated away mid-poll
+  const SESSION_KEY = 'dinges_pipeline_session';
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(SESSION_KEY);
+      if (!saved) return;
+      const { savedRunId, savedStage, savedApproved } = JSON.parse(saved);
+      if (savedRunId && savedStage === 4) {
+        setRunId(savedRunId);
+        setApproveResult({ approved: savedApproved ?? 0, exported: 0 });
+        setStage(4);
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Stage 0, structured (CSV/XLSX) sub-flow
   const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
@@ -196,14 +216,11 @@ export default function IngestPipeline() {
     const coerced: unknown = (field === 'zone_code' || field === 'bathrooms')
       ? (value === '' ? undefined : Number(value))
       : value;
-    // Auto-populate the paired zone field from the cr_zone_codes registry
+    // zone_code → zone name auto-populate (not the reverse: zone code is authority-assigned)
     const extra: Record<string, unknown> = {};
     if (field === 'zone_code' && value) {
       const match = zones.find(z => z.zone_code === Number(value));
       if (match) extra.zone = match.district_name;
-    } else if (field === 'zone' && value) {
-      const match = zones.find(z => z.district_name.toLowerCase() === value.toLowerCase());
-      if (match) extra.zone_code = match.zone_code;
     }
     setMatched(prev => prev.map(m =>
       m.rowIndex === rowIndex
@@ -211,22 +228,38 @@ export default function IngestPipeline() {
         : m,
     ));
     setEditingCell(null);
-  }, []);
+  }, [zones]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
   const [pollStatus, setPollStatus] = useState<{ total: number; acked: number } | null>(null);
 
+  const forceComplete = useCallback(async () => {
+    if (!runId) return;
+    setForceCompleting(true);
+    try {
+      const res = await fetch(`/api/runs/${runId}/force-complete`, { method: 'POST', cache: 'no-store' });
+      if (res.ok) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+        setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: pollStatus?.total ?? 0 }));
+        setStage(5);
+      }
+    } catch {}
+    setForceCompleting(false);
+  }, [runId, pollStatus]);
+
   const checkStatus = useCallback(async () => {
     if (!runId) return;
     setPollCount(n => n + 1);
     try {
-      const res = await fetch(`/api/runs/${runId}/status`);
+      const res = await fetch(`/api/runs/${runId}/status`, { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json() as { status: string; exported_count: number; allAcknowledged: boolean; total: number; acked: number };
       setPollStatus({ total: data.total ?? 0, acked: data.acked ?? 0 });
       if (data.status === 'exported' || data.allAcknowledged) {
         if (pollRef.current) clearInterval(pollRef.current);
+        try { sessionStorage.removeItem(SESSION_KEY); } catch {}
         setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: data.exported_count ?? 0 }));
         setStage(5); // Done
       }
@@ -238,7 +271,14 @@ export default function IngestPipeline() {
     setPollCount(0);
     checkStatus();
     pollRef.current = setInterval(checkStatus, 4000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    // Re-check immediately when the user switches back to this tab (Chrome throttles
+    // background timers, so the 4s interval can stretch to 60s+ while the user is in REIMS)
+    const onVisible = () => { if (document.visibilityState === 'visible') checkStatus(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [stage, runId, checkStatus]);
 
   const handleFile = useCallback(async (file: File) => {
@@ -376,7 +416,9 @@ export default function IngestPipeline() {
       const approveData = await approveRes.json();
       if (!approveRes.ok) throw new Error(approveData.error ?? 'Approve failed');
 
-      setApproveResult({ approved: approveData.approved ?? 0, exported: 0 });
+      const approved = approveData.approved ?? 0;
+      setApproveResult({ approved, exported: 0 });
+      try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ savedRunId: runId, savedStage: 4, savedApproved: approved })); } catch {}
       setStage(4); // REIMS Queue
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approve failed');
@@ -387,6 +429,7 @@ export default function IngestPipeline() {
 
   const reset = () => {
     if (pollRef.current) clearInterval(pollRef.current);
+    try { sessionStorage.removeItem(SESSION_KEY); } catch {}
     setBatchErrorSummary([]); setBatchTotalRows(0);
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
     setRecordActions({}); setRejectedInValidation(new Set()); setEditingCell(null);
@@ -397,42 +440,54 @@ export default function IngestPipeline() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-gray-900">REIMS Ingestion Service</h1>
-          <p className="text-xs text-gray-500">Vanguard REOS · Data Ingestion & Approval Pipeline</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <Link href="/batch-logs" className="text-xs text-blue-600 hover:text-blue-800 font-medium underline">
-            Batch History
-          </Link>
-          {(stage > 0 || structuredStage !== 'idle') && (
-            <button onClick={reset} className="text-xs text-gray-500 hover:text-gray-800 underline">
-              Start Over
-            </button>
-          )}
-        </div>
-      </header>
+  const { openNav } = useNav();
 
-      {/* Stage indicator */}
-      <div className="bg-white border-b border-gray-100 px-6 py-3">
+  return (
+    <div className="min-h-screen" style={{ background: '#1b1e23' }}>
+      <TopBar
+        onMenuClick={openNav}
+        title="Ingest Pipeline"
+        subtitle="Upload · Match · Validate · Export"
+        right={
+          <div className="flex items-center gap-3">
+            <Link href="/batch-logs" className="text-xs font-medium hidden sm:block" style={{ color: '#3daee9' }}>
+              Batch History
+            </Link>
+            {(stage > 0 || structuredStage !== 'idle') && (
+              <button onClick={reset} className="text-xs font-medium" style={{ color: '#7c8694' }}
+                onMouseOver={e => ((e.currentTarget as HTMLElement).style.color = '#eff0f1')}
+                onMouseOut={e => ((e.currentTarget as HTMLElement).style.color = '#7c8694')}
+              >
+                Start Over
+              </button>
+            )}
+          </div>
+        }
+      />
+
+      {/* Stage indicator — Plasma styled */}
+      <div className="px-6 py-3" style={{ background: '#1e2228', borderBottom: '1px solid #2e3440' }}>
         <div className="flex items-center gap-0 max-w-4xl">
           {STAGE_LABELS.map((label, i) => {
             const done   = i < stage;
             const active = i === stage;
             return (
               <React.Fragment key={i}>
-                <div className={`flex items-center gap-1.5 ${done || active ? 'text-blue-700' : 'text-gray-400'}`}>
-                  <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center ${done ? 'bg-blue-600 text-white' : active ? 'bg-blue-100 text-blue-700 border-2 border-blue-600' : 'bg-gray-100 text-gray-400'}`}>
+                <div className="flex items-center gap-1.5" style={{ color: done || active ? '#3daee9' : '#4e5a6a' }}>
+                  <span
+                    className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center"
+                    style={{
+                      background: done ? '#3daee9' : active ? 'rgba(61,174,233,0.15)' : '#252b33',
+                      color:      done ? '#1b1e23' : active ? '#3daee9' : '#4e5a6a',
+                      border:     active ? '2px solid #3daee9' : '2px solid transparent',
+                    }}
+                  >
                     {done ? '✓' : i + 1}
                   </span>
                   <span className="text-xs font-medium hidden sm:inline">{label}</span>
                 </div>
                 {i < STAGE_LABELS.length - 1 && (
-                  <div className={`flex-1 h-0.5 mx-2 ${done ? 'bg-blue-600' : 'bg-gray-200'}`} />
+                  <div className="flex-1 h-0.5 mx-2" style={{ background: done ? '#3daee9' : '#2e3440' }} />
                 )}
               </React.Fragment>
             );
@@ -557,37 +612,15 @@ export default function IngestPipeline() {
               </button>
             </div>
 
-            <datalist id="zone-names-list">
-              {zones.map(z => <option key={z.zone_code} value={z.district_name} />)}
-            </datalist>
-
-            <div className="mb-4 border border-teal-200 bg-teal-50 rounded-lg p-3">
-              <p className="text-xs font-semibold text-teal-800 mb-2">Zone — bulk apply to all records</p>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={bulkZone.code}
-                  onChange={e => {
-                    const code = e.target.value;
-                    const match = zones.find(z => z.zone_code === Number(code));
-                    setBulkZone({ code, name: match ? match.district_name : bulkZone.name });
-                  }}
-                  placeholder="Zone code (e.g. 25)"
-                  className="w-32 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
-                />
-                <input
-                  type="text"
-                  list="zone-names-list"
-                  value={bulkZone.name}
-                  onChange={e => {
-                    const name = e.target.value;
-                    const match = zones.find(z => z.district_name.toLowerCase() === name.toLowerCase());
-                    setBulkZone({ name, code: match ? String(match.zone_code) : bulkZone.code });
-                  }}
-                  placeholder="Zone name (e.g. Al Sadd)"
-                  className="flex-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
-                />
-              </div>
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Zone — bulk apply to all records</p>
+              <ZoneField
+                code={bulkZone.code}
+                name={bulkZone.name}
+                zones={zones}
+                onChange={next => setBulkZone(next)}
+                onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+              />
               <button
                 disabled={(!bulkZone.code && !bulkZone.name) || matched.length === excludedIdx.size}
                 onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
@@ -644,46 +677,19 @@ export default function IngestPipeline() {
                       : m))}
                     onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
                   />
-                  <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
-                    <p className="text-xs font-semibold text-gray-700 mb-2">Zone</p>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        value={String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '')}
-                        onChange={e => {
-                          const code = e.target.value;
-                          const match = zones.find(z => z.zone_code === Number(code));
-                          setMatched(prev => prev.map((m, mi) => mi === i ? {
-                            ...m, _conflictResolved: {
-                              ...m._conflictResolved,
-                              zone_code: code ? Number(code) : undefined,
-                              ...(match ? { zone: match.district_name } : {}),
-                            },
-                          } : m));
-                        }}
-                        placeholder="Code"
-                        className="w-24 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
-                      />
-                      <input
-                        type="text"
-                        list="zone-names-list"
-                        value={String(r._conflictResolved.zone ?? r.resolvedData.zone ?? '')}
-                        onChange={e => {
-                          const name = e.target.value;
-                          const match = zones.find(z => z.district_name.toLowerCase() === name.toLowerCase());
-                          setMatched(prev => prev.map((m, mi) => mi === i ? {
-                            ...m, _conflictResolved: {
-                              ...m._conflictResolved,
-                              zone: name,
-                              ...(match ? { zone_code: match.zone_code } : {}),
-                            },
-                          } : m));
-                        }}
-                        placeholder="Zone name"
-                        className="flex-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
+                  <ZoneField
+                    code={String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '')}
+                    name={String(r._conflictResolved.zone ?? r.resolvedData.zone ?? '')}
+                    zones={zones}
+                    onChange={next => setMatched(prev => prev.map((m, mi) => mi === i ? {
+                      ...m, _conflictResolved: {
+                        ...m._conflictResolved,
+                        zone_code: next.code ? Number(next.code) : undefined,
+                        zone: next.name,
+                      },
+                    } : m))}
+                    onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+                  />
                 </div>
               ))}
             </div>
@@ -763,20 +769,12 @@ export default function IngestPipeline() {
                           const val = bulkFill[f.field] ?? '';
                           const isNumeric = f.field === 'zone_code' || f.field === 'bathrooms' || f.field === 'rent';
                           const coerced: unknown = isNumeric ? Number(val) : val;
-                          // Zone auto-populate when bulk-applying one of the pair
-                          const zoneExtra = (m: MatchedRecord): Record<string, unknown> => {
-                            if (f.field === 'zone_code') {
-                              const match = zones.find(z => z.zone_code === Number(val));
-                              return match ? { zone: match.district_name } : {};
-                            }
-                            if (f.field === 'zone') {
-                              const match = zones.find(z => z.district_name.toLowerCase() === val.toLowerCase());
-                              return match ? { zone_code: match.zone_code } : {};
-                            }
-                            return {};
-                          };
+                          // zone_code bulk-fill: also auto-fill zone name from registry
+                          const zoneExtra = (f.field === 'zone_code')
+                            ? (() => { const z = zones.find(z => z.zone_code === Number(val)); return z ? { zone: z.district_name } : {}; })()
+                            : {};
                           setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
-                            ...m, _conflictResolved: { ...m._conflictResolved, [f.field]: coerced, ...zoneExtra(m) },
+                            ...m, _conflictResolved: { ...m._conflictResolved, [f.field]: coerced, ...zoneExtra },
                           }));
                         }}
                         className="text-xs px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded disabled:opacity-40"
@@ -1095,12 +1093,21 @@ export default function IngestPipeline() {
                     Check now
                   </button>
                   {isTimedOut && (
-                    <button
-                      onClick={reset}
-                      className="text-xs px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition-colors"
-                    >
-                      Start Over
-                    </button>
+                    <>
+                      <button
+                        onClick={forceComplete}
+                        disabled={forceCompleting}
+                        className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors"
+                      >
+                        {forceCompleting ? 'Marking Done…' : 'Mark as Done'}
+                      </button>
+                      <button
+                        onClick={reset}
+                        className="text-xs px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition-colors"
+                      >
+                        Start Over
+                      </button>
+                    </>
                   )}
                 </div>
               </div>

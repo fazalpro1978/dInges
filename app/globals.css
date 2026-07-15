@@ -2,12 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  color: rgb(17, 24, 39); /* gray-900 — always dark regardless of OS theme */
+/* KDE Plasma Breeze Dark — dInges base theme */
+:root {
+  --plasma-bg:      #1b1e23;
+  --plasma-surface: #232629;
+  --plasma-panel:   #1e2228;
+  --plasma-border:  #2e3440;
+  --plasma-accent:  #3daee9;
+  --plasma-text:    #eff0f1;
+  --plasma-muted:   #7c8694;
+}
+
+html, body {
+  background: var(--plasma-bg);
+  color: var(--plasma-text);
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+  .text-balance { text-wrap: balance; }
 }
