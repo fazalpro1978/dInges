@@ -49,7 +49,8 @@ const VALIDATION_FIELDS: FieldDef[] = [
   { field: 'type',       label: 'Type',        type: 'select', options: TYPE_OPTIONS },
   { field: 'config',     label: 'Config',      type: 'text' },
   { field: 'bathrooms',  label: 'Bath',        type: 'number', step: '0.5' },
-  { field: 'kitchen',    label: 'Kitchen',     type: 'select', options: KITCHEN_OPTIONS },
+  { field: 'parking',   label: 'Parking',     type: 'select', options: ['Yes', 'No'] },
+  { field: 'kitchen',   label: 'Kitchen',     type: 'select', options: KITCHEN_OPTIONS },
   { field: 'furnishing', label: 'Furnishing',  type: 'select', options: FURNISHING_OPTIONS },
   { field: 'status',     label: 'Status',      type: 'text' },
   { field: 'rent',       label: 'Rent (QAR)',  type: 'number' },
@@ -799,6 +800,7 @@ export default function IngestPipeline() {
                     <th className="px-2 py-2 text-left w-20">Type</th>
                     <th className="px-2 py-2 text-left w-16">Config</th>
                     <th className="px-2 py-2 text-left w-12">Bath</th>
+                    <th className="px-2 py-2 text-left w-16">Parking</th>
                     <th className="px-2 py-2 text-left w-20">Kitchen</th>
                     <th className="px-2 py-2 text-left w-24">Furnishing</th>
                     <th className="px-2 py-2 text-left min-w-[120px]">Status</th>
@@ -868,6 +870,13 @@ export default function IngestPipeline() {
                           {isEdit('bathrooms')
                             ? <input autoFocus type="number" step="0.5" min="0" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('bathrooms')} onBlur={e => handleCellEdit(r.rowIndex, 'bathrooms', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'bathrooms', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
                             : <span className={!getVal('bathrooms') ? 'text-amber-500 font-semibold' : ''}>{getVal('bathrooms') || '?'}</span>}
+                        </td>
+
+                        {/* Parking (select) */}
+                        <td className={td('parking')} onClick={() => startEdit('parking')}>
+                          {isEdit('parking')
+                            ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('parking')} onChange={e => handleCellEdit(r.rowIndex, 'parking', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'parking', e.target.value)}><option value="">—</option>{['Yes','No'].map(o => <option key={o}>{o}</option>)}</select>
+                            : <span className={!getVal('parking') ? 'text-amber-500 font-semibold' : ''}>{getVal('parking') || '?'}</span>}
                         </td>
 
                         {/* Kitchen (select) */}
