@@ -5,7 +5,7 @@ import { MASTER_FIELDS, BATCH_FIELDS, suggestMapping } from '@/lib/importSchema'
 import RealtorNameField from './RealtorNameField';
 import type { Realtor } from './RealtorField';
 import ZoneField from './ZoneField';
-import type { Zone } from './ZoneField';
+import type { ZoneEntry } from './ZoneField';
 
 export type MappedPayload = {
   fileName: string;
@@ -48,7 +48,7 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
   const [parseError, setParseError] = useState('');
   const loadedRef = useRef(false);
   const [realtors, setRealtors] = useState<Realtor[]>([]);
-  const [zones, setZones] = useState<Zone[]>([]);
+  const [zones, setZones] = useState<ZoneEntry[]>([]);
 
   useEffect(() => {
     fetch('/api/realtors').then((r) => r.json()).then((d) => setRealtors(d.realtors ?? [])).catch(() => {});
@@ -249,10 +249,11 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
           <div>
             <label className="text-[11px] text-gray-500">Zoning Location</label>
             <ZoneField
-              value={batch['zone_fallback'] ?? ''}
+              code={batch['zone_fallback'] ?? ''}
+              name={batch['zone_fallback_name'] ?? ''}
               zones={zones}
-              onChange={(zoneCode) => setBatch((b) => ({ ...b, zone_fallback: zoneCode }))}
-              onZoneAdded={(added) => setZones((prev) => [...prev, added].sort((a, b) => a.zone_code - b.zone_code))}
+              onChange={next => setBatch(b => ({ ...b, zone_fallback: next.code, zone_fallback_name: next.name }))}
+              onZoneAdded={added => setZones(prev => [...prev, added].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
             />
           </div>
         </div>

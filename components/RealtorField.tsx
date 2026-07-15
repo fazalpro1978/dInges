@@ -28,6 +28,10 @@ export default function RealtorField({
 
   async function saveNewRealtor() {
     if (!newName.trim()) return;
+    if (realtors.some(r => r.name.toLowerCase() === newName.trim().toLowerCase())) {
+      setSaveError(`"${newName.trim()}" already exists. Select it from the dropdown.`);
+      return;
+    }
     setSaving(true);
     setSaveError('');
     try {

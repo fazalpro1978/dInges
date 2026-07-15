@@ -88,6 +88,9 @@ export default function StructuredValidator({ payload, onValidated, onBack }: {
           if (!raw.zone_code && payload.batch['zone_fallback']) {
             raw.zone_code = payload.batch['zone_fallback'];
           }
+          if (!raw.zone && payload.batch['zone_fallback_name']) {
+            raw.zone = payload.batch['zone_fallback_name'];
+          }
           for (const f of BATCH_FIELDS) {
             raw[f.key] = payload.batch[f.key] ?? '';
           }
