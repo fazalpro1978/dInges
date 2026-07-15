@@ -22,12 +22,10 @@ export async function POST(req: NextRequest) {
       ? admin.from('batch_logs').update({ phase: 'cancelled', done_at: now }).eq('run_id', runId)
       : admin.from('batch_logs').update({ phase: 'cancelled', done_at: now }).eq('batch_id', batchId!);
 
-    const ops: Promise<unknown>[] = [batchUpdate];
-    if (runId) {
-      ops.push(admin.from('upload_runs').update({ status: 'cancelled' }).eq('id', runId));
-    }
-
-    await Promise.all(ops);
+    await Promise.all([
+      batchUpdate,
+      ...(runId ? [admin.from('upload_runs').update({ status: 'cancelled' }).eq('id', runId)] : []),
+    ]);
 
     return NextResponse.json({ cancelled: true, runId: runId ?? null, batchId: batchId ?? null });
   } catch (err) {
