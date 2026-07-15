@@ -38,6 +38,23 @@ const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
 const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
 
+// All fields shown in the Validation table — used to drive the dynamic bulk-fill toolbar.
+// Add any new field here and it will automatically appear in the toolbar when blank.
+type FieldDef = { field: string; label: string; type: 'text' | 'number' | 'select'; options?: string[]; step?: string };
+const VALIDATION_FIELDS: FieldDef[] = [
+  { field: 'property',   label: 'Property',   type: 'text' },
+  { field: 'unit_no',    label: 'Unit No.',    type: 'text' },
+  { field: 'zone_code',  label: 'Zone #',      type: 'number' },
+  { field: 'zone',       label: 'Zone',        type: 'text' },
+  { field: 'type',       label: 'Type',        type: 'select', options: TYPE_OPTIONS },
+  { field: 'config',     label: 'Config',      type: 'text' },
+  { field: 'bathrooms',  label: 'Bath',        type: 'number', step: '0.5' },
+  { field: 'kitchen',    label: 'Kitchen',     type: 'select', options: KITCHEN_OPTIONS },
+  { field: 'furnishing', label: 'Furnishing',  type: 'select', options: FURNISHING_OPTIONS },
+  { field: 'status',     label: 'Status',      type: 'text' },
+  { field: 'rent',       label: 'Rent (QAR)',  type: 'number' },
+];
+
 // ─── ConflictResolver ─────────────────────────────────────────────────────────
 
 function ConflictResolver({
@@ -107,11 +124,10 @@ export default function IngestPipeline() {
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
   const [zones, setZones] = useState<{ zone_code: number; district_name: string }[]>([]);
 
-  // Stage 2 → Validation: per-row reject + inline cell editing + bulk fill
+  // Stage 2 → Validation: per-row reject + inline cell editing + dynamic bulk fill
   const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
   const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
-  const [bulkBath, setBulkBath] = useState('');
-  const [bulkKitchen, setBulkKitchen] = useState('');
+  const [bulkFill, setBulkFill] = useState<Record<string, string>>({});
 
   // Stage 3 → staged run + Staged Analysis decisions
   const [runId, setRunId] = useState<string | null>(null);
@@ -706,49 +722,69 @@ export default function IngestPipeline() {
               </div>
             </div>
 
-            {/* Bulk fill toolbar */}
-            <div className="mb-3 flex flex-wrap gap-4 items-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-              <span className="text-xs font-semibold text-gray-500">Bulk fill:</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-600">Bath</span>
-                <input
-                  type="number" step="0.5" min="0"
-                  value={bulkBath}
-                  onChange={e => setBulkBath(e.target.value)}
-                  placeholder="0"
-                  className="w-16 border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400"
-                />
-                <button
-                  disabled={!bulkBath}
-                  onClick={() => {
-                    setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
-                      ...m, _conflictResolved: { ...m._conflictResolved, bathrooms: Number(bulkBath) },
-                    }));
-                  }}
-                  className="text-xs px-2 py-0.5 bg-gray-700 text-white rounded disabled:opacity-40 hover:bg-gray-800"
-                >Apply all</button>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-600">Kitchen</span>
-                <select
-                  value={bulkKitchen}
-                  onChange={e => setBulkKitchen(e.target.value)}
-                  className="border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400"
-                >
-                  <option value="">—</option>
-                  {KITCHEN_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                </select>
-                <button
-                  disabled={!bulkKitchen}
-                  onClick={() => {
-                    setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
-                      ...m, _conflictResolved: { ...m._conflictResolved, kitchen: bulkKitchen },
-                    }));
-                  }}
-                  className="text-xs px-2 py-0.5 bg-gray-700 text-white rounded disabled:opacity-40 hover:bg-gray-800"
-                >Apply all</button>
-              </div>
-            </div>
+            {/* Dynamic bulk-fill toolbar — shows only fields with at least one ? in this upload */}
+            {(() => {
+              const getVal = (m: MatchedRecord, field: string) =>
+                String(m._conflictResolved[field] ?? m.resolvedData[field] ?? '').trim();
+              const missingFields = VALIDATION_FIELDS.filter(f =>
+                matched.some(m => !rejectedInValidation.has(m.rowIndex) && !getVal(m, f.field))
+              );
+              if (missingFields.length === 0) return null;
+              return (
+                <div className="mb-3 flex flex-wrap gap-x-4 gap-y-2 items-center bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span className="text-xs font-semibold text-amber-700">Bulk fill missing fields:</span>
+                  {missingFields.map(f => (
+                    <div key={f.field} className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-600 font-medium">{f.label}</span>
+                      {f.type === 'select' ? (
+                        <select
+                          value={bulkFill[f.field] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, [f.field]: e.target.value }))}
+                          className="border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-amber-400"
+                        >
+                          <option value="">—</option>
+                          {f.options!.map(o => <option key={o}>{o}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          type={f.type}
+                          step={f.step}
+                          list={f.field === 'zone' ? 'zone-names-list' : undefined}
+                          value={bulkFill[f.field] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, [f.field]: e.target.value }))}
+                          placeholder="—"
+                          className="w-24 border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-amber-400"
+                        />
+                      )}
+                      <button
+                        disabled={!bulkFill[f.field]}
+                        onClick={() => {
+                          const val = bulkFill[f.field] ?? '';
+                          const isNumeric = f.field === 'zone_code' || f.field === 'bathrooms' || f.field === 'rent';
+                          const coerced: unknown = isNumeric ? Number(val) : val;
+                          // Zone auto-populate when bulk-applying one of the pair
+                          const zoneExtra = (m: MatchedRecord): Record<string, unknown> => {
+                            if (f.field === 'zone_code') {
+                              const match = zones.find(z => z.zone_code === Number(val));
+                              return match ? { zone: match.district_name } : {};
+                            }
+                            if (f.field === 'zone') {
+                              const match = zones.find(z => z.district_name.toLowerCase() === val.toLowerCase());
+                              return match ? { zone_code: match.zone_code } : {};
+                            }
+                            return {};
+                          };
+                          setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                            ...m, _conflictResolved: { ...m._conflictResolved, [f.field]: coerced, ...zoneExtra(m) },
+                          }));
+                        }}
+                        className="text-xs px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded disabled:opacity-40"
+                      >Apply all</button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
 
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="w-full text-xs min-w-[1200px]">
