@@ -105,10 +105,13 @@ export default function IngestPipeline() {
   const [excludedIdx, setExcludedIdx] = useState<Set<number>>(new Set());
   const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
+  const [zones, setZones] = useState<{ zone_code: number; district_name: string }[]>([]);
 
-  // Stage 2 → Validation: per-row reject + inline cell editing
+  // Stage 2 → Validation: per-row reject + inline cell editing + bulk fill
   const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
   const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
+  const [bulkBath, setBulkBath] = useState('');
+  const [bulkKitchen, setBulkKitchen] = useState('');
 
   // Stage 3 → staged run + Staged Analysis decisions
   const [runId, setRunId] = useState<string | null>(null);
@@ -159,6 +162,10 @@ export default function IngestPipeline() {
         .then(r => r.json())
         .then(d => setRealtors(d.realtors ?? []))
         .catch(() => {});
+      fetch('/api/zones')
+        .then(r => r.json())
+        .then(d => setZones(d.zones ?? []))
+        .catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Match failed');
     } finally {
@@ -172,9 +179,18 @@ export default function IngestPipeline() {
     const coerced: unknown = (field === 'zone_code' || field === 'bathrooms')
       ? (value === '' ? undefined : Number(value))
       : value;
+    // Auto-populate the paired zone field from the cr_zone_codes registry
+    const extra: Record<string, unknown> = {};
+    if (field === 'zone_code' && value) {
+      const match = zones.find(z => z.zone_code === Number(value));
+      if (match) extra.zone = match.district_name;
+    } else if (field === 'zone' && value) {
+      const match = zones.find(z => z.district_name.toLowerCase() === value.toLowerCase());
+      if (match) extra.zone_code = match.zone_code;
+    }
     setMatched(prev => prev.map(m =>
       m.rowIndex === rowIndex
-        ? { ...m, _conflictResolved: { ...m._conflictResolved, [field]: coerced } }
+        ? { ...m, _conflictResolved: { ...m._conflictResolved, [field]: coerced, ...extra } }
         : m,
     ));
     setEditingCell(null);
@@ -524,20 +540,33 @@ export default function IngestPipeline() {
               </button>
             </div>
 
+            <datalist id="zone-names-list">
+              {zones.map(z => <option key={z.zone_code} value={z.district_name} />)}
+            </datalist>
+
             <div className="mb-4 border border-teal-200 bg-teal-50 rounded-lg p-3">
               <p className="text-xs font-semibold text-teal-800 mb-2">Zone — bulk apply to all records</p>
               <div className="flex gap-2">
                 <input
                   type="number"
                   value={bulkZone.code}
-                  onChange={e => setBulkZone(prev => ({ ...prev, code: e.target.value }))}
+                  onChange={e => {
+                    const code = e.target.value;
+                    const match = zones.find(z => z.zone_code === Number(code));
+                    setBulkZone({ code, name: match ? match.district_name : bulkZone.name });
+                  }}
                   placeholder="Zone code (e.g. 25)"
                   className="w-32 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
                 />
                 <input
                   type="text"
+                  list="zone-names-list"
                   value={bulkZone.name}
-                  onChange={e => setBulkZone(prev => ({ ...prev, name: e.target.value }))}
+                  onChange={e => {
+                    const name = e.target.value;
+                    const match = zones.find(z => z.district_name.toLowerCase() === name.toLowerCase());
+                    setBulkZone({ name, code: match ? String(match.zone_code) : bulkZone.code });
+                  }}
                   placeholder="Zone name (e.g. Al Sadd)"
                   className="flex-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
                 />
@@ -604,18 +633,35 @@ export default function IngestPipeline() {
                       <input
                         type="number"
                         value={String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '')}
-                        onChange={e => setMatched(prev => prev.map((m, mi) => mi === i
-                          ? { ...m, _conflictResolved: { ...m._conflictResolved, zone_code: e.target.value ? Number(e.target.value) : undefined } }
-                          : m))}
+                        onChange={e => {
+                          const code = e.target.value;
+                          const match = zones.find(z => z.zone_code === Number(code));
+                          setMatched(prev => prev.map((m, mi) => mi === i ? {
+                            ...m, _conflictResolved: {
+                              ...m._conflictResolved,
+                              zone_code: code ? Number(code) : undefined,
+                              ...(match ? { zone: match.district_name } : {}),
+                            },
+                          } : m));
+                        }}
                         placeholder="Code"
                         className="w-24 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
                       />
                       <input
                         type="text"
+                        list="zone-names-list"
                         value={String(r._conflictResolved.zone ?? r.resolvedData.zone ?? '')}
-                        onChange={e => setMatched(prev => prev.map((m, mi) => mi === i
-                          ? { ...m, _conflictResolved: { ...m._conflictResolved, zone: e.target.value } }
-                          : m))}
+                        onChange={e => {
+                          const name = e.target.value;
+                          const match = zones.find(z => z.district_name.toLowerCase() === name.toLowerCase());
+                          setMatched(prev => prev.map((m, mi) => mi === i ? {
+                            ...m, _conflictResolved: {
+                              ...m._conflictResolved,
+                              zone: name,
+                              ...(match ? { zone_code: match.zone_code } : {}),
+                            },
+                          } : m));
+                        }}
                         placeholder="Zone name"
                         className="flex-1 bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
                       />
@@ -657,6 +703,50 @@ export default function IngestPipeline() {
                   onClick={() => setRejectedInValidation(new Set(matched.map(r => r.rowIndex)))}
                   className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
                 >Reject All</button>
+              </div>
+            </div>
+
+            {/* Bulk fill toolbar */}
+            <div className="mb-3 flex flex-wrap gap-4 items-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+              <span className="text-xs font-semibold text-gray-500">Bulk fill:</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-600">Bath</span>
+                <input
+                  type="number" step="0.5" min="0"
+                  value={bulkBath}
+                  onChange={e => setBulkBath(e.target.value)}
+                  placeholder="0"
+                  className="w-16 border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400"
+                />
+                <button
+                  disabled={!bulkBath}
+                  onClick={() => {
+                    setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                      ...m, _conflictResolved: { ...m._conflictResolved, bathrooms: Number(bulkBath) },
+                    }));
+                  }}
+                  className="text-xs px-2 py-0.5 bg-gray-700 text-white rounded disabled:opacity-40 hover:bg-gray-800"
+                >Apply all</button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-600">Kitchen</span>
+                <select
+                  value={bulkKitchen}
+                  onChange={e => setBulkKitchen(e.target.value)}
+                  className="border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400"
+                >
+                  <option value="">—</option>
+                  {KITCHEN_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                </select>
+                <button
+                  disabled={!bulkKitchen}
+                  onClick={() => {
+                    setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                      ...m, _conflictResolved: { ...m._conflictResolved, kitchen: bulkKitchen },
+                    }));
+                  }}
+                  className="text-xs px-2 py-0.5 bg-gray-700 text-white rounded disabled:opacity-40 hover:bg-gray-800"
+                >Apply all</button>
               </div>
             </div>
 
