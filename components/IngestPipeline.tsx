@@ -138,10 +138,8 @@ export default function IngestPipeline() {
   const [stagedRecords, setStagedRecords] = useState<StagedRecord[]>([]);
   const [recordActions, setRecordActions] = useState<Record<number, RecordDecision>>({});
 
-  // Stage 4 → REIMS Queue polling
+  // Stage 4 → REIMS Queue (manual confirmation — no auto-polling)
   const [approveResult, setApproveResult] = useState<{ approved: number; exported: number } | null>(null);
-  const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [pollCount, setPollCount] = useState(0);
   const [forceCompleting, setForceCompleting] = useState(false);
 
   // Restore stage 4 session if user navigated away mid-poll
@@ -232,7 +230,6 @@ export default function IngestPipeline() {
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
-  const [pollStatus, setPollStatus] = useState<{ total: number; acked: number } | null>(null);
 
   const forceComplete = useCallback(async () => {
     if (!runId) return;
@@ -240,46 +237,13 @@ export default function IngestPipeline() {
     try {
       const res = await fetch(`/api/runs/${runId}/force-complete`, { method: 'POST', cache: 'no-store' });
       if (res.ok) {
-        if (pollRef.current) clearInterval(pollRef.current);
         try { sessionStorage.removeItem(SESSION_KEY); } catch {}
-        setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: pollStatus?.total ?? 0 }));
+        setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: approveResult?.approved ?? 0 }));
         setStage(5);
       }
     } catch {}
     setForceCompleting(false);
-  }, [runId, pollStatus]);
-
-  const checkStatus = useCallback(async () => {
-    if (!runId) return;
-    setPollCount(n => n + 1);
-    try {
-      const res = await fetch(`/api/runs/${runId}/status`, { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json() as { status: string; exported_count: number; allAcknowledged: boolean; total: number; acked: number };
-      setPollStatus({ total: data.total ?? 0, acked: data.acked ?? 0 });
-      if (data.status === 'exported' || data.allAcknowledged) {
-        if (pollRef.current) clearInterval(pollRef.current);
-        try { sessionStorage.removeItem(SESSION_KEY); } catch {}
-        setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: data.exported_count ?? 0 }));
-        setStage(5); // Done
-      }
-    } catch {}
-  }, [runId]);
-
-  useEffect(() => {
-    if (stage !== 4 || !runId) return;
-    setPollCount(0);
-    checkStatus();
-    pollRef.current = setInterval(checkStatus, 4000);
-    // Re-check immediately when the user switches back to this tab (Chrome throttles
-    // background timers, so the 4s interval can stretch to 60s+ while the user is in REIMS)
-    const onVisible = () => { if (document.visibilityState === 'visible') checkStatus(); };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [stage, runId, checkStatus]);
+  }, [runId, approveResult]);
 
   const handleFile = useCallback(async (file: File) => {
     const ext = file.name.toLowerCase().split('.').pop() ?? '';
@@ -428,12 +392,11 @@ export default function IngestPipeline() {
   };
 
   const reset = () => {
-    if (pollRef.current) clearInterval(pollRef.current);
     try { sessionStorage.removeItem(SESSION_KEY); } catch {}
     setBatchErrorSummary([]); setBatchTotalRows(0);
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
     setRecordActions({}); setRejectedInValidation(new Set()); setEditingCell(null);
-    setApproveResult(null); setPollStatus(null);
+    setApproveResult(null);
     setFileName(''); setFileSize(0); setError(null);
     setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
   };
@@ -1033,87 +996,47 @@ export default function IngestPipeline() {
           </div>
         )}
 
-        {/* ── Stage 4: REIMS Queue (polling) ────────────────────────────── */}
-        {stage === 4 && (() => {
-          const isTimedOut  = pollCount > 75;  // ~5 min
-          const isSlowWarn  = pollCount > 30 && !isTimedOut; // ~2 min
-          return (
-            <div className={`bg-white rounded-xl border p-10 text-center max-w-2xl mx-auto ${isTimedOut ? 'border-orange-300' : 'border-gray-200'}`}>
-              {isTimedOut ? (
-                <div className="text-4xl mb-4">⚠️</div>
-              ) : (
-                <div className="w-14 h-14 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-5" />
-              )}
+        {/* ── Stage 4: REIMS Queue (manual confirmation) ────────────────── */}
+        {stage === 4 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-10 text-center max-w-2xl mx-auto">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Queued for REIMS Export</h2>
+            <p className="text-sm text-gray-500 mb-1">
+              Run <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{runId}</span>
+            </p>
+            <p className="text-sm text-gray-500 mb-8">
+              <span className="font-semibold text-blue-600">{approveResult?.approved ?? activeMatched.length}</span> records are in the vetted queue, ready for REIMS
+            </p>
 
-              <h2 className={`text-xl font-bold mb-2 ${isTimedOut ? 'text-orange-700' : 'text-gray-900'}`}>
-                {isTimedOut ? 'Still Waiting — Action Required' : 'Queued for REIMS Export'}
-              </h2>
-              <p className="text-sm text-gray-500 mb-1">
-                Run <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{runId}</span>
-              </p>
-              <p className="text-sm text-gray-500 mb-8">
-                <span className="font-semibold text-blue-600">{approveResult?.approved ?? activeMatched.length}</span> records are in the vetted queue, ready for REIMS
-              </p>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-left mb-6">
+              <p className="text-xs font-bold uppercase tracking-widest mb-2 text-blue-700">Next Step — REIMS IngestQueue</p>
+              <ol className="text-xs space-y-1.5 list-decimal list-inside text-blue-700">
+                <li>Open <span className="font-semibold">REIMS</span> and click <span className="font-mono bg-blue-100 px-1 rounded">dInges Queue</span> in the sidebar</li>
+                <li>Preview the records and click <span className="font-semibold">Import All →</span></li>
+                <li>Please confirm all records have been imported</li>
+              </ol>
+            </div>
 
-              {isTimedOut ? (
-                <div className="bg-orange-50 border border-orange-200 rounded-xl p-5 text-left mb-6">
-                  <p className="text-xs font-bold text-orange-700 uppercase tracking-widest mb-2">REIMS has not confirmed — check manually</p>
-                  <ol className="text-xs text-orange-700 space-y-1.5 list-decimal list-inside">
-                    <li>Open REIMS → dInges Queue → if records appear, click <strong>Import All</strong></li>
-                    <li>If REIMS already shows &ldquo;Import Complete&rdquo;, the pipeline is Done — click <strong>Start Over</strong> above to reset</li>
-                    <li>If REIMS shows an error, re-upload this file from the beginning</li>
-                  </ol>
-                </div>
-              ) : (
-                <div className={`${isSlowWarn ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'} border rounded-xl p-5 text-left mb-6`}>
-                  {isSlowWarn && (
-                    <p className="text-xs text-amber-700 font-semibold mb-2">Taking longer than expected — go to REIMS and check the dInges Queue</p>
-                  )}
-                  <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${isSlowWarn ? 'text-amber-700' : 'text-blue-700'}`}>Next Step — REIMS IngestQueue</p>
-                  <ol className={`text-xs space-y-1.5 list-decimal list-inside ${isSlowWarn ? 'text-amber-700' : 'text-blue-700'}`}>
-                    <li>Open <span className="font-semibold">REIMS</span> and click <span className="font-mono bg-blue-100 px-1 rounded">dInges Queue</span> in the sidebar</li>
-                    <li>Preview the records and click <span className="font-semibold">Import All →</span></li>
-                    <li>This screen will automatically advance to Done once REIMS confirms</li>
-                  </ol>
-                </div>
-              )}
-
-              <div className="flex flex-col items-center gap-2">
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <div className={`w-2 h-2 rounded-full animate-pulse ${isTimedOut ? 'bg-orange-400' : 'bg-green-400'}`} />
-                  {pollStatus
-                    ? `${pollStatus.acked} / ${pollStatus.total} records acknowledged`
-                    : 'Watching for REIMS acknowledgement…'}
-                </div>
-                <div className="flex items-center gap-4 mt-1">
-                  <button
-                    onClick={checkStatus}
-                    className="text-xs text-blue-500 hover:text-blue-700 underline"
-                  >
-                    Check now
-                  </button>
-                  {isTimedOut && (
-                    <>
-                      <button
-                        onClick={forceComplete}
-                        disabled={forceCompleting}
-                        className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors"
-                      >
-                        {forceCompleting ? 'Marking Done…' : 'Mark as Done'}
-                      </button>
-                      <button
-                        onClick={reset}
-                        className="text-xs px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition-colors"
-                      >
-                        Start Over
-                      </button>
-                    </>
-                  )}
-                </div>
+            {/* Admin / Superuser actions */}
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-[11px] text-gray-400 uppercase tracking-widest">Administrator · Superuser</p>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={forceComplete}
+                  disabled={forceCompleting}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+                >
+                  {forceCompleting ? 'Marking Done…' : 'Mark as Done'}
+                </button>
+                <button
+                  onClick={reset}
+                  className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors"
+                >
+                  Start Over
+                </button>
               </div>
             </div>
-          );
-        })()}
+          </div>
+        )}
 
         {/* ── Stage 5: Done ─────────────────────────────────────────────── */}
         {stage === 5 && approveResult && (
