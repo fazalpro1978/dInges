@@ -529,6 +529,31 @@ export default function IngestPipeline() {
               className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
             />
+
+            {/* Template download */}
+            <div className="mt-5 flex items-center justify-between rounded-lg px-4 py-3" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+              <div className="flex items-center gap-3">
+                <span className="text-xl">📋</span>
+                <div>
+                  <p className="text-sm font-semibold text-blue-900">Axiom Import Template</p>
+                  <p className="text-xs text-blue-600 mt-0.5">Pre-formatted XLSX with all required columns, sample data, and allowed-value hints</p>
+                </div>
+              </div>
+              <a
+                href="/api/units-template"
+                download="axiom-units-import-template.xlsx"
+                onClick={e => e.stopPropagation()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors"
+                style={{ background: '#0ea5e9', color: '#fff' }}
+                onMouseOver={e => (e.currentTarget.style.background = '#0284c7')}
+                onMouseOut={e => (e.currentTarget.style.background = '#0ea5e9')}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                  <path d="M12 3v12M8 11l4 4 4-4" /><path d="M20 21H4" />
+                </svg>
+                Download Template
+              </a>
+            </div>
           </div>
         )}
 
