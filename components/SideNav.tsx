@@ -61,7 +61,7 @@ function IcClose() {
 // ── Nav data ──────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { id: 'pipeline',     label: 'Ingest Pipeline',   href: '/',            icon: 'pipeline',    external: false },
+  { id: 'pipeline',     label: 'Axiom Pipeline',    href: '/',            icon: 'pipeline',    external: false },
   { id: 'batch-logs',   label: 'Batch History',     href: '/batch-logs',  icon: 'history',     external: false },
   { id: 'exceptions',   label: 'Exception Queue',   href: '/exceptions',  icon: 'exceptions',  external: false },
 ];
@@ -123,8 +123,8 @@ export default function SideNav({ open, onClose }: SideNavProps) {
               </svg>
             </div>
             <div>
-              <p className="font-bold text-sm tracking-wide" style={{ color: '#eff0f1' }}>dInges</p>
-              <p className="text-[10px] tracking-wider uppercase" style={{ color: '#7c8694' }}>Ingest Service · v1.0</p>
+              <p className="font-bold text-sm tracking-wide" style={{ color: '#eff0f1' }}>Axiom</p>
+              <p className="text-[10px] tracking-wider uppercase" style={{ color: '#7c8694' }}>Axiom · v1.0</p>
             </div>
           </div>
           <button
@@ -194,7 +194,7 @@ export default function SideNav({ open, onClose }: SideNavProps) {
                 <rect x="14" y="14" width="7" height="7" rx="1.5" />
               </svg>
             </span>
-            <span className="flex-1 truncate">Open REIMS</span>
+            <span className="flex-1 truncate">Open REOS</span>
             <IcExternal />
           </a>
         </nav>

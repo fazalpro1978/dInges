@@ -46,7 +46,7 @@ export default function TopBar({
             <path d="M20 21H4a1 1 0 01-1-1v-2a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-1 1z" />
           </svg>
         </div>
-        <span className="font-bold text-sm tracking-wide" style={{ color: '#3daee9' }}>dInges</span>
+        <span className="font-bold text-sm tracking-wide" style={{ color: '#3daee9' }}>Axiom</span>
         <span className="text-[11px] hidden sm:block" style={{ color: '#4e5a6a' }}>·</span>
         {title && (
           <span className="text-[13px] font-semibold hidden sm:block" style={{ color: '#eff0f1' }}>{title}</span>

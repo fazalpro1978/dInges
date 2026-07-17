@@ -418,7 +418,7 @@ export default function IngestPipeline() {
     <div className="min-h-screen" style={{ background: '#1b1e23' }}>
       <TopBar
         onMenuClick={openNav}
-        title="Ingest Pipeline"
+        title="Axiom Pipeline"
         subtitle="Upload · Match · Validate · Export"
         right={
           <div className="flex items-center gap-3">
@@ -1039,7 +1039,7 @@ export default function IngestPipeline() {
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-left mb-6">
               <p className="text-xs font-bold uppercase tracking-widest mb-2 text-blue-700">Next Step — REIMS IngestQueue</p>
               <ol className="text-xs space-y-1.5 list-decimal list-inside text-blue-700">
-                <li>Open <span className="font-semibold">REIMS</span> and click <span className="font-mono bg-blue-100 px-1 rounded">dInges Queue</span> in the sidebar</li>
+                <li>Open <span className="font-semibold">REOS</span> and click <span className="font-mono bg-blue-100 px-1 rounded">Axiom Queue</span> in the sidebar</li>
                 <li>Preview the records and click <span className="font-semibold">Import All →</span></li>
                 <li>Please confirm all records have been imported</li>
               </ol>

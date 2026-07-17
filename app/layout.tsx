@@ -6,7 +6,7 @@ import AppShell from '@/components/AppShell';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'dInges — Ingest Service',
+  title: 'Axiom — Ingest Service',
   description: 'Vanguard REOS · Data Ingestion & Approval Pipeline',
 };
 
