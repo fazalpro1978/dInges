@@ -18,6 +18,17 @@ html, body {
   color: var(--plasma-text);
 }
 
+/* White-background cards inherit dark text — overrides the light body color */
+.bg-white {
+  color: #111827; /* gray-900 */
+}
+
+/* Gray-50 / gray-100 content surfaces also use dark text */
+.bg-gray-50,
+.bg-gray-100 {
+  color: #1f2937; /* gray-800 */
+}
+
 @layer utilities {
   .text-balance { text-wrap: balance; }
 }
