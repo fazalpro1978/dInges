@@ -780,92 +780,92 @@ export default function IngestPipeline() {
                       `px-2 py-1.5 ${rejected ? 'opacity-40' : 'cursor-pointer hover:bg-blue-50'} ${isConflict(field) ? 'bg-purple-50' : ''} ${extra}`;
 
                     return (
-                      <tr key={r.rowIndex} className={rejected ? 'bg-red-50 text-gray-400' : 'hover:bg-gray-50'}>
-                        <td className="px-3 py-1.5 text-gray-400">{r.rowIndex + 1}</td>
+                      <tr key={r.rowIndex} className={rejected ? 'bg-red-50 opacity-50' : 'hover:bg-gray-50 text-gray-900'}>
+                        <td className="px-3 py-1.5 text-gray-400 font-medium">{r.rowIndex + 1}</td>
                         <td className="px-2 py-1.5">{actionBadge(r.action)}</td>
 
                         {/* Property */}
                         <td className={td('property')} onClick={() => startEdit('property')}>
                           {isEdit('property')
                             ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('property')} onBlur={e => handleCellEdit(r.rowIndex, 'property', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'property', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('property') ? 'text-red-400 font-semibold' : ''}>{getVal('property') || '!'}</span>}
+                            : <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>}
                         </td>
 
                         {/* Unit No */}
                         <td className={td('unit_no')} onClick={() => startEdit('unit_no')}>
                           {isEdit('unit_no')
                             ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('unit_no')} onBlur={e => handleCellEdit(r.rowIndex, 'unit_no', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'unit_no', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('unit_no') ? 'text-red-400 font-semibold' : ''}>{getVal('unit_no') || '!'}</span>}
+                            : <span className={!getVal('unit_no') ? 'text-red-500 font-bold' : 'text-blue-700 font-mono font-medium'}>{getVal('unit_no') || '!'}</span>}
                         </td>
 
                         {/* Zone # */}
                         <td className={td('zone_code')} onClick={() => startEdit('zone_code')}>
                           {isEdit('zone_code')
                             ? <input autoFocus type="number" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('zone_code')} onBlur={e => handleCellEdit(r.rowIndex, 'zone_code', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'zone_code', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('zone_code') ? 'text-amber-500 font-semibold' : ''}>{getVal('zone_code') || '?'}</span>}
+                            : <span className={!getVal('zone_code') ? 'text-amber-500 font-bold' : 'text-teal-700 font-semibold'}>{getVal('zone_code') || '?'}</span>}
                         </td>
 
                         {/* Zone */}
                         <td className={td('zone')} onClick={() => startEdit('zone')}>
                           {isEdit('zone')
                             ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('zone')} onBlur={e => handleCellEdit(r.rowIndex, 'zone', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'zone', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('zone') ? 'text-amber-500 font-semibold' : ''}>{getVal('zone') || '?'}</span>}
+                            : <span className={!getVal('zone') ? 'text-amber-500 font-bold' : 'text-teal-800'}>{getVal('zone') || '?'}</span>}
                         </td>
 
                         {/* Type (select) */}
                         <td className={td('type')} onClick={() => startEdit('type')}>
                           {isEdit('type')
                             ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('type')} onChange={e => handleCellEdit(r.rowIndex, 'type', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'type', e.target.value)}><option value="">—</option>{TYPE_OPTIONS.map(o => <option key={o}>{o}</option>)}</select>
-                            : <span className={!getVal('type') ? 'text-amber-500 font-semibold' : ''}>{getVal('type') || '?'}</span>}
+                            : <span className={!getVal('type') ? 'text-amber-500 font-bold' : 'text-violet-700 font-medium'}>{getVal('type') || '?'}</span>}
                         </td>
 
                         {/* Config */}
                         <td className={td('config')} onClick={() => startEdit('config')}>
                           {isEdit('config')
                             ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('config')} onBlur={e => handleCellEdit(r.rowIndex, 'config', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'config', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('config') ? 'text-amber-500 font-semibold' : ''}>{getVal('config') || '?'}</span>}
+                            : <span className={!getVal('config') ? 'text-amber-500 font-bold' : 'text-indigo-600 font-semibold'}>{getVal('config') || '?'}</span>}
                         </td>
 
                         {/* Bath */}
                         <td className={td('bathrooms')} onClick={() => startEdit('bathrooms')}>
                           {isEdit('bathrooms')
                             ? <input autoFocus type="number" step="0.5" min="0" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('bathrooms')} onBlur={e => handleCellEdit(r.rowIndex, 'bathrooms', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'bathrooms', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('bathrooms') ? 'text-amber-500 font-semibold' : ''}>{getVal('bathrooms') || '?'}</span>}
+                            : <span className={!getVal('bathrooms') ? 'text-amber-500 font-bold' : 'text-gray-800 font-medium'}>{getVal('bathrooms') || '?'}</span>}
                         </td>
 
                         {/* Parking (select) */}
                         <td className={td('parking')} onClick={() => startEdit('parking')}>
                           {isEdit('parking')
                             ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('parking')} onChange={e => handleCellEdit(r.rowIndex, 'parking', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'parking', e.target.value)}><option value="">—</option>{['Yes','No'].map(o => <option key={o}>{o}</option>)}</select>
-                            : <span className={!getVal('parking') ? 'text-amber-500 font-semibold' : ''}>{getVal('parking') || '?'}</span>}
+                            : <span className={!getVal('parking') ? 'text-amber-500 font-bold' : getVal('parking') === 'Yes' ? 'text-green-700 font-medium' : 'text-gray-500'}>{getVal('parking') || '?'}</span>}
                         </td>
 
                         {/* Kitchen (select) */}
                         <td className={td('kitchen')} onClick={() => startEdit('kitchen')}>
                           {isEdit('kitchen')
                             ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('kitchen')} onChange={e => handleCellEdit(r.rowIndex, 'kitchen', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'kitchen', e.target.value)}><option value="">—</option>{KITCHEN_OPTIONS.map(o => <option key={o}>{o}</option>)}</select>
-                            : <span className={!getVal('kitchen') ? 'text-amber-500 font-semibold' : ''}>{getVal('kitchen') || '?'}</span>}
+                            : <span className={!getVal('kitchen') ? 'text-amber-500 font-bold' : 'text-gray-700'}>{getVal('kitchen') || '?'}</span>}
                         </td>
 
                         {/* Furnishing (select) */}
                         <td className={td('furnishing')} onClick={() => startEdit('furnishing')}>
                           {isEdit('furnishing')
                             ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('furnishing')} onChange={e => handleCellEdit(r.rowIndex, 'furnishing', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'furnishing', e.target.value)}><option value="">—</option>{FURNISHING_OPTIONS.map(o => <option key={o}>{o}</option>)}</select>
-                            : <span className={!getVal('furnishing') ? 'text-amber-500 font-semibold' : ''}>{getVal('furnishing') || '?'}</span>}
+                            : <span className={!getVal('furnishing') ? 'text-amber-500 font-bold' : getVal('furnishing') === 'Furnished' ? 'text-green-700 font-medium' : getVal('furnishing') === 'Semi-furnished' ? 'text-amber-600 font-medium' : 'text-gray-600'}>{getVal('furnishing') || '?'}</span>}
                         </td>
 
                         {/* Status */}
                         <td className={td('status')} onClick={() => startEdit('status')}>
                           {isEdit('status')
                             ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('status')} onBlur={e => handleCellEdit(r.rowIndex, 'status', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'status', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('status') ? 'text-red-400 font-semibold' : ''}>{getVal('status') || '!'}</span>}
+                            : <span className={!getVal('status') ? 'text-red-500 font-bold' : getVal('status') === 'Available' ? 'text-green-700 font-semibold' : 'text-gray-700 font-medium'}>{getVal('status') || '!'}</span>}
                         </td>
 
                         {/* Rent */}
                         <td className={td('rent', 'text-right')} onClick={() => startEdit('rent')}>
                           {isEdit('rent')
                             ? <input autoFocus type="number" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs text-right" defaultValue={getVal('rent')} onBlur={e => handleCellEdit(r.rowIndex, 'rent', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'rent', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('rent') ? 'text-red-400 font-semibold' : ''}>{getVal('rent') ? Number(getVal('rent')).toLocaleString() : '!'}</span>}
+                            : <span className={!getVal('rent') ? 'text-red-500 font-bold' : 'text-emerald-700 font-semibold'}>{getVal('rent') ? Number(getVal('rent')).toLocaleString() : '!'}</span>}
                         </td>
 
                         {/* Accept / Reject — two explicit buttons */}
