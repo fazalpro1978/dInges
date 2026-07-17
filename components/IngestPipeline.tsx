@@ -34,6 +34,13 @@ type MatchedRecord = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function confidenceBadge(matchType: string, confidence: number) {
+  if (matchType === 'exact_code') return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dbeafe', color: '#1d4ed8' }}>EXACT</span>;
+  if (matchType === 'natural_key') return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dcfce7', color: '#15803d' }}>KEY 95%</span>;
+  if (matchType === 'fuzzy') return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#fef3c7', color: '#b45309' }}>FUZZY {Math.round(confidence * 100)}%</span>;
+  return null;
+}
+
 // Pipeline stages: 0=Upload, 1=Match&Review, 2=Validation, 3=Stage Analysis, 4=REIMS Queue, 5=Done
 const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS Queue', 'Done'];
 
@@ -141,6 +148,7 @@ export default function IngestPipeline() {
   // Stage 4 → REIMS Queue (manual confirmation — no auto-polling)
   const [approveResult, setApproveResult] = useState<{ approved: number; exported: number } | null>(null);
   const [forceCompleting, setForceCompleting] = useState(false);
+  const [schemaErrors, setSchemaErrors] = useState<Array<{ stagedId: string; rowIndex?: number; errors: { field: string; label: string; rule: string; value?: unknown }[] }>>([]);
 
   // Restore stage 4 session if user navigated away mid-poll
   const SESSION_KEY = 'dinges_pipeline_session';
@@ -382,6 +390,7 @@ export default function IngestPipeline() {
 
       const approved = approveData.approved ?? 0;
       setApproveResult({ approved, exported: 0 });
+      if (approveData.schemaErrors?.length) setSchemaErrors(approveData.schemaErrors);
       try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ savedRunId: runId, savedStage: 4, savedApproved: approved })); } catch {}
       setStage(4); // REIMS Queue
     } catch (e) {
@@ -396,7 +405,7 @@ export default function IngestPipeline() {
     setBatchErrorSummary([]); setBatchTotalRows(0);
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
     setRecordActions({}); setRejectedInValidation(new Set()); setEditingCell(null);
-    setApproveResult(null);
+    setApproveResult(null); setSchemaErrors([]);
     setFileName(''); setFileSize(0); setError(null);
     setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
   };
@@ -604,7 +613,7 @@ export default function IngestPipeline() {
 
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => (
-                <div key={i} className="border border-gray-200 rounded-lg p-3">
+                <div key={i} className={`border rounded-lg p-3 ${r.matchType === 'fuzzy' ? 'border-amber-300 bg-amber-50/20' : 'border-gray-200'}`}>
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -617,6 +626,7 @@ export default function IngestPipeline() {
                     />
                     <span className="text-xs text-gray-400 w-6">#{r.rowIndex + 1}</span>
                     {actionBadge(r.action)}
+                    {confidenceBadge(r.matchType, r.matchConfidence)}
                     <span className="font-medium text-sm truncate flex-1">{String(r.resolvedData.property ?? r.resolvedData.unit_code ?? '—')}</span>
                     <span className="text-xs text-gray-500">{String(r.resolvedData.unit_no ?? '')}</span>
                     {r.existingSnapshot && (
@@ -999,6 +1009,25 @@ export default function IngestPipeline() {
         {/* ── Stage 4: REIMS Queue (manual confirmation) ────────────────── */}
         {stage === 4 && (
           <div className="bg-white rounded-xl border border-gray-200 p-10 text-center max-w-2xl mx-auto">
+
+            {/* Schema errors — records blocked from REIMS */}
+            {schemaErrors.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-6 text-left">
+                <p className="text-xs font-bold text-red-700 uppercase tracking-widest mb-2">
+                  {schemaErrors.length} Record{schemaErrors.length > 1 ? 's' : ''} Blocked — Schema Errors
+                </p>
+                <ul className="text-xs text-red-700 space-y-1.5 list-none">
+                  {schemaErrors.map(({ stagedId, rowIndex, errors }) => (
+                    <li key={stagedId} className="flex flex-col gap-0.5">
+                      <span className="font-semibold">Row {rowIndex != null ? rowIndex + 1 : '?'}</span>
+                      <span>{errors.map(e => e.rule === 'required' ? `${e.label} missing` : `${e.label}: invalid value "${e.value}"`).join(' · ')}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-red-500 mt-3">These records were NOT sent to REIMS. Open <a href="/exceptions" className="underline font-semibold">Exception Queue</a> to review.</p>
+              </div>
+            )}
+
             <h2 className="text-xl font-bold text-gray-900 mb-2">Queued for REIMS Export</h2>
             <p className="text-sm text-gray-500 mb-1">
               Run <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{runId}</span>

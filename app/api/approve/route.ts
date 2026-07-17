@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { validateCanonical, schemaErrorSummary, type SchemaError } from '@/lib/validateCanonical';
+
+export const dynamic = 'force-dynamic';
 
 const admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,70 +32,86 @@ export async function POST(req: NextRequest) {
 
     let approvedCount = 0;
     let rejectedCount = 0;
+    const schemaErrors: { stagedId: string; rowIndex?: number; errors: SchemaError[] }[] = [];
+
+    // Fetch source file once for the whole run
+    const { data: run } = await admin
+      .from('upload_runs')
+      .select('source_file, record_count')
+      .eq('id', runId)
+      .single();
 
     for (const a of approvals) {
-      // Update staged_records status
-      const { error: updateErr } = await admin
+      // Rejections — fast path, no validation needed
+      if (a.decision === 'rejected') {
+        await admin
+          .from('staged_records')
+          .update({ status: 'rejected', reviewer_notes: a.notes ?? null, reviewed_at: now, reviewed_by: reviewer })
+          .eq('id', a.stagedId);
+        rejectedCount++;
+        continue;
+      }
+
+      // Approved — fetch staged record first so we can validate
+      const { data: staged, error: fetchErr } = await admin
+        .from('staged_records')
+        .select('resolved_data, match_type, row_index, run_id')
+        .eq('id', a.stagedId)
+        .single();
+
+      if (fetchErr || !staged) {
+        return NextResponse.json({ error: `Staged record ${a.stagedId} not found` }, { status: 404 });
+      }
+
+      const payload = a.resolvedData ?? (staged.resolved_data as Record<string, unknown>);
+      const { valid, errors } = validateCanonical(payload);
+
+      if (!valid) {
+        // Block from reaching vetted_records — mark with dedicated status so exception queue can find it
+        await admin
+          .from('staged_records')
+          .update({
+            status:         'schema_error',
+            reviewer_notes: schemaErrorSummary(errors),
+            reviewed_at:    now,
+            reviewed_by:    reviewer,
+            ...(a.resolvedData ? { resolved_data: a.resolvedData } : {}),
+          })
+          .eq('id', a.stagedId);
+
+        schemaErrors.push({ stagedId: a.stagedId, rowIndex: staged.row_index, errors });
+        rejectedCount++;
+        continue;
+      }
+
+      // Valid — update staged_records then write to vetted_records
+      await admin
         .from('staged_records')
         .update({
-          status:        a.decision,
+          status:         'approved',
           reviewer_notes: a.notes ?? null,
-          reviewed_at:   now,
-          reviewed_by:   reviewer,
+          reviewed_at:    now,
+          reviewed_by:    reviewer,
           ...(a.resolvedData ? { resolved_data: a.resolvedData } : {}),
         })
         .eq('id', a.stagedId);
 
-      if (updateErr) {
-        return NextResponse.json({ error: updateErr.message }, { status: 500 });
+      const { error: vettedErr } = await admin.from('vetted_records').insert({
+        staged_id:   a.stagedId,
+        run_id:      runId,
+        payload,
+        source_file: run?.source_file ?? null,
+        match_type:  staged.match_type,
+        approved_by: reviewer,
+      });
+
+      if (vettedErr) {
+        return NextResponse.json({ error: vettedErr.message }, { status: 500 });
       }
-
-      if (a.decision === 'approved') {
-        // Fetch the staged record to get resolved_data and match_type
-        const { data: staged, error: fetchErr } = await admin
-          .from('staged_records')
-          .select('resolved_data, match_type, run_id')
-          .eq('id', a.stagedId)
-          .single();
-
-        if (fetchErr || !staged) {
-          return NextResponse.json({ error: `Staged record ${a.stagedId} not found` }, { status: 404 });
-        }
-
-        // Fetch source file from the run
-        const { data: run } = await admin
-          .from('upload_runs')
-          .select('source_file')
-          .eq('id', runId)
-          .single();
-
-        const payload = a.resolvedData ?? (staged.resolved_data as Record<string, unknown>);
-
-        const { error: vettedErr } = await admin.from('vetted_records').insert({
-          staged_id:   a.stagedId,
-          run_id:      runId,
-          payload,
-          source_file: run?.source_file ?? null,
-          match_type:  staged.match_type,
-          approved_by: reviewer,
-        });
-
-        if (vettedErr) {
-          return NextResponse.json({ error: vettedErr.message }, { status: 500 });
-        }
-        approvedCount++;
-      } else {
-        rejectedCount++;
-      }
+      approvedCount++;
     }
 
-    // Update run counters and status
-    const { data: run } = await admin
-      .from('upload_runs')
-      .select('record_count')
-      .eq('id', runId)
-      .single();
-
+    // Update run counters
     const total = run?.record_count ?? approvals.length;
     const newStatus =
       approvedCount === 0 ? 'staged'
@@ -109,13 +128,18 @@ export async function POST(req: NextRequest) {
       .from('batch_logs')
       .update({
         phase:                'review_approve',
-        review_approve_at:    new Date().toISOString(),
+        review_approve_at:    now,
         record_count_success: approvedCount,
         record_count_failed:  rejectedCount,
       })
       .eq('run_id', runId);
 
-    return NextResponse.json({ runId, approved: approvedCount, rejected: rejectedCount });
+    return NextResponse.json({
+      runId,
+      approved:     approvedCount,
+      rejected:     rejectedCount,
+      schemaErrors: schemaErrors.length > 0 ? schemaErrors : undefined,
+    });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Approve failed' }, { status: 500 });
   }
