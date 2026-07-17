@@ -10,12 +10,14 @@ const admin = createClient(
 );
 
 export async function GET(_req: NextRequest) {
-  // Fetch records that are low-confidence fuzzy matches OR blocked by schema errors
+  // Low-confidence = fuzzy matches (confidence 0.01–0.84, match_type != 'new').
+  // New records have confidence=0 by design — not an exception.
+  // schema_error records are always included regardless of confidence.
   const { data: records, error } = await admin
     .from('staged_records')
-    .select('id, run_id, row_index, resolved_data, match_type, match_confidence, status, reviewer_notes, created_at')
-    .or('match_confidence.lt.0.85,status.eq.schema_error')
-    .order('created_at', { ascending: false })
+    .select('id, run_id, row_index, resolved_data, match_type, match_confidence, status, reviewer_notes, staged_at')
+    .or('and(match_confidence.lt.0.85,match_confidence.gt.0),reviewer_notes.like.[SCHEMA ERROR]%')
+    .order('staged_at', { ascending: false })
     .limit(300);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -28,7 +30,7 @@ export async function GET(_req: NextRequest) {
   const runIds = Array.from(new Set(records.map(r => r.run_id as string)));
   const { data: runs } = await admin
     .from('upload_runs')
-    .select('id, source_file, uploaded_by, created_at')
+    .select('id, source_file, uploaded_by, staged_at')
     .in('id', runIds);
 
   const runMap = Object.fromEntries((runs ?? []).map(r => [r.id, r]));
@@ -44,16 +46,16 @@ export async function GET(_req: NextRequest) {
       match_type:     r.match_type,
       match_confidence: r.match_confidence,
       reviewer_notes: r.reviewer_notes,
-      created_at:     r.created_at,
+      staged_at:     r.staged_at,
       property:       rd?.property ?? null,
       unit_no:        rd?.unit_no ?? null,
       type:           rd?.type ?? null,
       // Exception classification
       exception_type:
-        r.status === 'schema_error'   ? 'Schema Error'
-        : r.match_confidence < 0.85  ? `Low Confidence (${Math.round((r.match_confidence as number) * 100)}%)`
+        String(r.reviewer_notes ?? '').startsWith('[SCHEMA ERROR]') ? 'Schema Error'
+        : r.match_confidence > 0 && (r.match_confidence as number) < 0.85 ? `Low Confidence (${Math.round((r.match_confidence as number) * 100)}%)`
         : 'Flagged',
-      run: run ? { source_file: run.source_file, uploaded_by: run.uploaded_by, created_at: run.created_at } : null,
+      run: run ? { source_file: run.source_file, uploaded_by: run.uploaded_by, staged_at: run.staged_at } : null,
     };
   });
 

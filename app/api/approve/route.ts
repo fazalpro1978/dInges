@@ -67,12 +67,14 @@ export async function POST(req: NextRequest) {
       const { valid, errors } = validateCanonical(payload);
 
       if (!valid) {
-        // Block from reaching vetted_records — mark with dedicated status so exception queue can find it
+        // Block from reaching vetted_records.
+        // DB check constraint only allows 'rejected' — we prefix reviewer_notes
+        // with [SCHEMA ERROR] so the exception queue can distinguish from manual rejects.
         await admin
           .from('staged_records')
           .update({
-            status:         'schema_error',
-            reviewer_notes: schemaErrorSummary(errors),
+            status:         'rejected',
+            reviewer_notes: `[SCHEMA ERROR] ${schemaErrorSummary(errors)}`,
             reviewed_at:    now,
             reviewed_by:    reviewer,
             ...(a.resolvedData ? { resolved_data: a.resolvedData } : {}),

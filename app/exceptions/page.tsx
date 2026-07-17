@@ -13,7 +13,7 @@ interface ExceptionRecord {
   match_type: string;
   match_confidence: number;
   reviewer_notes: string | null;
-  created_at: string;
+  staged_at: string;
   property: string | null;
   unit_no: string | null;
   type: string | null;
