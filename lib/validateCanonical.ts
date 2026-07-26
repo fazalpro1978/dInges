@@ -16,7 +16,7 @@ export interface SchemaResult {
 /**
  * Validates a resolved payload against the canonical schema defined in importSchema.ts.
  * Called at the API boundary in /api/approve before writing to vetted_records —
- * ensures validation happens exactly once, inside dInges, never repeated in REIMS.
+ * ensures validation happens exactly once, inside AXIOM, never repeated in REIMS.
  */
 export function validateCanonical(payload: Record<string, unknown>): SchemaResult {
   const errors: SchemaError[] = [];

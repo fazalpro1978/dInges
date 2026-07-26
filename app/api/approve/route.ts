@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { validateCanonical, schemaErrorSummary, type SchemaError } from '@/lib/validateCanonical';
+import { requireAuth } from '@/lib/serverAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,9 @@ const admin = createClient(
 );
 
 export async function POST(req: NextRequest) {
+  const auth = await requireAuth(req);
+  if (!auth.ok) return auth.response;
+
   try {
     const { runId, approvals, reviewedBy } = (await req.json()) as {
       runId: string;

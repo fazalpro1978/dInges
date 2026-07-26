@@ -6,8 +6,8 @@ import AppShell from '@/components/AppShell';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Axiom — Ingest Service',
-  description: 'Vanguard REOS · Data Ingestion & Approval Pipeline',
+  title: 'AXIOM — Ingest Service',
+  description: 'AXIOM · Data Ingestion & Approval Pipeline',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

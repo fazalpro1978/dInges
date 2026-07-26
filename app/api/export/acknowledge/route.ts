@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireApiKey, requireAuth } from '@/lib/serverAuth';
 
 const admin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,6 +9,12 @@ const admin = createClient(
 );
 
 export async function POST(req: NextRequest) {
+  // Accept either a user JWT (browser) or the server-to-server API key (REIMS)
+  const apiKeyOk = requireApiKey(req);
+  if (!apiKeyOk) {
+    const auth = await requireAuth(req);
+    if (!auth.ok) return auth.response;
+  }
   try {
     const { ids } = (await req.json()) as { ids: string[] };
     if (!Array.isArray(ids) || ids.length === 0) {

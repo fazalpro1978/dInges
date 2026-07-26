@@ -115,7 +115,7 @@ export default function SideNav({ open, onClose }: SideNavProps) {
         {/* Panel header */}
         <div className="flex items-center justify-between px-5 py-4 shrink-0" style={{ borderBottom: '1px solid #2e3440' }}>
           <div className="flex items-center gap-2.5">
-            {/* dInges wordmark */}
+            {/* AXIOM wordmark */}
             <div className="flex items-center justify-center w-8 h-8 rounded-lg" style={{ background: 'rgba(61,174,233,0.15)', border: '1px solid rgba(61,174,233,0.3)' }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="#3daee9" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                 <path d="M12 3v12M8 11l4 4 4-4" />
@@ -123,8 +123,8 @@ export default function SideNav({ open, onClose }: SideNavProps) {
               </svg>
             </div>
             <div>
-              <p className="font-bold text-sm tracking-wide" style={{ color: '#eff0f1' }}>Axiom</p>
-              <p className="text-[10px] tracking-wider uppercase" style={{ color: '#7c8694' }}>Axiom · v1.0</p>
+              <p className="font-bold text-sm tracking-wide" style={{ color: '#eff0f1' }}>AXIOM</p>
+              <p className="text-[10px] tracking-wider uppercase" style={{ color: '#7c8694' }}>AXIOM · v1.0</p>
             </div>
           </div>
           <button

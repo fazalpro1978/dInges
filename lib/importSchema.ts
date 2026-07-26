@@ -14,7 +14,7 @@ export const ENUM_FURNISHING    = ['Furnished', 'Semi-Furnished', 'Unfurnished']
 export const ENUM_STATUS        = ['Available', 'Not Available', 'Reserved', 'Under Preparation'] as const;
 export const ENUM_KITCHEN       = ['Open', 'Closed', 'Yes', 'Pantry'] as const;
 
-// Duplicated from REIMS' lib/propertySchema.ts (UNIT_CONFIGS_FULL) — dInges is a
+// Duplicated from REIMS' lib/propertySchema.ts (UNIT_CONFIGS_FULL) — AXIOM is a
 // separate deployable app with no access to REIMS' source tree, so this list must
 // be kept in sync manually if REIMS ever adds/removes a configuration.
 export const UNIT_CONFIGS_FULL: string[] = [
@@ -25,7 +25,7 @@ export const UNIT_CONFIGS_FULL: string[] = [
   '4 BHK + Maid', '4 BHK + Maid (Private)', '5 BHK + Maid (Private)', 'Penthouse',
 ];
 
-// ─── Master schema — fixed order, exactly as specified (keys = dInges' native field names) ──
+// ─── Master schema — fixed order, exactly as specified (keys = AXIOM' native field names) ──
 
 export const MASTER_FIELDS: MasterFieldDef[] = [
   {
@@ -112,7 +112,7 @@ export function suggestMapping(headers: string[]): Record<string, string | null>
   const normHeaders = headers.map((h) => ({ raw: h, norm: normalizeHeader(h) }));
   const result: Record<string, string | null> = {};
   for (const field of MASTER_FIELDS) {
-    // Deliberately excludes field.key: dInges' keys are short native field names
+    // Deliberately excludes field.key: AXIOM' keys are short native field names
     // (e.g. 'type', 'status', 'config') that collide with generic source headers
     // holding unrelated values (a "Type" column full of "1 BHK" config strings,
     // not the type enum). Every key already has an equivalent entry in aliases
@@ -210,9 +210,9 @@ export function castAndValidateField(field: MasterFieldDef, rawValue: unknown): 
   }
 }
 
-// ─── Final translation to dInges' native record shape ─────────────────────────
+// ─── Final translation to AXIOM' native record shape ─────────────────────────
 
-/** values keys: master field keys + batch field keys + 'zone' + 'unit_code' (already cast). Output keys equal dInges' own field names directly (no DB-column translation needed). */
+/** values keys: master field keys + batch field keys + 'zone' + 'unit_code' (already cast). Output keys equal AXIOM' own field names directly (no DB-column translation needed). */
 export function toIngestRecord(values: Record<string, unknown>): Record<string, unknown> {
   const record: Record<string, unknown> = {};
   for (const f of [...MASTER_FIELDS, ...BATCH_FIELDS]) {

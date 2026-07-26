@@ -2,7 +2,7 @@
 
 import React from 'react';
 
-// KDE Plasma Breeze Dark topbar for dInges
+// KDE Plasma Breeze Dark topbar for AXIOM
 
 export default function TopBar({
   onMenuClick,

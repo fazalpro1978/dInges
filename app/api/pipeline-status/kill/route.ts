@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/serverAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,9 @@ const admin = createClient(
 );
 
 export async function POST(req: NextRequest) {
+  const auth = await requireAuth(req);
+  if (!auth.ok) return auth.response;
+
   try {
     const { runId, batchId } = (await req.json()) as { runId?: string; batchId?: string };
     if (!runId && !batchId) return NextResponse.json({ error: 'runId or batchId required' }, { status: 400 });

@@ -334,7 +334,7 @@ function PipelineStatusPanel({
                 Stalled in REIMS Queue — records sent but REIMS has not acknowledged
               </p>
               <p className="text-[10px] text-gray-500 mb-2">
-                Open REIMS and check the <strong>dInges Queue</strong> tab. If the queue is empty, the REIMS connection may need to be re-established.
+                Open REIMS and check the <strong>AXIOM Queue</strong> tab. If the queue is empty, the REIMS connection may need to be re-established.
               </p>
               <div className="space-y-1.5">
                 {status.stalled.map(issue => (

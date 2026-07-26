@@ -151,7 +151,7 @@ export default function IngestPipeline() {
   const [schemaErrors, setSchemaErrors] = useState<Array<{ stagedId: string; rowIndex?: number; errors: { field: string; label: string; rule: string; value?: unknown }[] }>>([]);
 
   // Restore stage 4 session if user navigated away mid-poll
-  const SESSION_KEY = 'dinges_pipeline_session';
+  const SESSION_KEY = 'axiom_pipeline_session';
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(SESSION_KEY);
