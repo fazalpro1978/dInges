@@ -74,15 +74,22 @@ const ROLE_LABEL: Record<string, string> = {
   staff: 'Staff', agent: 'Agent', public: 'Public',
 };
 
+const ROLE_COLOR: Record<string, string> = {
+  superuser:     '#c9a84c',
+  administrator: '#3daee9',
+  staff:         '#10b981',
+  agent:         '#8b5cf6',
+  public:        '#64748b',
+};
+
 export default function SideNav({ open, onClose }: SideNavProps) {
   const pathname = usePathname();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
 
-  const initials = user
-    ? user.fullName.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()
-    : '?';
+  const initials    = user ? user.fullName.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase() : '?';
   const displayName = user?.fullName ?? '—';
   const roleLabel   = user ? (ROLE_LABEL[user.role] ?? user.role) : '—';
+  const roleColor   = ROLE_COLOR[user?.role ?? ''] ?? '#3daee9';
 
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -214,14 +221,31 @@ export default function SideNav({ open, onClose }: SideNavProps) {
 
         {/* Bottom */}
         <div className="shrink-0 px-3 pt-3 pb-5" style={{ borderTop: '1px solid #2e3440' }}>
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: 'rgba(61,174,233,0.12)', border: '1px solid rgba(61,174,233,0.25)' }}>
-              <span className="text-xs font-bold" style={{ color: '#3daee9' }}>{initials}</span>
+          <div
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors group"
+            style={{ cursor: 'default' }}
+            onMouseOver={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'}
+            onMouseOut={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
+          >
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: `${roleColor}18`, border: `1px solid ${roleColor}30` }}>
+              <span className="text-xs font-bold" style={{ color: roleColor }}>{initials}</span>
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium truncate" style={{ color: '#eff0f1' }}>{displayName}</p>
-              <p className="text-[11px] truncate" style={{ color: '#7c8694' }}>Privé Group · {roleLabel}</p>
+              <p className="text-[11px] truncate" style={{ color: `${roleColor}bb` }}>{roleLabel}</p>
             </div>
+            <button
+              onClick={signOut}
+              title="Sign out"
+              className="w-6 h-6 rounded-md flex items-center justify-center transition-all shrink-0"
+              style={{ color: '#4e5a6a' }}
+              onMouseOver={e => { (e.currentTarget as HTMLElement).style.color = '#ef4444'; (e.currentTarget as HTMLElement).style.background = 'rgba(239,68,68,0.08)'; }}
+              onMouseOut={e => { (e.currentTarget as HTMLElement).style.color = '#4e5a6a'; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+              </svg>
+            </button>
           </div>
         </div>
       </aside>
