@@ -2,6 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
+import { useAuth } from '../contexts/AuthContext';
 
 // ── KDE Plasma Breeze Dark palette ────────────────────────────────────────────
 // Panel bg:   #1e2228   Border: #2e3440   Accent: #3daee9
@@ -68,8 +69,20 @@ const NAV_ITEMS = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+const ROLE_LABEL: Record<string, string> = {
+  superuser: 'Superuser', administrator: 'Administrator',
+  staff: 'Staff', agent: 'Agent', public: 'Public',
+};
+
 export default function SideNav({ open, onClose }: SideNavProps) {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  const initials = user
+    ? user.fullName.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()
+    : '?';
+  const displayName = user?.fullName ?? '—';
+  const roleLabel   = user ? (ROLE_LABEL[user.role] ?? user.role) : '—';
 
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -194,7 +207,7 @@ export default function SideNav({ open, onClose }: SideNavProps) {
                 <rect x="14" y="14" width="7" height="7" rx="1.5" />
               </svg>
             </span>
-            <span className="flex-1 truncate">Open REOS</span>
+            <span className="flex-1 truncate">Open Vanguard REOS</span>
             <IcExternal />
           </a>
         </nav>
@@ -203,11 +216,11 @@ export default function SideNav({ open, onClose }: SideNavProps) {
         <div className="shrink-0 px-3 pt-3 pb-5" style={{ borderTop: '1px solid #2e3440' }}>
           <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg">
             <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: 'rgba(61,174,233,0.12)', border: '1px solid rgba(61,174,233,0.25)' }}>
-              <span className="text-xs font-bold" style={{ color: '#3daee9' }}>A</span>
+              <span className="text-xs font-bold" style={{ color: '#3daee9' }}>{initials}</span>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate" style={{ color: '#eff0f1' }}>Administrator</p>
-              <p className="text-[11px] truncate" style={{ color: '#7c8694' }}>Privé Group · Admin</p>
+              <p className="text-sm font-medium truncate" style={{ color: '#eff0f1' }}>{displayName}</p>
+              <p className="text-[11px] truncate" style={{ color: '#7c8694' }}>Privé Group · {roleLabel}</p>
             </div>
           </div>
         </div>

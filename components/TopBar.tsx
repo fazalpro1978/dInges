@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useAuth } from '../contexts/AuthContext';
 
 // KDE Plasma Breeze Dark topbar for AXIOM
 
@@ -15,6 +16,11 @@ export default function TopBar({
   subtitle?: string;
   right?: React.ReactNode;
 }) {
+  const { user } = useAuth();
+  const initials = user
+    ? user.fullName.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()
+    : 'A';
+
   return (
     <header
       className="sticky top-0 z-30 flex items-center gap-4 px-5 py-0"
@@ -66,7 +72,7 @@ export default function TopBar({
 
         {/* Avatar */}
         <div className="w-7 h-7 rounded-full flex items-center justify-center cursor-default" style={{ background: 'rgba(61,174,233,0.12)', border: '1px solid rgba(61,174,233,0.25)' }}>
-          <span className="text-xs font-bold select-none" style={{ color: '#3daee9' }}>A</span>
+          <span className="text-xs font-bold select-none" style={{ color: '#3daee9' }}>{initials}</span>
         </div>
       </div>
     </header>
