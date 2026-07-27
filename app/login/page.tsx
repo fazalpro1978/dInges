@@ -1,44 +1,44 @@
 'use client';
 
 import { useState, useEffect, FormEvent, Suspense } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { useRouter, useSearchParams } from 'next/navigation';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
+import { useAuth } from '../../contexts/AuthContext';
+import supabase from '../../lib/supabaseClient';
 
 function LoginForm() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const reason       = searchParams.get('reason');
+  const { user, loading } = useAuth();
 
   const [email,    setEmail   ] = useState('');
   const [password, setPassword] = useState('');
-  const [loading,  setLoading ] = useState(false);
+  const [busy,     setBusy    ] = useState(false);
   const [error,    setError   ] = useState('');
   const [showPw,   setShowPw  ] = useState(false);
 
+  // When auth context resolves a valid user, navigate away
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) router.replace('/');
-    });
-  }, [router]);
+    if (!loading && user) router.replace('/');
+  }, [user, loading, router]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    setLoading(true);
-    const { error: authErr } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    setLoading(false);
+    setBusy(true);
+    const { error: authErr } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    setBusy(false);
     if (authErr) {
-      setError(authErr.message === 'Invalid login credentials'
-        ? 'Incorrect email or password.'
-        : authErr.message);
-    } else {
-      router.replace('/');
+      setError(
+        authErr.message === 'Invalid login credentials'
+          ? 'Incorrect email or password.'
+          : authErr.message,
+      );
     }
+    // On success, onAuthStateChange in AuthContext sets user → useEffect above navigates
   }
 
   return (
@@ -74,9 +74,7 @@ function LoginForm() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 className="w-full rounded-lg px-3.5 py-2.5 text-sm outline-none transition-colors"
-                style={{
-                  background: '#141720', border: '1px solid #2e3440', color: '#eff0f1',
-                }}
+                style={{ background: '#141720', border: '1px solid #2e3440', color: '#eff0f1' }}
                 onFocus={e => { e.target.style.borderColor = '#3daee9'; }}
                 onBlur={e => { e.target.style.borderColor = '#2e3440'; }}
               />
@@ -121,15 +119,15 @@ function LoginForm() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={busy}
               className="w-full font-bold text-sm py-2.5 rounded-lg transition-colors mt-1"
               style={{
-                background: loading ? '#1e2228' : '#3daee9',
-                color: loading ? '#555' : '#0d1117',
-                opacity: loading ? 0.6 : 1,
+                background: busy ? '#1e2228' : '#3daee9',
+                color: busy ? '#555' : '#0d1117',
+                opacity: busy ? 0.6 : 1,
               }}
             >
-              {loading ? 'Signing in…' : 'Sign In'}
+              {busy ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
         </div>

@@ -3,13 +3,9 @@
 import {
   createContext, useContext, useEffect, useState, useCallback, ReactNode,
 } from 'react';
-import { createClient, User } from '@supabase/supabase-js';
+import { User } from '@supabase/supabase-js';
 import { useRouter, usePathname } from 'next/navigation';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
+import supabase from '../lib/supabaseClient';
 
 export type UserRole = 'superuser' | 'administrator' | 'staff' | 'agent' | 'public';
 
