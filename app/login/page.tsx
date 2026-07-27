@@ -50,7 +50,7 @@ function LoginForm() {
       <div className="w-full max-w-[360px] relative">
         <div className="text-center mb-8">
           <p className="text-[#3daee9] text-[9px] font-bold uppercase tracking-[0.28em] mb-1">AXIOM</p>
-          <h1 className="text-white text-xl font-bold">Ingest Service</h1>
+          <h1 className="text-white text-xl font-bold">Data Ingestion Pipeline</h1>
           <p className="text-[#7c8694] text-xs mt-1">Superusers &amp; Administrators only</p>
         </div>
 
