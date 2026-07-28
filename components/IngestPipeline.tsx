@@ -8,6 +8,7 @@ import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
 import ZoneField, { type ZoneEntry } from './ZoneField';
 import { Badge, actionBadge } from './StructuredImportShared';
+import supabase from '../lib/supabaseClient';
 
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
 
@@ -361,6 +362,9 @@ export default function IngestPipeline() {
     setIsProcessing(true);
     setError(null);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Session expired — please sign in again');
+
       const approvals = activeMatched
         .map(r => {
           const stagedRec = stagedRecords.find(sr => sr.row_index === r.rowIndex);
@@ -382,7 +386,10 @@ export default function IngestPipeline() {
 
       const approveRes = await fetch('/api/approve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({ runId, approvals }),
       });
       const approveData = await approveRes.json();
