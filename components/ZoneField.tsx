@@ -1,9 +1,8 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 export type ZoneEntry = { zone_code: number; district_name: string; municipality?: string };
 
-// Programmatic display format: "Zone [N] — [District Name]"
 export function fmtZone(z: ZoneEntry) {
   return `Zone ${z.zone_code} — ${z.district_name}`;
 }
@@ -32,54 +31,76 @@ export default function ZoneField({
   onChange: (next: { code: string; name: string }) => void;
   onZoneAdded: (z: ZoneEntry) => void;
 }) {
-  const [adding, setAdding]             = useState(false);
+  const [open, setOpen]               = useState(false);
+  const [search, setSearch]           = useState('');
+  const [adding, setAdding]           = useState(false);
   const [municipality, setMunicipality] = useState('');
-  const [customMuni, setCustomMuni]     = useState('');
-  const [newCode, setNewCode]           = useState('');
-  const [newName, setNewName]           = useState('');
-  const [saving, setSaving]             = useState(false);
-  const [saveError, setSaveError]       = useState('');
+  const [customMuni, setCustomMuni]   = useState('');
+  const [newCode, setNewCode]         = useState('');
+  const [newName, setNewName]         = useState('');
+  const [saving, setSaving]           = useState(false);
+  const [saveError, setSaveError]     = useState('');
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchRef    = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch('');
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+  }, [open]);
 
   const codeNum      = code ? Number(code) : NaN;
   const selectedZone = zones.find(z => z.zone_code === codeNum);
 
-  const effectiveMuni   = municipality === '__new__' ? customMuni.trim() : municipality;
-  const newCodeNum      = Number(newCode);
-  const canSave         = !!(effectiveMuni && Number.isInteger(newCodeNum) && newCodeNum > 0 && newName.trim());
-  const municipalities  = Array.from(new Set(zones.map(z => z.municipality).filter(Boolean))).sort() as string[];
+  // Filter by zone code OR district name
+  const filtered = zones.filter(z =>
+    String(z.zone_code).includes(search) ||
+    z.district_name.toLowerCase().includes(search.toLowerCase()) ||
+    (z.municipality ?? '').toLowerCase().includes(search.toLowerCase())
+  );
 
-  function handleSelect(val: string) {
-    if (!val) { onChange({ code: '', name: '' }); return; }
-    const z = zones.find(z => z.zone_code === Number(val));
-    if (z) onChange({ code: String(z.zone_code), name: z.district_name });
+  const effectiveMuni  = municipality === '__new__' ? customMuni.trim() : municipality;
+  const newCodeNum     = Number(newCode);
+  const canSave        = !!(effectiveMuni && Number.isInteger(newCodeNum) && newCodeNum > 0 && newName.trim());
+  const municipalities = Array.from(new Set(zones.map(z => z.municipality).filter(Boolean))).sort() as string[];
+
+  function pickZone(z: ZoneEntry) {
+    onChange({ code: String(z.zone_code), name: z.district_name });
+    setOpen(false);
+    setSearch('');
+  }
+
+  function clearSelection() {
+    onChange({ code: '', name: '' });
+    setOpen(false);
+    setSearch('');
   }
 
   function openAddForm() {
-    setNewCode('');
-    setNewName('');
-    setMunicipality('');
-    setCustomMuni('');
-    setSaveError('');
-    setAdding(true);
+    setNewCode(''); setNewName(''); setMunicipality(''); setCustomMuni(''); setSaveError('');
+    setAdding(true); setOpen(false); setSearch('');
   }
 
   async function saveZone() {
-    if (!canSave) {
-      setSaveError('Municipality, Zone Number, and District Name are all required.');
-      return;
-    }
+    if (!canSave) { setSaveError('Municipality, Zone Number, and District Name are all required.'); return; }
     if (zones.some(z => z.zone_code === newCodeNum)) {
-      setSaveError(`Zone code ${newCodeNum} is already registered. Choose a different number.`);
-      return;
+      setSaveError(`Zone code ${newCodeNum} is already registered. Choose a different number.`); return;
     }
-    // Strip any "Zone N -" prefix the user may have typed
     const cleanName = newName.trim().replace(/^zone\s*\d+\s*[-–—]\s*/i, '').trim();
     if (zones.some(z => z.district_name.toLowerCase() === cleanName.toLowerCase())) {
-      setSaveError(`"${cleanName}" is already registered under a different zone code.`);
-      return;
+      setSaveError(`"${cleanName}" is already registered under a different zone code.`); return;
     }
-    setSaving(true);
-    setSaveError('');
+    setSaving(true); setSaveError('');
     try {
       const res = await fetch('/api/zones', {
         method: 'POST',
@@ -100,19 +121,21 @@ export default function ZoneField({
   }
 
   return (
-    <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-      {/* Zone selector dropdown */}
-      <div className="flex items-center gap-2">
-        <select
-          value={code}
-          onChange={e => handleSelect(e.target.value)}
-          className="flex-1 bg-white border border-gray-300 rounded px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
+    <div className="border border-gray-200 rounded-lg p-3 bg-gray-50" ref={containerRef}>
+
+      {/* Combobox trigger row */}
+      <div className="relative flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => { setOpen(o => !o); setSearch(''); }}
+          className="flex-1 flex items-center justify-between bg-white border border-gray-300 rounded px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500 hover:border-teal-400 transition-colors text-left"
         >
-          <option value="">— Select zone —</option>
-          {zones.map(z => (
-            <option key={z.zone_code} value={z.zone_code}>{fmtZone(z)}</option>
-          ))}
-        </select>
+          <span className={code ? 'text-gray-800' : 'text-gray-400'}>
+            {selectedZone ? fmtZone(selectedZone) : '— Select zone —'}
+          </span>
+          <span className="text-gray-400 ml-2">{open ? '▲' : '▼'}</span>
+        </button>
+
         <button
           type="button"
           onClick={() => adding ? setAdding(false) : openAddForm()}
@@ -121,19 +144,93 @@ export default function ZoneField({
         >
           {adding ? '✕' : '+ Add Zone'}
         </button>
+
+        {/* Dropdown */}
+        {open && (
+          <div className="absolute top-full left-0 z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden" style={{ minWidth: 0 }}>
+            {/* Search input */}
+            <div className="p-2 border-b border-gray-100">
+              <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                <svg className="w-3 h-3 text-gray-400 shrink-0" fill="none" viewBox="0 0 16 16">
+                  <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M10.5 10.5l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <input
+                  ref={searchRef}
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') { setOpen(false); setSearch(''); }
+                    if (e.key === 'Enter' && filtered.length === 1) pickZone(filtered[0]);
+                  }}
+                  placeholder="Search by zone name or number…"
+                  className="flex-1 bg-transparent text-xs text-gray-800 placeholder-gray-400 focus:outline-none min-w-0"
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch('')} className="text-gray-400 hover:text-gray-600 text-xs leading-none">✕</button>
+                )}
+              </div>
+            </div>
+
+            {/* Options */}
+            <div className="max-h-48 overflow-y-auto">
+              {code && (
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 border-b border-gray-100 italic"
+                >
+                  — Clear selection —
+                </button>
+              )}
+
+              {filtered.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-gray-400 italic">No zones match &ldquo;{search}&rdquo;</p>
+              ) : (
+                filtered.map(z => (
+                  <button
+                    key={z.zone_code}
+                    type="button"
+                    onClick={() => pickZone(z)}
+                    className={`w-full text-left px-3 py-2 text-xs hover:bg-teal-50 transition-colors ${
+                      z.zone_code === codeNum ? 'bg-teal-50 text-teal-700 font-semibold' : 'text-gray-800'
+                    }`}
+                  >
+                    <span className="font-medium">{fmtZone(z)}</span>
+                    {z.municipality && (
+                      <span className="block text-[10px] text-gray-400 mt-0.5">{z.municipality}</span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Register new from within dropdown */}
+            <div className="border-t border-gray-100 p-2">
+              <button
+                type="button"
+                onClick={openAddForm}
+                className="w-full text-xs text-teal-700 hover:text-teal-900 hover:bg-teal-50 rounded px-2 py-1.5 text-left transition-colors font-medium"
+              >
+                + Register new zone
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Selected zone display */}
-      {selectedZone && (
-        <p className="text-[11px] text-teal-700 mt-1 font-medium">{fmtZone(selectedZone)}{selectedZone.municipality ? ` · ${selectedZone.municipality}` : ''}</p>
+      {/* Selected zone hint */}
+      {selectedZone && !open && (
+        <p className="text-[11px] text-teal-700 mt-1 font-medium">
+          {fmtZone(selectedZone)}{selectedZone.municipality ? ` · ${selectedZone.municipality}` : ''}
+        </p>
       )}
 
-      {/* Inline Add Zone form — mirrors Code Registry ZoneInlineAdd */}
+      {/* Inline add zone form */}
       {adding && (
         <div className="mt-2 border border-teal-200 rounded-lg bg-teal-50 p-3 space-y-2.5">
           <p className="text-[11px] font-bold text-teal-800 uppercase tracking-wide">Register New Zone</p>
 
-          {/* Municipality */}
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wide mb-1">Municipality *</label>
             <select
@@ -157,7 +254,6 @@ export default function ZoneField({
             )}
           </div>
 
-          {/* Zone Number — user-assigned, no auto-increment */}
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wide mb-1">Zone Number *</label>
             <input
@@ -171,7 +267,6 @@ export default function ZoneField({
             <p className="text-[10px] text-gray-400 mt-0.5">Administrator-assigned. Must be unique — not auto-generated.</p>
           </div>
 
-          {/* District / Zone Name */}
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wide mb-1">District / Zone Name *</label>
             <input
