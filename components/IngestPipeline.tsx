@@ -787,10 +787,10 @@ export default function IngestPipeline() {
               <table className="w-full text-xs min-w-[1200px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold">
-                    <th className="px-3 py-2 text-left w-8">#</th>
-                    <th className="px-2 py-2 text-left">Match</th>
-                    <th className="px-2 py-2 text-left min-w-[120px]">Property</th>
-                    <th className="px-2 py-2 text-left w-16">Unit No.</th>
+                    <th className="px-3 py-2 text-left w-8 sticky left-0 z-20 bg-gray-50">#</th>
+                    <th className="px-2 py-2 text-left w-10 sticky left-8 z-20 bg-gray-50">Match</th>
+                    <th className="px-2 py-2 text-left min-w-[130px] sticky left-[88px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Property</th>
+                    <th className="px-2 py-2 text-left w-16 sticky left-[218px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Unit No.</th>
                     <th className="px-2 py-2 text-left w-14">Zone #</th>
                     <th className="px-2 py-2 text-left min-w-[100px]">Zone</th>
                     <th className="px-2 py-2 text-left w-20">Type</th>
@@ -814,20 +814,21 @@ export default function IngestPipeline() {
                     const td        = (field: string, extra = '') =>
                       `px-2 py-1.5 ${rejected ? 'opacity-40' : 'cursor-pointer hover:bg-blue-50'} ${isConflict(field) ? 'bg-purple-50' : ''} ${extra}`;
 
+                    const bgRow = rejected ? 'bg-red-50' : 'bg-white hover:bg-gray-50';
                     return (
-                      <tr key={r.rowIndex} className={rejected ? 'bg-red-50 opacity-50' : 'hover:bg-gray-50 text-gray-900'}>
-                        <td className="px-3 py-1.5 text-gray-400 font-medium">{r.rowIndex + 1}</td>
-                        <td className="px-2 py-1.5">{actionBadge(r.action)}</td>
+                      <tr key={r.rowIndex} className={`${rejected ? 'opacity-50' : 'text-gray-900'}`}>
+                        <td className={`px-3 py-1.5 text-gray-400 font-medium sticky left-0 z-10 ${bgRow}`}>{r.rowIndex + 1}</td>
+                        <td className={`px-2 py-1.5 sticky left-8 z-10 ${bgRow}`}>{actionBadge(r.action)}</td>
 
-                        {/* Property */}
-                        <td className={td('property')} onClick={() => startEdit('property')}>
+                        {/* Property — sticky */}
+                        <td className={`${td('property')} sticky left-[88px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`} onClick={() => startEdit('property')}>
                           {isEdit('property')
                             ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('property')} onBlur={e => handleCellEdit(r.rowIndex, 'property', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'property', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
                             : <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>}
                         </td>
 
-                        {/* Unit No */}
-                        <td className={td('unit_no')} onClick={() => startEdit('unit_no')}>
+                        {/* Unit No — sticky */}
+                        <td className={`${td('unit_no')} sticky left-[218px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`} onClick={() => startEdit('unit_no')}>
                           {isEdit('unit_no')
                             ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('unit_no')} onBlur={e => handleCellEdit(r.rowIndex, 'unit_no', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'unit_no', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
                             : <span className={!getVal('unit_no') ? 'text-red-500 font-bold' : 'text-blue-700 font-mono font-medium'}>{getVal('unit_no') || '!'}</span>}
@@ -931,6 +932,65 @@ export default function IngestPipeline() {
               <span><span className="text-amber-500 font-semibold">?</span> = value not set / inferred</span>
               <span><span className="bg-purple-100 text-purple-700 px-1 rounded">purple</span> = conflict field</span>
             </div>
+
+            {/* ── Extended Fields Panel — REIMS Export ──────────────────────── */}
+            {(() => {
+              const accepted = matched.filter(r => !rejectedInValidation.has(r.rowIndex));
+              const getV = (r: typeof matched[0], f: string) => String(r._conflictResolved[f] ?? r.resolvedData[f] ?? '');
+              const boolCell = (val: string) => {
+                const yes = val === 'true' || val === '1' || val?.toLowerCase() === 'yes';
+                return yes
+                  ? <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold"><span className="w-3.5 h-3.5 rounded-sm bg-emerald-100 border border-emerald-400 flex items-center justify-center text-[9px]">✓</span>Yes</span>
+                  : <span className="text-gray-300">—</span>;
+              };
+              const hasAnyExtended = accepted.some(r =>
+                getV(r,'floor') || getV(r,'area_sqft') || getV(r,'maid_room') || getV(r,'wifi')
+              );
+              return (
+                <div className="mt-6 border border-blue-100 rounded-xl overflow-hidden">
+                  <div className="bg-blue-50 px-4 py-2.5 flex items-center justify-between border-b border-blue-100">
+                    <div>
+                      <span className="text-xs font-bold text-blue-800 uppercase tracking-wider">Extended Fields — REIMS Export</span>
+                      <span className="ml-2 text-[11px] text-blue-500">Non-mandatory fields slated for Unit Details on import</span>
+                    </div>
+                    {!hasAnyExtended && (
+                      <span className="text-[11px] text-blue-400 italic">No extended field data extracted from this document</span>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs min-w-[640px]">
+                      <thead>
+                        <tr className="bg-blue-50/60 border-b border-blue-100 text-blue-600 font-semibold">
+                          <th className="px-3 py-2 text-left w-8 sticky left-0 bg-blue-50/60">#</th>
+                          <th className="px-2 py-2 text-left min-w-[130px] sticky left-8 bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Property</th>
+                          <th className="px-2 py-2 text-left w-20 sticky left-[178px] bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Unit No.</th>
+                          <th className="px-2 py-2 text-left w-16">Floor</th>
+                          <th className="px-2 py-2 text-left w-24">Size (sqm)</th>
+                          <th className="px-2 py-2 text-left w-24">Maid Room</th>
+                          <th className="px-2 py-2 text-left w-16">WiFi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-blue-50">
+                        {accepted.map((r, i) => (
+                          <tr key={r.rowIndex} className="hover:bg-blue-50/40 text-gray-700">
+                            <td className="px-3 py-1.5 text-gray-400 sticky left-0 bg-white">{i + 1}</td>
+                            <td className="px-2 py-1.5 font-semibold text-gray-900 sticky left-8 bg-white shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'property') || <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5 font-mono text-blue-700 sticky left-[178px] bg-white shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'unit_no') || <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5">{getV(r,'floor') ? <span className="text-gray-800 font-medium">{getV(r,'floor')}</span> : <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5">{getV(r,'area_sqft') ? <span className="text-gray-800 font-medium">{getV(r,'area_sqft')} sqm</span> : <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5">{boolCell(getV(r,'maid_room'))}</td>
+                            <td className="px-2 py-1.5">{boolCell(getV(r,'wifi'))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="bg-blue-50/40 px-4 py-2 border-t border-blue-100 text-[11px] text-blue-400">
+                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. These fields populate Unit Details → Classification and Amenities in REIMS on import.
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="mt-6 flex justify-between items-center">
               <button

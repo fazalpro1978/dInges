@@ -10,7 +10,7 @@ Extract ALL unit/property records from the provided document.
 Return ONLY a JSON array of objects. Each object must use these exact field names:
 unit_code, property, unit_no, zone, zone_code, type, config, furnishing, kitchen,
 status, rent, service_charges, deposit_amount, agency_fee, listing_type,
-bedrooms, bathrooms, parking, floor, area_sqft, realtor_name, realtor_moci,
+bedrooms, bathrooms, parking, floor, area_sqft, maid_room, wifi, realtor_name, realtor_moci,
 moci_contract_status, moci_contract_number, legal_duration,
 contract_start_date, contract_end_date, location_map_url, notes
 
@@ -50,6 +50,10 @@ Normalisation rules:
 - rent: numbers only, no currency — strip "QAR", "QR", commas, ".00", "/ month", contract term text in parentheses (e.g. "QR 6,000 / month (1 year contract)" → 6000; "QAR 6,500.00" → 6500)
 - dates: YYYY-MM-DD format (for contract dates etc.; status dates use dd/mm/yy as above)
 - realtor_name: The COMPANY or BROKERAGE name that owns/manages the listing. Look for a dedicated "Company", "Agent", "Broker", "Real Estate" column or the document issuer name (e.g. "Al Emadi Enterprises" from the document header/logo/title). NEVER put a person's first name or watchman/caretaker name here (e.g. "Hussein", "Mohamed", "Azeez" are watchman names — not realtors). If no company name is identifiable, omit realtor_name entirely.
+- maid_room: true | false — set true when Room Type / config contains "+Maid" or "Maid" suffix (e.g. "2BR+Maid", "3BR+Maid"). When true, also strip "+Maid" from the config value so config stores only the BHK part (e.g. "2 BHK").
+- wifi: true | false — set true when a WIFI / WiFi / Wi-Fi column value is "Yes" or "YES". Set false when "No" or absent.
+- area_sqft: numeric size from "Size Sq.", "Size (sqm)", "Area", "Sq.m" column — store the number as-is (label says sqft but we treat it as sqm for Qatar properties).
+- floor: numeric floor number from "Floor", "Fl." column — integer only.
 - Watchman / Caretaker / Contact column (labelled "Watchman Number", "Watchman No.", "Caretaker", "Contact", "Supervisor" or similar): This is NOT the realtor. Extract as notes in format "Contact: {Name} {Phone}" (e.g. "Contact: Hussein 51838959"). Do NOT put this in realtor_name.
 - property: The BUILDING or PROPERTY name — e.g. "C25 Al Waab", "E-A3 Airport", "V35 Meisameer". The "Bldg. Code / Area" or "Building Code" column is the property field. The document issuer name (e.g. "Al Emadi Enterprises") is the REALTOR, not the property. Do not confuse the two.
 - Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, BALCONY, VIEW columns, Viewing Time column
