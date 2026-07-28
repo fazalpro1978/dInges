@@ -47,9 +47,12 @@ Normalisation rules:
   * "Awaiting Activation on {dd/mm/yy}" — when a date is present in the status cell; format date as dd/mm/yy (e.g. "Awaiting Activation on 03/07/26")
   * Skip the entire row if a property-level status is "FULL" with no unit data
 - listing_type: Rent | Sale
-- rent: numbers only, no currency — strip "QAR", commas, ".00" (e.g. "QAR 6,500.00" → 6500)
+- rent: numbers only, no currency — strip "QAR", "QR", commas, ".00", "/ month", contract term text in parentheses (e.g. "QR 6,000 / month (1 year contract)" → 6000; "QAR 6,500.00" → 6500)
 - dates: YYYY-MM-DD format (for contract dates etc.; status dates use dd/mm/yy as above)
-- Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, booking agent names, BALCONY, VIEW columns
+- realtor_name: The COMPANY or BROKERAGE name that owns/manages the listing. Look for a dedicated "Company", "Agent", "Broker", "Real Estate" column or the document issuer name (e.g. "Al Emadi Enterprises" from the document header/logo/title). NEVER put a person's first name or watchman/caretaker name here (e.g. "Hussein", "Mohamed", "Azeez" are watchman names — not realtors). If no company name is identifiable, omit realtor_name entirely.
+- Watchman / Caretaker / Contact column (labelled "Watchman Number", "Watchman No.", "Caretaker", "Contact", "Supervisor" or similar): This is NOT the realtor. Extract as notes in format "Contact: {Name} {Phone}" (e.g. "Contact: Hussein 51838959"). Do NOT put this in realtor_name.
+- property: The BUILDING or PROPERTY name — e.g. "C25 Al Waab", "E-A3 Airport", "V35 Meisameer". The "Bldg. Code / Area" or "Building Code" column is the property field. The document issuer name (e.g. "Al Emadi Enterprises") is the REALTOR, not the property. Do not confuse the two.
+- Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, BALCONY, VIEW columns, Viewing Time column
 - If a field is not present in the source, omit it entirely (do not include null values)
 - For multi-column layouts (units side by side), extract each unit as a separate record
 
