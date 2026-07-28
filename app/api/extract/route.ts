@@ -29,6 +29,7 @@ Normalisation rules:
   * Strip area/size notation only: "5- (362 sqm)" → "5". Keep alphanumeric IDs as-is.
   * If the only identifier is a serial/row number (1, 2, 3...), use that number.
   * Never omit this field.
+  * COMMA/AMPERSAND MULTI-UNIT EXPANSION (CRITICAL): If a unit_no cell contains multiple flat/unit numbers separated by commas, ampersands (&), or both (e.g. "Flat No. 103,105,106,203,205,303,403,404,405,503,505" or "Flat 7, 15 & 20" or "Flat 12 & 37"), you MUST expand this into SEPARATE individual records — one record per flat/unit number. Every expanded record inherits ALL shared attributes from that row (property, zone, zone_code, type, config, furnishing, rent, status, realtor_name, etc.). For example: "Flat 7, 15 & 20" with rent 5500 → three records: unit_no "Flat 7", unit_no "Flat 15", unit_no "Flat 20", each with rent 5500 and all other fields identical. This is the most important extraction rule — failure to expand means missing records.
 - type: Apartment | Villa | Office | Studio
   * Infer from unit_no: "APT." prefix → Apartment; "V"/"VIL" prefix → Villa
   * OFFICE / AL KHOR OFFICE → Office; STUDIO → Studio; bare number → Apartment default
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 8096,
+        max_tokens: 16000,
         messages: [{
           role: 'user',
           content: [
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 8096,
+        max_tokens: 16000,
         messages: [{
           role: 'user',
           content: [
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 8096,
+        max_tokens: 16000,
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}`,
