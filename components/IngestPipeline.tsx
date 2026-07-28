@@ -653,7 +653,12 @@ export default function IngestPipeline() {
                     {actionBadge(r.action)}
                     {confidenceBadge(r.matchType, r.matchConfidence)}
                     <span className="font-medium text-sm truncate flex-1">{String(r.resolvedData.property ?? r.resolvedData.unit_code ?? '—')}</span>
-                    <span className="text-xs text-gray-500">{String(r.resolvedData.unit_no ?? '')}</span>
+                    {r.resolvedData.unit_no ? (
+                      <span className="inline-flex items-center gap-1 shrink-0 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+                        <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide">Unit</span>
+                        <span className="text-xs font-bold text-blue-700 font-mono">{String(r.resolvedData.unit_no)}</span>
+                      </span>
+                    ) : null}
                     {r.existingSnapshot && (
                       <span className="text-xs text-gray-400 hidden sm:inline">
                         was: {r.existingSnapshot.status} · QAR {r.existingSnapshot.rent?.toLocaleString()}
