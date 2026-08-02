@@ -197,7 +197,7 @@ export default function SideNav({ open, onClose }: SideNavProps) {
 
           {/* External: open REIMS */}
           <a
-            href="https://reims-sigma.vercel.app"
+            href="https://reims.propertyscape.io"
             target="_blank"
             rel="noopener noreferrer"
             onClick={onClose}
