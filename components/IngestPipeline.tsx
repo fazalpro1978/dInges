@@ -153,31 +153,48 @@ export default function IngestPipeline() {
 
   // Restore pipeline session if user navigated away mid-flow
   const SESSION_KEY = 'axiom_pipeline_session';
+  const FILE_KEY    = 'axiom_pending_file';
   useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(SESSION_KEY);
-      if (!saved) return;
-      const s = JSON.parse(saved);
-      if (s.savedStage === 4 && s.savedRunId) {
-        setRunId(s.savedRunId);
-        setApproveResult({ approved: s.savedApproved ?? 0, exported: 0 });
-        setStage(4);
-      } else if (s.savedStage >= 1 && s.savedStage <= 3 && s.savedMatched?.length) {
-        setFileName(s.savedFileName ?? '');
-        setFileSize(s.savedFileSize ?? 0);
-        setMatched(s.savedMatched);
-        setSummary(s.savedSummary ?? { new: 0, update: 0, conflict: 0, total: 0 });
-        setExcludedIdx(new Set(s.savedExcludedIdx ?? []));
-        setRejectedInValidation(new Set(s.savedRejectedInValidation ?? []));
-        setBulkRealtor(s.savedBulkRealtor ?? { name: '', moci: '' });
-        setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
-        setRecordActions(s.savedRecordActions ?? {});
-        if (s.savedRunId) setRunId(s.savedRunId);
-        setStage(s.savedStage);
-        fetch('/api/realtors').then(r => r.json()).then(d => setRealtors(d.realtors ?? [])).catch(() => {});
-        fetch('/api/zones').then(r => r.json()).then(d => setZones(d.zones ?? [])).catch(() => {});
-      }
-    } catch {}
+    (async () => {
+      try {
+        const saved = sessionStorage.getItem(SESSION_KEY);
+        if (saved) {
+          const s = JSON.parse(saved);
+          if (s.savedStage === 4 && s.savedRunId) {
+            setRunId(s.savedRunId);
+            setApproveResult({ approved: s.savedApproved ?? 0, exported: 0 });
+            setStage(4);
+          } else if (s.savedStage >= 1 && s.savedStage <= 3 && s.savedMatched?.length) {
+            setFileName(s.savedFileName ?? '');
+            setFileSize(s.savedFileSize ?? 0);
+            setMatched(s.savedMatched);
+            setSummary(s.savedSummary ?? { new: 0, update: 0, conflict: 0, total: 0 });
+            setExcludedIdx(new Set(s.savedExcludedIdx ?? []));
+            setRejectedInValidation(new Set(s.savedRejectedInValidation ?? []));
+            setBulkRealtor(s.savedBulkRealtor ?? { name: '', moci: '' });
+            setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
+            setRecordActions(s.savedRecordActions ?? {});
+            if (s.savedRunId) setRunId(s.savedRunId);
+            setStage(s.savedStage);
+            fetch('/api/realtors').then(r => r.json()).then(d => setRealtors(d.realtors ?? [])).catch(() => {});
+            fetch('/api/zones').then(r => r.json()).then(d => setZones(d.zones ?? [])).catch(() => {});
+          }
+          return;
+        }
+        // Restore mapping sub-stage (stage 0 + structuredStage='mapping')
+        const raw = sessionStorage.getItem(FILE_KEY);
+        if (raw) {
+          const { dataUrl, name, size } = JSON.parse(raw);
+          const res  = await fetch(dataUrl);
+          const blob = await res.blob();
+          const file = new File([blob], name, { type: blob.type });
+          setFileName(name);
+          setFileSize(size ?? blob.size);
+          setPendingFile(file);
+          setStructuredStage('mapping');
+        }
+      } catch {}
+    })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -234,6 +251,7 @@ export default function IngestPipeline() {
       setStructuredStage('idle');
       setPendingFile(null);
       setMappedPayload(null);
+      try { sessionStorage.removeItem(FILE_KEY); } catch {}
       setStage(1);
 
       fetch('/api/realtors')
@@ -296,6 +314,14 @@ export default function IngestPipeline() {
       setFileSize(file.size);
       setPendingFile(file);
       setStructuredStage('mapping');
+      // Persist file so navigation-away doesn't lose the mapping screen
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          sessionStorage.setItem(FILE_KEY, JSON.stringify({ dataUrl: e.target?.result, name: file.name, size: file.size }));
+        } catch {}
+      };
+      reader.readAsDataURL(file);
       return;
     }
 
@@ -443,6 +469,7 @@ export default function IngestPipeline() {
 
   const reset = () => {
     try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+    try { sessionStorage.removeItem(FILE_KEY); } catch {}
     setBatchErrorSummary([]); setBatchTotalRows(0);
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
     setRecordActions({}); setRejectedInValidation(new Set()); setEditingCell(null);
