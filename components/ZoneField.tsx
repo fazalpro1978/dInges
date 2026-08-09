@@ -42,7 +42,9 @@ export default function ZoneField({
   const [saveError, setSaveError]     = useState('');
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef   = useRef<HTMLButtonElement>(null);
   const searchRef    = useRef<HTMLInputElement>(null);
+  const [dropUp, setDropUp] = useState(false);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -58,6 +60,15 @@ export default function ZoneField({
   useEffect(() => {
     if (open) searchRef.current?.focus();
   }, [open]);
+
+  function toggleOpen() {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setDropUp(window.innerHeight - rect.bottom < 240);
+    }
+    setOpen(o => !o);
+    setSearch('');
+  }
 
   const codeNum      = code ? Number(code) : NaN;
   const selectedZone = zones.find(z => z.zone_code === codeNum);
@@ -127,7 +138,8 @@ export default function ZoneField({
       <div className="relative flex items-center gap-2">
         <button
           type="button"
-          onClick={() => { setOpen(o => !o); setSearch(''); }}
+          ref={triggerRef}
+          onClick={toggleOpen}
           className="flex-1 flex items-center justify-between bg-white border border-gray-300 rounded px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500 hover:border-teal-400 transition-colors text-left"
         >
           <span className={code ? 'text-gray-800' : 'text-gray-400'}>
@@ -147,7 +159,7 @@ export default function ZoneField({
 
         {/* Dropdown */}
         {open && (
-          <div className="absolute top-full left-0 z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden" style={{ minWidth: 0 }}>
+          <div className={`absolute ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'} left-0 z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden`} style={{ minWidth: 0 }}>
             {/* Search input */}
             <div className="p-2 border-b border-gray-100">
               <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded px-2 py-1">
