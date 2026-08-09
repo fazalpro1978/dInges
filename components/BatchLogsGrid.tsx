@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import TopBar from './TopBar';
 import { useNav } from './AppShell';
+import supabase from '../lib/supabaseClient';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -468,9 +469,13 @@ export default function BatchLogsGrid() {
     setReinstateToast(null);
     setReinstateToastIsError(false);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
       const res  = await fetch('/api/pipeline-status/reinstate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({ runId }),
       });
       const data = await res.json() as { reinstated?: number; message?: string; error?: string };
@@ -512,9 +517,13 @@ export default function BatchLogsGrid() {
     setKillToastIsError(false);
     setConfirmKillId(null);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
       const res  = await fetch('/api/pipeline-status/kill', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
         body: JSON.stringify({ runId: runId ?? undefined, batchId }),
       });
       const data = await res.json() as { cancelled?: boolean; error?: string };
