@@ -20,16 +20,22 @@ export async function POST(req: NextRequest) {
 
     const now = new Date().toISOString();
 
-    // Kill the batch_log entry — prefer run_id match (covers all logs for the run),
-    // fall back to batch_id for old entries where run_id is null.
-    const batchUpdate = runId
-      ? admin.from('batch_logs').update({ phase: 'cancelled', done_at: now }).eq('run_id', runId)
-      : admin.from('batch_logs').update({ phase: 'cancelled', done_at: now }).eq('batch_id', batchId!);
+    // batch_id is the canonical unique key for batch_logs — always use it.
+    // run_id is only used to also cancel the upload_runs row when available.
+    const { error: batchErr, count } = await admin
+      .from('batch_logs')
+      .update({ phase: 'cancelled', done_at: now })
+      .eq('batch_id', batchId!)
+      .select('batch_id', { count: 'exact', head: true });
 
-    await Promise.all([
-      batchUpdate,
-      ...(runId ? [admin.from('upload_runs').update({ status: 'cancelled' }).eq('id', runId)] : []),
-    ]);
+    if (batchErr) throw new Error(batchErr.message);
+    if ((count ?? 0) === 0) {
+      return NextResponse.json({ error: `No batch_log found for batch_id ${batchId}` }, { status: 404 });
+    }
+
+    if (runId) {
+      await admin.from('upload_runs').update({ status: 'cancelled' }).eq('id', runId);
+    }
 
     return NextResponse.json({ cancelled: true, runId: runId ?? null, batchId: batchId ?? null });
   } catch (err) {

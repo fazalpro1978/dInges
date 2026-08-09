@@ -531,6 +531,13 @@ export default function BatchLogsGrid() {
         setKillToast(data.error ?? `HTTP ${res.status}`);
         setKillToastIsError(true);
       } else {
+        // Optimistically remove from health panel immediately
+        setPipelineStatus(prev => prev ? {
+          ...prev,
+          abandoned: prev.abandoned.filter(i => i.batch_id !== batchId),
+          stalled:   prev.stalled.filter(i   => i.batch_id !== batchId),
+          failed:    prev.failed.filter(i     => i.batch_id !== batchId),
+        } : prev);
         setKillToast('Run cancelled and removed from the pipeline health panel.');
         await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
       }
