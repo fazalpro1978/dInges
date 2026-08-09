@@ -111,6 +111,8 @@ function IssueRow({
   killing,
   onMarkDone,
   markingDone,
+  selected,
+  onSelect,
 }: {
   issue: PipelineIssue;
   type: 'abandoned' | 'stalled' | 'failed';
@@ -120,12 +122,22 @@ function IssueRow({
   killing?: boolean;
   onMarkDone?: (runId: string) => void;
   markingDone?: boolean;
+  selected?: boolean;
+  onSelect?: (batchId: string) => void;
 }) {
   const [confirmKill, setConfirmKill] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);
   const age = timeAgo(type === 'stalled' && issue.review_approve_at ? issue.review_approve_at : issue.created_at);
   return (
-    <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-white border border-gray-100 shadow-sm">
+    <div className={`flex items-center gap-3 py-2 px-3 rounded-lg border shadow-sm transition-colors ${selected ? 'bg-orange-50 border-orange-200' : 'bg-white border-gray-100'}`}>
+      {onSelect && (
+        <input
+          type="checkbox"
+          checked={selected ?? false}
+          onChange={() => onSelect(issue.batch_id)}
+          className="shrink-0 w-3.5 h-3.5 accent-orange-500 cursor-pointer"
+        />
+      )}
       <span className="font-mono text-[10px] text-gray-400 w-20 shrink-0">{shortId(issue.batch_id)}</span>
       <span className="text-xs text-gray-800 font-medium truncate flex-1" title={issue.file_name}>{issue.file_name}</span>
       <span className="text-[10px] text-gray-400 shrink-0">{issue.record_count_total} records</span>
@@ -216,6 +228,8 @@ function PipelineStatusPanel({
   killingId,
   onMarkDone,
   markingDoneId,
+  onBulkKill,
+  onBulkReinstate,
   toast,
   toastIsError,
 }: {
@@ -229,10 +243,45 @@ function PipelineStatusPanel({
   killingId: string | null;
   onMarkDone: (runId: string) => void;
   markingDoneId: string | null;
+  onBulkKill: (items: Array<{ runId: string | null; batchId: string }>) => Promise<void>;
+  onBulkReinstate: (items: Array<{ runId: string; batchId: string }>) => Promise<void>;
   toast: string | null;
   toastIsError: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded]       = useState(false);
+  const [selected, setSelected]       = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy]       = useState(false);
+
+  // Clear selection when status refreshes
+  useEffect(() => { setSelected(new Set()); }, [status]);
+
+  const actionable = [...(status?.abandoned ?? []), ...(status?.stalled ?? [])];
+  const selectedList = actionable.filter(i => selected.has(i.batch_id));
+  const requeableSelected = selectedList.filter(i => !!(status?.abandoned.find(a => a.batch_id === i.batch_id)) && i.run_id);
+
+  function toggleOne(batchId: string) {
+    setSelected(prev => { const s = new Set(prev); s.has(batchId) ? s.delete(batchId) : s.add(batchId); return s; });
+  }
+  function toggleSection(issues: PipelineIssue[]) {
+    const ids = issues.map(i => i.batch_id);
+    const allOn = ids.every(id => selected.has(id));
+    setSelected(prev => { const s = new Set(prev); ids.forEach(id => allOn ? s.delete(id) : s.add(id)); return s; });
+  }
+
+  async function bulkKill() {
+    if (!selectedList.length || bulkBusy) return;
+    setBulkBusy(true);
+    await onBulkKill(selectedList.map(i => ({ runId: i.run_id, batchId: i.batch_id })));
+    setSelected(new Set());
+    setBulkBusy(false);
+  }
+  async function bulkReinstate() {
+    if (!requeableSelected.length || bulkBusy) return;
+    setBulkBusy(true);
+    await onBulkReinstate(requeableSelected.map(i => ({ runId: i.run_id!, batchId: i.batch_id })));
+    setSelected(new Set());
+    setBulkBusy(false);
+  }
 
   const totalIssues = (status?.abandoned.length ?? 0) + (status?.stalled.length ?? 0) + (status?.failed.length ?? 0);
   const allHealthy  = !loading && status !== null && totalIssues === 0;
@@ -305,12 +354,53 @@ function PipelineStatusPanel({
       {expanded && status && totalIssues > 0 && (
         <div className="border-t border-orange-100 px-4 py-3 space-y-4">
 
+          {/* Bulk action bar */}
+          {selected.size > 0 && (
+            <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-900 border border-gray-700">
+              <span className="text-xs text-gray-300 font-medium shrink-0">{selected.size} selected</span>
+              <div className="flex items-center gap-2 ml-auto">
+                {requeableSelected.length > 0 && (
+                  <button
+                    onClick={bulkReinstate}
+                    disabled={bulkBusy}
+                    className="text-[11px] font-semibold px-3 py-1 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white transition-colors"
+                  >
+                    {bulkBusy ? 'Processing…' : `Re-queue ${requeableSelected.length} →`}
+                  </button>
+                )}
+                <button
+                  onClick={bulkKill}
+                  disabled={bulkBusy}
+                  className="text-[11px] font-semibold px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white transition-colors"
+                >
+                  {bulkBusy ? 'Processing…' : `Kill ${selected.size} ✕`}
+                </button>
+                <button
+                  onClick={() => setSelected(new Set())}
+                  disabled={bulkBusy}
+                  className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-1 transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
           {status.abandoned.length > 0 && (
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-orange-700 mb-1.5">
-                Abandoned — session ended before records reached REIMS
-              </p>
-              <p className="text-[10px] text-gray-500 mb-2">
+              <div className="flex items-center gap-2 mb-1.5">
+                <input
+                  type="checkbox"
+                  checked={status.abandoned.length > 0 && status.abandoned.every(i => selected.has(i.batch_id))}
+                  ref={el => { if (el) el.indeterminate = status.abandoned.some(i => selected.has(i.batch_id)) && !status.abandoned.every(i => selected.has(i.batch_id)); }}
+                  onChange={() => toggleSection(status.abandoned)}
+                  className="w-3.5 h-3.5 accent-orange-500 cursor-pointer"
+                />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-700">
+                  Abandoned — session ended before records reached REIMS
+                </p>
+              </div>
+              <p className="text-[10px] text-gray-500 mb-2 ml-5">
                 Records are staged but were never approved. Click <strong>Re-queue</strong> to auto-approve and push them to the REIMS vetted queue.
               </p>
               <div className="space-y-1.5">
@@ -323,6 +413,8 @@ function PipelineStatusPanel({
                     reinstating={reinstatingId === issue.run_id}
                     onKill={onKill}
                     killing={killingId === issue.batch_id}
+                    selected={selected.has(issue.batch_id)}
+                    onSelect={toggleOne}
                   />
                 ))}
               </div>
@@ -331,10 +423,19 @@ function PipelineStatusPanel({
 
           {status.stalled.length > 0 && (
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700 mb-1.5">
-                Stalled in REIMS Queue — records sent but REIMS has not acknowledged
-              </p>
-              <p className="text-[10px] text-gray-500 mb-2">
+              <div className="flex items-center gap-2 mb-1.5">
+                <input
+                  type="checkbox"
+                  checked={status.stalled.length > 0 && status.stalled.every(i => selected.has(i.batch_id))}
+                  ref={el => { if (el) el.indeterminate = status.stalled.some(i => selected.has(i.batch_id)) && !status.stalled.every(i => selected.has(i.batch_id)); }}
+                  onChange={() => toggleSection(status.stalled)}
+                  className="w-3.5 h-3.5 accent-orange-500 cursor-pointer"
+                />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700">
+                  Stalled in REIMS Queue — records sent but REIMS has not acknowledged
+                </p>
+              </div>
+              <p className="text-[10px] text-gray-500 mb-2 ml-5">
                 Open REIMS and check the <strong>AXIOM Queue</strong> tab. If the queue is empty, the REIMS connection may need to be re-established.
               </p>
               <div className="space-y-1.5">
@@ -347,6 +448,8 @@ function PipelineStatusPanel({
                     killing={killingId === issue.batch_id}
                     onMarkDone={onMarkDone}
                     markingDone={markingDoneId === issue.run_id}
+                    selected={selected.has(issue.batch_id)}
+                    onSelect={toggleOne}
                   />
                 ))}
               </div>
@@ -550,6 +653,50 @@ export default function BatchLogsGrid() {
     }
   }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
 
+  const bulkKillRuns = useCallback(async (items: Array<{ runId: string | null; batchId: string }>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    };
+    const results = await Promise.allSettled(items.map(({ runId, batchId }) =>
+      fetch('/api/pipeline-status/kill', {
+        method: 'POST', headers,
+        body: JSON.stringify({ runId: runId ?? undefined, batchId }),
+      })
+    ));
+    const failed = results.filter(r => r.status === 'rejected').length;
+    // Optimistically remove all from panel
+    setPipelineStatus(prev => prev ? {
+      ...prev,
+      abandoned: prev.abandoned.filter(i => !items.some(x => x.batchId === i.batch_id)),
+      stalled:   prev.stalled.filter(i   => !items.some(x => x.batchId === i.batch_id)),
+    } : prev);
+    setKillToast(failed ? `${items.length - failed} killed, ${failed} failed.` : `${items.length} run${items.length !== 1 ? 's' : ''} killed.`);
+    setKillToastIsError(failed > 0);
+    setTimeout(() => { setKillToast(null); setKillToastIsError(false); }, 10000);
+    await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+
+  const bulkReinstateRuns = useCallback(async (items: Array<{ runId: string; batchId: string }>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    };
+    const results = await Promise.allSettled(items.map(({ runId }) =>
+      fetch('/api/pipeline-status/reinstate', {
+        method: 'POST', headers,
+        body: JSON.stringify({ runId }),
+      })
+    ));
+    const failed = results.filter(r => r.status === 'rejected').length;
+    setReinstateToast(failed ? `${items.length - failed} re-queued, ${failed} failed.` : `${items.length} run${items.length !== 1 ? 's' : ''} re-queued. REIMS will pick them up shortly.`);
+    setReinstateToastIsError(failed > 0);
+    setTimeout(() => { setReinstateToast(null); setReinstateToastIsError(false); }, 10000);
+    await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+
   useEffect(() => {
     loadPipelineStatus();
   }, [loadPipelineStatus]);
@@ -605,6 +752,8 @@ export default function BatchLogsGrid() {
           killingId={killingId}
           onMarkDone={markDone}
           markingDoneId={markingDoneId}
+          onBulkKill={bulkKillRuns}
+          onBulkReinstate={bulkReinstateRuns}
           toast={reinstateToast ?? killToast}
           toastIsError={reinstateToastIsError || killToastIsError}
         />
