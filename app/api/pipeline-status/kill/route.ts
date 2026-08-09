@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     // run_id is only used to also cancel the upload_runs row when available.
     const { data: updated, error: batchErr } = await admin
       .from('batch_logs')
-      .update({ phase: 'cancelled', done_at: now })
+      .update({ phase: 'killed', done_at: now })
       .eq('batch_id', batchId!)
       .select('batch_id');
 

@@ -14,7 +14,7 @@ type BatchLog = {
   run_id:                string | null;
   file_name:             string;
   uploaded_by:           string;
-  phase:                 'uploaded' | 'review_approve' | 'done' | 'failed' | 'cancelled';
+  phase:                 'uploaded' | 'review_approve' | 'done' | 'failed' | 'killed';
   record_count_total:    number;
   record_count_success:  number;
   record_count_failed:   number;
@@ -55,7 +55,7 @@ const PHASE_META: Record<string, { label: string; cls: string }> = {
   review_approve: { label: 'Review & Approve', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
   done:           { label: 'Done',             cls: 'bg-green-50 text-green-700 border-green-200' },
   failed:         { label: 'Failed',           cls: 'bg-red-50 text-red-700 border-red-200' },
-  cancelled:      { label: 'Cancelled',        cls: 'bg-gray-50 text-gray-500 border-gray-200' },
+  killed:         { label: 'Killed',            cls: 'bg-gray-50 text-gray-500 border-gray-200' },
 };
 
 function PhasePill({ phase }: { phase: string }) {
