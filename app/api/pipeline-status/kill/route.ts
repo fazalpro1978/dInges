@@ -22,14 +22,14 @@ export async function POST(req: NextRequest) {
 
     // batch_id is the canonical unique key for batch_logs — always use it.
     // run_id is only used to also cancel the upload_runs row when available.
-    const { error: batchErr, count } = await admin
+    const { data: updated, error: batchErr } = await admin
       .from('batch_logs')
       .update({ phase: 'cancelled', done_at: now })
       .eq('batch_id', batchId!)
-      .select('batch_id', { count: 'exact', head: true });
+      .select('batch_id');
 
     if (batchErr) throw new Error(batchErr.message);
-    if ((count ?? 0) === 0) {
+    if (!updated || updated.length === 0) {
       return NextResponse.json({ error: `No batch_log found for batch_id ${batchId}` }, { status: 404 });
     }
 
