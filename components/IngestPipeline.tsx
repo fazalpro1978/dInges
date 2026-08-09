@@ -151,21 +151,59 @@ export default function IngestPipeline() {
   const [forceCompleting, setForceCompleting] = useState(false);
   const [schemaErrors, setSchemaErrors] = useState<Array<{ stagedId: string; rowIndex?: number; errors: { field: string; label: string; rule: string; value?: unknown }[] }>>([]);
 
-  // Restore stage 4 session if user navigated away mid-poll
+  // Restore pipeline session if user navigated away mid-flow
   const SESSION_KEY = 'axiom_pipeline_session';
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(SESSION_KEY);
       if (!saved) return;
-      const { savedRunId, savedStage, savedApproved } = JSON.parse(saved);
-      if (savedRunId && savedStage === 4) {
-        setRunId(savedRunId);
-        setApproveResult({ approved: savedApproved ?? 0, exported: 0 });
+      const s = JSON.parse(saved);
+      if (s.savedStage === 4 && s.savedRunId) {
+        setRunId(s.savedRunId);
+        setApproveResult({ approved: s.savedApproved ?? 0, exported: 0 });
         setStage(4);
+      } else if (s.savedStage >= 1 && s.savedStage <= 3 && s.savedMatched?.length) {
+        setFileName(s.savedFileName ?? '');
+        setFileSize(s.savedFileSize ?? 0);
+        setMatched(s.savedMatched);
+        setSummary(s.savedSummary ?? { new: 0, update: 0, conflict: 0, total: 0 });
+        setExcludedIdx(new Set(s.savedExcludedIdx ?? []));
+        setRejectedInValidation(new Set(s.savedRejectedInValidation ?? []));
+        setBulkRealtor(s.savedBulkRealtor ?? { name: '', moci: '' });
+        setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
+        setRecordActions(s.savedRecordActions ?? {});
+        setBatchErrorSummary(s.savedBatchErrorSummary ?? []);
+        setBatchTotalRows(s.savedBatchTotalRows ?? 0);
+        if (s.savedRunId) setRunId(s.savedRunId);
+        setStage(s.savedStage);
+        fetch('/api/realtors').then(r => r.json()).then(d => setRealtors(d.realtors ?? [])).catch(() => {});
+        fetch('/api/zones').then(r => r.json()).then(d => setZones(d.zones ?? [])).catch(() => {});
       }
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Persist stages 1-3 so navigation away doesn't reset the pipeline
+  useEffect(() => {
+    if (stage < 1 || stage > 3) return;
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        savedStage: stage,
+        savedFileName: fileName,
+        savedFileSize: fileSize,
+        savedMatched: matched,
+        savedSummary: summary,
+        savedExcludedIdx: [...excludedIdx],
+        savedRejectedInValidation: [...rejectedInValidation],
+        savedBulkRealtor: bulkRealtor,
+        savedBulkZone: bulkZone,
+        savedRecordActions: recordActions,
+        savedBatchErrorSummary: batchErrorSummary,
+        savedBatchTotalRows: batchTotalRows,
+        savedRunId: runId,
+      }));
+    } catch {}
+  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, excludedIdx, fileName, fileSize, summary, batchErrorSummary, batchTotalRows, runId]);
 
   // Stage 0, structured (CSV/XLSX) sub-flow
   const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
