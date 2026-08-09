@@ -158,17 +158,29 @@ export default function ZoneField({
 
       {/* Combobox trigger */}
       <div className="relative">
-        <button
-          type="button"
-          ref={triggerRef}
-          onClick={toggleOpen}
-          className="w-full flex items-center justify-between bg-white border border-gray-300 rounded px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500 hover:border-teal-400 transition-colors text-left"
-        >
-          <span className={code ? 'text-gray-800' : 'text-gray-400'}>
-            {selectedZone ? fmtZone(selectedZone) : '— Select zone —'}
-          </span>
-          <span className="text-gray-400 ml-2">{open ? '▲' : '▼'}</span>
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            ref={triggerRef}
+            onClick={toggleOpen}
+            className="flex-1 flex items-center justify-between bg-white border border-gray-300 rounded px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500 hover:border-teal-400 transition-colors text-left"
+          >
+            <span className={code ? 'text-gray-800' : 'text-gray-400'}>
+              {selectedZone ? fmtZone(selectedZone) : '— Select zone —'}
+            </span>
+            <span className="text-gray-400 ml-2">{open ? '▲' : '▼'}</span>
+          </button>
+          {code && (
+            <button
+              type="button"
+              onClick={clearSelection}
+              title="Clear zone"
+              className="shrink-0 w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+            >
+              ✕
+            </button>
+          )}
+        </div>
 
         {/* Dropdown — fixed so it escapes overflow-y-auto scroll containers */}
         {open && (
@@ -199,16 +211,6 @@ export default function ZoneField({
 
             {/* Options list */}
             <div className="max-h-48 overflow-y-auto">
-              {code && (
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 border-b border-gray-100 italic"
-                >
-                  — Clear selection —
-                </button>
-              )}
-
               {filtered.length === 0 ? (
                 <p className="px-3 py-3 text-xs text-gray-400 italic">No zones match &ldquo;{search}&rdquo;</p>
               ) : (
