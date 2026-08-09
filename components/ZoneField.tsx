@@ -46,6 +46,7 @@ export default function ZoneField({
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef   = useRef<HTMLButtonElement>(null);
   const searchRef    = useRef<HTMLInputElement>(null);
+  const dropdownRef  = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -64,7 +65,11 @@ export default function ZoneField({
 
   useEffect(() => {
     if (!open) return;
-    function close() { setOpen(false); setSearch(''); }
+    function close(e: Event) {
+      // Don't close when scrolling inside the dropdown's own list
+      if (e.target instanceof Node && dropdownRef.current?.contains(e.target)) return;
+      setOpen(false); setSearch('');
+    }
     window.addEventListener('scroll', close, true);
     window.addEventListener('resize', close);
     return () => {
@@ -184,7 +189,7 @@ export default function ZoneField({
 
         {/* Dropdown — fixed so it escapes overflow-y-auto scroll containers */}
         {open && (
-          <div style={dropStyle} className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+          <div ref={dropdownRef} style={dropStyle} className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
             {/* Search input */}
             <div className="p-2 border-b border-gray-100">
               <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded px-2 py-1">
