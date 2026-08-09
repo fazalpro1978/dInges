@@ -31,20 +31,20 @@ export default function ZoneField({
   onChange: (next: { code: string; name: string }) => void;
   onZoneAdded: (z: ZoneEntry) => void;
 }) {
-  const [open, setOpen]               = useState(false);
-  const [search, setSearch]           = useState('');
-  const [adding, setAdding]           = useState(false);
+  const [open, setOpen]             = useState(false);
+  const [search, setSearch]         = useState('');
+  const [adding, setAdding]         = useState(false);
   const [municipality, setMunicipality] = useState('');
-  const [customMuni, setCustomMuni]   = useState('');
-  const [newCode, setNewCode]         = useState('');
-  const [newName, setNewName]         = useState('');
-  const [saving, setSaving]           = useState(false);
-  const [saveError, setSaveError]     = useState('');
+  const [customMuni, setCustomMuni] = useState('');
+  const [newCode, setNewCode]       = useState('');
+  const [newName, setNewName]       = useState('');
+  const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError]   = useState('');
+  const [dropUp, setDropUp]         = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef   = useRef<HTMLButtonElement>(null);
   const searchRef    = useRef<HTMLInputElement>(null);
-  const [dropUp, setDropUp] = useState(false);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -73,7 +73,6 @@ export default function ZoneField({
   const codeNum      = code ? Number(code) : NaN;
   const selectedZone = zones.find(z => z.zone_code === codeNum);
 
-  // Filter by zone code OR district name
   const filtered = zones.filter(z =>
     String(z.zone_code).includes(search) ||
     z.district_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -97,7 +96,7 @@ export default function ZoneField({
     setSearch('');
   }
 
-  function openAddForm() {
+  function openAdd() {
     setNewCode(''); setNewName(''); setMunicipality(''); setCustomMuni(''); setSaveError('');
     setAdding(true); setOpen(false); setSearch('');
   }
@@ -132,15 +131,16 @@ export default function ZoneField({
   }
 
   return (
-    <div className="border border-gray-200 rounded-lg p-3 bg-gray-50" ref={containerRef}>
+    <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50" ref={containerRef}>
+      <p className="text-xs font-semibold text-gray-700 mb-2">Zone</p>
 
-      {/* Combobox trigger row */}
-      <div className="relative flex items-center gap-2">
+      {/* Combobox trigger */}
+      <div className="relative">
         <button
           type="button"
           ref={triggerRef}
           onClick={toggleOpen}
-          className="flex-1 flex items-center justify-between bg-white border border-gray-300 rounded px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500 hover:border-teal-400 transition-colors text-left"
+          className="w-full flex items-center justify-between bg-white border border-gray-300 rounded px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500 hover:border-teal-400 transition-colors text-left"
         >
           <span className={code ? 'text-gray-800' : 'text-gray-400'}>
             {selectedZone ? fmtZone(selectedZone) : '— Select zone —'}
@@ -148,18 +148,9 @@ export default function ZoneField({
           <span className="text-gray-400 ml-2">{open ? '▲' : '▼'}</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => adding ? setAdding(false) : openAddForm()}
-          className="text-xs px-2 py-1.5 rounded border border-gray-300 text-teal-700 hover:bg-teal-50 font-semibold whitespace-nowrap"
-          title={adding ? 'Cancel add zone' : 'Register a new zone'}
-        >
-          {adding ? '✕' : '+ Add Zone'}
-        </button>
-
         {/* Dropdown */}
         {open && (
-          <div className={`absolute ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'} left-0 z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden`} style={{ minWidth: 0 }}>
+          <div className={`absolute ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'} left-0 z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden`}>
             {/* Search input */}
             <div className="p-2 border-b border-gray-100">
               <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded px-2 py-1">
@@ -184,7 +175,7 @@ export default function ZoneField({
               </div>
             </div>
 
-            {/* Options */}
+            {/* Options list */}
             <div className="max-h-48 overflow-y-auto">
               {code && (
                 <button
@@ -217,12 +208,12 @@ export default function ZoneField({
               )}
             </div>
 
-            {/* Register new from within dropdown */}
+            {/* Add new from within dropdown */}
             <div className="border-t border-gray-100 p-2">
               <button
                 type="button"
-                onClick={openAddForm}
-                className="w-full text-xs text-teal-700 hover:text-teal-900 hover:bg-teal-50 rounded px-2 py-1.5 text-left transition-colors font-medium"
+                onClick={openAdd}
+                className="w-full text-xs text-teal-600 hover:text-teal-800 hover:bg-teal-50 rounded px-2 py-1.5 text-left transition-colors font-medium"
               >
                 + Register new zone
               </button>
@@ -232,26 +223,31 @@ export default function ZoneField({
       </div>
 
       {/* Selected zone hint */}
-      {selectedZone && !open && (
-        <p className="text-[11px] text-teal-700 mt-1 font-medium">
-          {fmtZone(selectedZone)}{selectedZone.municipality ? ` · ${selectedZone.municipality}` : ''}
-        </p>
+      {selectedZone?.municipality && !open && (
+        <p className="text-[11px] text-gray-400 mt-1">{selectedZone.municipality}</p>
+      )}
+
+      {/* Add new zone text link (shown when not open / not adding) */}
+      {!open && !adding && (
+        <button onClick={openAdd} className="mt-2 text-xs text-teal-600 underline hover:text-teal-800">
+          + Add new zone
+        </button>
       )}
 
       {/* Inline add zone form */}
       {adding && (
-        <div className="mt-2 border border-teal-200 rounded-lg bg-teal-50 p-3 space-y-2.5">
-          <p className="text-[11px] font-bold text-teal-800 uppercase tracking-wide">Register New Zone</p>
+        <div className="mt-2 border border-teal-100 rounded-lg bg-teal-50 p-3 space-y-2">
+          <p className="text-[11px] font-bold text-teal-800 uppercase tracking-wide">Add New Zone</p>
 
           <div>
-            <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wide mb-1">Municipality *</label>
+            <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Municipality *</label>
             <select
               value={municipality}
               onChange={e => { setMunicipality(e.target.value); setSaveError(''); }}
               className="w-full bg-white border border-gray-300 rounded px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
             >
               <option value="">Select…</option>
-              {municipalities.length > 0 && municipalities.map(m => <option key={m}>{m}</option>)}
+              {municipalities.map(m => <option key={m}>{m}</option>)}
               {MUNICIPALITIES.filter(m => !municipalities.includes(m)).map(m => <option key={m}>{m}</option>)}
               <option value="__new__">+ Type new municipality…</option>
             </select>
@@ -267,7 +263,7 @@ export default function ZoneField({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wide mb-1">Zone Number *</label>
+            <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Zone Number *</label>
             <input
               type="number"
               min={1}
@@ -276,11 +272,10 @@ export default function ZoneField({
               placeholder="e.g. 61"
               className="w-full bg-white border border-gray-300 rounded px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500 placeholder-gray-400"
             />
-            <p className="text-[10px] text-gray-400 mt-0.5">Administrator-assigned. Must be unique — not auto-generated.</p>
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wide mb-1">District / Zone Name *</label>
+            <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">District / Zone Name *</label>
             <input
               value={newName}
               onChange={e => { setNewName(e.target.value); setSaveError(''); }}
@@ -288,11 +283,6 @@ export default function ZoneField({
               placeholder="e.g. West Bay, The Pearl…"
               className="w-full bg-white border border-gray-300 rounded px-2 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-teal-500 placeholder-gray-400"
             />
-            {newCode && newName && Number.isInteger(newCodeNum) && newCodeNum > 0 && (
-              <p className="text-[10px] text-teal-700 mt-0.5 font-medium">
-                Will display as: Zone {newCodeNum} — {newName.trim()}
-              </p>
-            )}
           </div>
 
           {saveError && <p className="text-[11px] text-red-600">{saveError}</p>}
@@ -301,13 +291,13 @@ export default function ZoneField({
             <button
               onClick={saveZone}
               disabled={saving || !canSave}
-              className="flex-1 text-xs px-3 py-1.5 rounded bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold transition-colors"
+              className="flex-1 text-xs px-2 py-1.5 rounded bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold transition-colors"
             >
               {saving ? 'Saving…' : 'Save to Registry'}
             </button>
             <button
               onClick={() => { setAdding(false); setSaveError(''); }}
-              className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+              className="text-xs px-2 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
             >
               Cancel
             </button>

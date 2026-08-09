@@ -617,7 +617,6 @@ export default function IngestPipeline() {
             </div>
 
             <div className="mb-4">
-              <p className="text-xs font-semibold text-gray-700 mb-1">Zone — bulk apply to all records</p>
               <ZoneField
                 code={bulkZone.code}
                 name={bulkZone.name}
