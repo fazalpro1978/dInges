@@ -172,8 +172,6 @@ export default function IngestPipeline() {
         setBulkRealtor(s.savedBulkRealtor ?? { name: '', moci: '' });
         setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
         setRecordActions(s.savedRecordActions ?? {});
-        setBatchErrorSummary(s.savedBatchErrorSummary ?? []);
-        setBatchTotalRows(s.savedBatchTotalRows ?? 0);
         if (s.savedRunId) setRunId(s.savedRunId);
         setStage(s.savedStage);
         fetch('/api/realtors').then(r => r.json()).then(d => setRealtors(d.realtors ?? [])).catch(() => {});
@@ -198,12 +196,10 @@ export default function IngestPipeline() {
         savedBulkRealtor: bulkRealtor,
         savedBulkZone: bulkZone,
         savedRecordActions: recordActions,
-        savedBatchErrorSummary: batchErrorSummary,
-        savedBatchTotalRows: batchTotalRows,
         savedRunId: runId,
       }));
     } catch {}
-  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, excludedIdx, fileName, fileSize, summary, batchErrorSummary, batchTotalRows, runId]);
+  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, excludedIdx, fileName, fileSize, summary, runId]);
 
   // Stage 0, structured (CSV/XLSX) sub-flow
   const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
