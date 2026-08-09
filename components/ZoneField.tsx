@@ -41,6 +41,7 @@ export default function ZoneField({
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState('');
   const [dropUp, setDropUp]         = useState(false);
+  const [dropStyle, setDropStyle]   = useState<React.CSSProperties>({});
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef   = useRef<HTMLButtonElement>(null);
@@ -61,10 +62,31 @@ export default function ZoneField({
     if (open) searchRef.current?.focus();
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    function close() { setOpen(false); setSearch(''); }
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
   function toggleOpen() {
     if (!open && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
-      setDropUp(window.innerHeight - rect.bottom < 240);
+      const up = window.innerHeight - rect.bottom < 240;
+      setDropUp(up);
+      setDropStyle({
+        position: 'fixed',
+        left: rect.left,
+        width: rect.width,
+        zIndex: 9999,
+        ...(up
+          ? { bottom: window.innerHeight - rect.top + 4, top: 'auto' }
+          : { top: rect.bottom + 4, bottom: 'auto' }),
+      });
     }
     setOpen(o => !o);
     setSearch('');
@@ -148,9 +170,9 @@ export default function ZoneField({
           <span className="text-gray-400 ml-2">{open ? '▲' : '▼'}</span>
         </button>
 
-        {/* Dropdown */}
+        {/* Dropdown — fixed so it escapes overflow-y-auto scroll containers */}
         {open && (
-          <div className={`absolute ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'} left-0 z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden`}>
+          <div style={dropStyle} className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
             {/* Search input */}
             <div className="p-2 border-b border-gray-100">
               <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded px-2 py-1">
