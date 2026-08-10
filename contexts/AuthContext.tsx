@@ -37,13 +37,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchProfile = useCallback(async (authUser: User) => {
     const { data } = await supabase
       .from('profiles')
-      .select('id,email,full_name,role,is_active')
+      .select('id,email,full_name,role,is_active,registration_status')
       .eq('id', authUser.id)
       .single();
 
-    if (!data || !data.is_active) {
+    if (!data) {
       await supabase.auth.signOut();
       router.replace('/login?reason=no-access');
+      return;
+    }
+
+    if (data.registration_status === 'rejected') {
+      await supabase.auth.signOut();
+      router.replace('/login?reason=rejected');
+      return;
+    }
+
+    if (data.registration_status === 'pending' || !data.is_active) {
+      await supabase.auth.signOut();
+      router.replace(data.registration_status === 'pending' ? '/login?reason=pending' : '/login?reason=no-access');
       return;
     }
 
