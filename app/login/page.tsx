@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 import supabase from '../../lib/supabaseClient';
 
-type Mode = 'login' | 'register';
+type Mode = 'login' | 'register' | 'forgot';
 interface PwStrength { len: boolean; upper: boolean; num: boolean; special: boolean; }
 
 function strengthLevel(s: PwStrength): number {
@@ -55,6 +55,12 @@ function LoginForm() {
 
   const [mode, setMode] = useState<Mode>('login');
 
+  // Forgot password state
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotBusy,  setForgotBusy ] = useState(false);
+  const [forgotErr,   setForgotErr  ] = useState('');
+  const [forgotSent,  setForgotSent ] = useState(false);
+
   // Login state
   const [email,     setEmail    ] = useState('');
   const [password,  setPassword ] = useState('');
@@ -100,6 +106,18 @@ function LoginForm() {
         ? 'Incorrect email or password.'
         : authErr.message);
     }
+  }
+
+  async function handleForgot(e: FormEvent) {
+    e.preventDefault();
+    setForgotErr('');
+    setForgotBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim().toLowerCase(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setForgotBusy(false);
+    if (error) setForgotErr(error.message);
+    else setForgotSent(true);
   }
 
   async function handleRegister(e: FormEvent) {
@@ -191,7 +209,13 @@ function LoginForm() {
                 {busy ? 'Signing in…' : 'Sign In'}
               </button>
 
-              <div className="pt-1" style={{ borderTop: '1px solid #2e3440' }}>
+              <div className="pt-1 space-y-0.5" style={{ borderTop: '1px solid #2e3440' }}>
+                <button type="button" onClick={() => { setMode('forgot'); setForgotSent(false); setForgotErr(''); setForgotEmail(email); }}
+                  className="w-full text-xs py-1.5 text-center transition-colors" style={{ color: '#44505e' }}
+                  onMouseEnter={e => { (e.target as HTMLElement).style.color = '#3daee9'; }}
+                  onMouseLeave={e => { (e.target as HTMLElement).style.color = '#44505e'; }}>
+                  Forgot your password?
+                </button>
                 <button type="button" onClick={() => setMode('register')}
                   className="w-full text-xs transition-colors py-1.5 text-center"
                   style={{ color: '#44505e' }}
@@ -201,6 +225,53 @@ function LoginForm() {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* ── FORGOT FORM ── */}
+          {mode === 'forgot' && !forgotSent && (
+            <form onSubmit={handleForgot} className="space-y-4">
+              <p className="text-xs leading-relaxed" style={{ color: '#7c8694' }}>
+                Enter your registered email and we&apos;ll send a secure reset link.
+              </p>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-[0.14em] mb-1.5" style={{ color: '#7c8694' }}>Email Address</label>
+                <input type="email" required autoComplete="email" value={forgotEmail}
+                  onChange={e => setForgotEmail(e.target.value)} style={inputSx}
+                  onFocus={e => { e.target.style.borderColor = '#3daee9'; }}
+                  onBlur={e => { e.target.style.borderColor = '#2e3440'; }} />
+              </div>
+              {forgotErr && (
+                <p className="text-xs rounded-lg px-3 py-2" style={{ color: '#ef4444', background: '#ef444415', border: '1px solid #ef444430' }}>{forgotErr}</p>
+              )}
+              <button type="submit" disabled={forgotBusy} className="w-full font-bold text-sm py-2.5 rounded-lg mt-1"
+                style={{ background: forgotBusy ? '#1e2228' : '#3daee9', color: forgotBusy ? '#555' : '#0d1117', opacity: forgotBusy ? 0.6 : 1 }}>
+                {forgotBusy ? 'Sending…' : 'Send Reset Link'}
+              </button>
+              <div className="pt-1" style={{ borderTop: '1px solid #2e3440' }}>
+                <button type="button" onClick={() => setMode('login')}
+                  className="w-full text-xs py-1.5 text-center" style={{ color: '#44505e' }}
+                  onMouseEnter={e => { (e.target as HTMLElement).style.color = '#3daee9'; }}
+                  onMouseLeave={e => { (e.target as HTMLElement).style.color = '#44505e'; }}>
+                  ← Back to Sign In
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ── FORGOT SENT ── */}
+          {mode === 'forgot' && forgotSent && (
+            <div className="py-4 text-center space-y-4">
+              <div className="w-14 h-14 rounded-full mx-auto flex items-center justify-center text-2xl"
+                style={{ background: '#3daee920', border: '1px solid #3daee940' }}>✉</div>
+              <div>
+                <p className="font-semibold text-sm mb-1" style={{ color: '#eff0f1' }}>Check your email</p>
+                <p className="text-xs leading-relaxed" style={{ color: '#7c8694' }}>
+                  A reset link was sent to <strong style={{ color: '#eff0f1' }}>{forgotEmail}</strong>. It expires in 1 hour.
+                </p>
+              </div>
+              <button type="button" onClick={() => setMode('login')}
+                className="text-xs" style={{ color: '#3daee9' }}>← Back to Sign In</button>
+            </div>
           )}
 
           {/* ── REGISTER FORM ── */}
