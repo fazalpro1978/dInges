@@ -48,6 +48,12 @@ const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS 
 const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
 const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
+const VIEW_OPTIONS = [
+  'Front View', 'Side View', 'Back View', 'Corner View', 'Full View',
+  'Pool View', 'Sea View', 'City View', 'Garden View', 'Street View',
+  'Marina View', 'Park View', 'Mountain View', 'Panoramic View', 'Partial View',
+  'Internal View', 'Open View',
+];
 
 // All fields shown in the Validation table — used to drive the dynamic bulk-fill toolbar.
 // Add any new field here and it will automatically appear in the toolbar when blank.
@@ -923,18 +929,14 @@ export default function IngestPipeline() {
                         <td className={`px-3 py-1.5 text-gray-400 font-medium sticky left-0 z-10 ${bgRow}`}>{r.rowIndex + 1}</td>
                         <td className={`px-2 py-1.5 sticky left-8 z-10 ${bgRow}`}>{actionBadge(r.action)}</td>
 
-                        {/* Property — sticky */}
-                        <td className={`${td('property')} sticky left-[88px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`} onClick={() => startEdit('property')}>
-                          {isEdit('property')
-                            ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('property')} onBlur={e => handleCellEdit(r.rowIndex, 'property', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'property', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>}
+                        {/* Property — sticky, read-only */}
+                        <td className={`px-2 py-1.5 sticky left-[88px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                          <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>
                         </td>
 
-                        {/* Unit No — sticky */}
-                        <td className={`${td('unit_no')} sticky left-[218px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`} onClick={() => startEdit('unit_no')}>
-                          {isEdit('unit_no')
-                            ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('unit_no')} onBlur={e => handleCellEdit(r.rowIndex, 'unit_no', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'unit_no', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
-                            : <span className={!getVal('unit_no') ? 'text-red-500 font-bold' : 'text-blue-700 font-mono font-medium'}>{getVal('unit_no') || '!'}</span>}
+                        {/* Unit No — sticky, read-only */}
+                        <td className={`px-2 py-1.5 sticky left-[218px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                          <span className={!getVal('unit_no') ? 'text-red-500 font-bold' : 'text-blue-700 font-mono font-medium'}>{getVal('unit_no') || '!'}</span>
                         </td>
 
                         {/* Zone # */}
@@ -1047,7 +1049,7 @@ export default function IngestPipeline() {
                   : <span className="text-gray-300">—</span>;
               };
               const hasAnyExtended = accepted.some(r =>
-                getV(r,'floor') || getV(r,'area_sqft') || getV(r,'maid_room') || getV(r,'wifi')
+                getV(r,'floor') || getV(r,'area_sqft') || getV(r,'maid_room') || getV(r,'wifi') || getV(r,'contact_details') || getV(r,'view')
               );
               return (
                 <div className="mt-6 border border-blue-100 rounded-xl overflow-hidden">
@@ -1061,7 +1063,7 @@ export default function IngestPipeline() {
                     )}
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs min-w-[640px]">
+                    <table className="w-full text-xs min-w-[900px]">
                       <thead>
                         <tr className="bg-blue-50/60 border-b border-blue-100 text-blue-600 font-semibold">
                           <th className="px-3 py-2 text-left w-8 sticky left-0 bg-blue-50/60">#</th>
@@ -1071,6 +1073,8 @@ export default function IngestPipeline() {
                           <th className="px-2 py-2 text-left w-24">Size (sqm)</th>
                           <th className="px-2 py-2 text-left w-24">Maid Room</th>
                           <th className="px-2 py-2 text-left w-16">WiFi</th>
+                          <th className="px-2 py-2 text-left min-w-[160px]">Contact Details</th>
+                          <th className="px-2 py-2 text-left min-w-[140px]">View</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-blue-50">
@@ -1083,13 +1087,32 @@ export default function IngestPipeline() {
                             <td className="px-2 py-1.5">{getV(r,'area_sqft') ? <span className="text-gray-800 font-medium">{getV(r,'area_sqft')} sqm</span> : <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-1.5">{boolCell(getV(r,'maid_room'))}</td>
                             <td className="px-2 py-1.5">{boolCell(getV(r,'wifi'))}</td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none placeholder-gray-300"
+                                placeholder="Name Phone"
+                                defaultValue={getV(r,'contact_details')}
+                                onBlur={e => handleCellEdit(r.rowIndex, 'contact_details', e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'contact_details', e.currentTarget.value); }}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <select
+                                className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none"
+                                value={getV(r,'view')}
+                                onChange={e => handleCellEdit(r.rowIndex, 'view', e.target.value)}
+                              >
+                                <option value="">— Select —</option>
+                                {VIEW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                   <div className="bg-blue-50/40 px-4 py-2 border-t border-blue-100 text-[11px] text-blue-400">
-                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. These fields populate Unit Details → Classification and Amenities in REIMS on import.
+                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. Contact Details exports as Property Focal Point Info in REIMS.
                   </div>
                 </div>
               );
