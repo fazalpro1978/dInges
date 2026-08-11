@@ -151,6 +151,10 @@ export default function IngestPipeline() {
   const [forceCompleting, setForceCompleting] = useState(false);
   const [schemaErrors, setSchemaErrors] = useState<Array<{ stagedId: string; rowIndex?: number; errors: { field: string; label: string; rule: string; value?: unknown }[] }>>([]);
 
+  // Pipeline termination
+  const [terminateConfirm, setTerminateConfirm] = useState(false);
+  const [isTerminating, setIsTerminating] = useState(false);
+
   // Restore pipeline session if user navigated away mid-flow
   const SESSION_KEY = 'axiom_pipeline_session';
   const FILE_KEY    = 'axiom_pending_file';
@@ -478,6 +482,29 @@ export default function IngestPipeline() {
     setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
   };
 
+  const handleTerminate = async () => {
+    setIsTerminating(true);
+    try {
+      if (runId) {
+        const { data: { session } } = await supabase.auth.getSession();
+        await fetch(`/api/v1/axiom/pipeline/${runId}/terminate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify({ stage }),
+        });
+      }
+      reset();
+    } catch {
+      reset();
+    } finally {
+      setIsTerminating(false);
+      setTerminateConfirm(false);
+    }
+  };
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   const { openNav } = useNav();
@@ -638,6 +665,10 @@ export default function IngestPipeline() {
                   onClick={reset}
                   className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
                 >← Back to Upload</button>
+                <button
+                  onClick={() => setTerminateConfirm(true)}
+                  className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
+                >⊘ Terminate</button>
                 <Badge label={`${summary.new} New`} color="#22c55e" />
                 <Badge label={`${summary.update} Update`} color="#3b82f6" />
                 {summary.conflict > 0 && <Badge label={`${summary.conflict} Conflict`} color="#a855f7" />}
@@ -1065,10 +1096,16 @@ export default function IngestPipeline() {
             })()}
 
             <div className="mt-6 flex justify-between items-center">
-              <button
-                onClick={() => setStage(1)}
-                className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
-              >← Back to Match & Review</button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setStage(1)}
+                  className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
+                >← Back to Match & Review</button>
+                <button
+                  onClick={() => setTerminateConfirm(true)}
+                  className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
+                >⊘ Terminate</button>
+              </div>
               <button
                 disabled={rejectedInValidation.size === matched.length || isProcessing}
                 onClick={handleStage}
@@ -1148,10 +1185,16 @@ export default function IngestPipeline() {
             </div>
 
             <div className="mt-6 flex justify-between items-center">
-              <button
-                onClick={() => setStage(2)}
-                className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
-              >← Back to Validation</button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setStage(2)}
+                  className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
+                >← Back to Validation</button>
+                <button
+                  onClick={() => setTerminateConfirm(true)}
+                  className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
+                >⊘ Terminate</button>
+              </div>
               <button
                 disabled={isProcessing}
                 onClick={handleProceedToReims}
@@ -1257,6 +1300,62 @@ export default function IngestPipeline() {
           </div>
         )}
       </main>
+
+      {/* ── Pipeline Termination Confirmation Modal ────────────────────────── */}
+      {terminateConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.55)' }}
+          onClick={e => { if (e.target === e.currentTarget) setTerminateConfirm(false); }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
+              <span className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center text-lg flex-shrink-0">⊘</span>
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Terminate Pipeline?</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Stage {stage} — {['Upload', 'Match & Review', 'Validation', 'Stage Analysis'][stage] ?? 'Unknown'}
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-4">
+              <p className="text-sm text-gray-700 leading-relaxed">
+                This will <span className="font-semibold text-red-600">permanently roll back</span> all staged records for
+                this run, cancel the upload, and reset the pipeline to the upload screen.
+              </p>
+              {runId && (
+                <div className="mt-3 bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
+                  Run <span className="font-mono text-gray-700">{runId}</span> will be marked <span className="font-semibold text-red-600">CANCELLED</span> in the audit log.
+                </div>
+              )}
+              {!runId && (
+                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+                  No records have been staged to the database yet — this will only clear your current session.
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setTerminateConfirm(false)}
+                disabled={isTerminating}
+                className="px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTerminate}
+                disabled={isTerminating}
+                className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isTerminating && (
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                {isTerminating ? 'Terminating…' : 'Yes, Terminate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
