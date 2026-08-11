@@ -1053,14 +1053,60 @@ export default function IngestPipeline() {
               );
               return (
                 <div className="mt-6 border border-blue-100 rounded-xl overflow-hidden">
-                  <div className="bg-blue-50 px-4 py-2.5 flex items-center justify-between border-b border-blue-100">
-                    <div>
-                      <span className="text-xs font-bold text-blue-800 uppercase tracking-wider">Extended Fields — REIMS Export</span>
-                      <span className="ml-2 text-[11px] text-blue-500">Non-mandatory fields slated for Unit Details on import</span>
+                  <div className="bg-blue-50 px-4 py-2.5 border-b border-blue-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <span className="text-xs font-bold text-blue-800 uppercase tracking-wider">Extended Fields — REIMS Export</span>
+                        <span className="ml-2 text-[11px] text-blue-500">Non-mandatory fields slated for Unit Details on import</span>
+                      </div>
+                      {!hasAnyExtended && (
+                        <span className="text-[11px] text-blue-400 italic">No extended field data extracted from this document</span>
+                      )}
                     </div>
-                    {!hasAnyExtended && (
-                      <span className="text-[11px] text-blue-400 italic">No extended field data extracted from this document</span>
-                    )}
+                    {/* Bulk-apply toolbar for Contact Details and View */}
+                    <div className="flex flex-wrap gap-x-5 gap-y-2 items-center">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-blue-700">Contact Details:</span>
+                        <input
+                          type="text"
+                          placeholder="Name Phone"
+                          value={bulkFill['contact_details'] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, contact_details: e.target.value }))}
+                          className="border border-blue-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 w-36"
+                        />
+                        <button
+                          disabled={!bulkFill['contact_details']?.trim()}
+                          onClick={() => {
+                            const val = bulkFill['contact_details'] ?? '';
+                            setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                              ...m, _conflictResolved: { ...m._conflictResolved, contact_details: val },
+                            }));
+                          }}
+                          className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                        >Apply all</button>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-blue-700">View:</span>
+                        <select
+                          value={bulkFill['view'] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, view: e.target.value }))}
+                          className="border border-blue-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400"
+                        >
+                          <option value="">— Select —</option>
+                          {VIEW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                        <button
+                          disabled={!bulkFill['view']}
+                          onClick={() => {
+                            const val = bulkFill['view'] ?? '';
+                            setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                              ...m, _conflictResolved: { ...m._conflictResolved, view: val },
+                            }));
+                          }}
+                          className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                        >Apply all</button>
+                      </div>
+                    </div>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs min-w-[900px]">
