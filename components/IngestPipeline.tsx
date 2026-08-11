@@ -50,9 +50,9 @@ const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
 const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
 const VIEW_OPTIONS = [
   'Front View', 'Side View', 'Back View', 'Corner View', 'Full View',
-  'Pool View', 'Sea View', 'City View', 'Garden View', 'Street View',
-  'Marina View', 'Park View', 'Mountain View', 'Panoramic View', 'Partial View',
-  'Internal View', 'Open View',
+  'Pool View', 'Swimming Pool View', 'Sea View', 'City View', 'Garden View',
+  'Street View', 'Marina View', 'Park View', 'Mountain View', 'Panoramic View',
+  'Partial View', 'Internal View', 'Open View', 'Porto Arabia View',
 ];
 
 // All fields shown in the Validation table — used to drive the dynamic bulk-fill toolbar.
