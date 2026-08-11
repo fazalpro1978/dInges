@@ -49,10 +49,16 @@ const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
 const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
 const VIEW_OPTIONS = [
-  'Front View', 'Side View', 'Back View', 'Corner View', 'Full View',
-  'Pool View', 'Swimming Pool View', 'Sea View', 'City View', 'Garden View',
-  'Street View', 'Marina View', 'Park View', 'Mountain View', 'Panoramic View',
-  'Partial View', 'Internal View', 'Open View', 'Porto Arabia View',
+  'Back View', 'Beach View', 'Canal View', 'City View', 'Clubhouse View',
+  'Community View', 'Corner View', 'Countryside View', 'Courtyard View',
+  'Desert View', 'Downtown View', 'Front View', 'Full View', 'Garden View',
+  'Golf Course View', 'Greenery View', 'Internal View', 'Lake View', 'Lagoon View',
+  'Landmark View', 'Main Road View', 'Marina View', 'Mountain View', 'Nature View',
+  'Neighbourhood View', 'Ocean View', 'Open View', 'Panoramic View', 'Park View',
+  'Partial View', 'Playground View', 'Pool View', 'Porto Arabia View', 'River View',
+  'Sea View', 'Side View', 'Skyline View', 'Sports View', 'Street View',
+  'Sunrise View', 'Sunset View', 'Swimming Pool View', 'Unobstructed View',
+  'Waterfront View',
 ];
 
 // All fields shown in the Validation table — used to drive the dynamic bulk-fill toolbar.
