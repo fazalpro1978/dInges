@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const { data, error } = await reims
     .from('cr_zone_codes')
-    .select('zone_code, district_name, municipality')
+    .select('zone_code, district_name, municipality, area_km2, population')
     .order('zone_code');
 
   if (error) {
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   const { data, error } = await reims
     .from('cr_zone_codes')
     .upsert(row, { onConflict: 'zone_code' })
-    .select('zone_code, district_name, municipality')
+    .select('zone_code, district_name, municipality, area_km2, population')
     .single();
 
   if (error) {

@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useRef, useEffect } from 'react';
 
-export type ZoneEntry = { zone_code: number; district_name: string; municipality?: string };
+export type ZoneEntry = { zone_code: number; district_name: string; municipality?: string; area_km2?: number | null; population?: number | null };
 
 export function fmtZone(z: ZoneEntry) {
   return `Zone ${z.zone_code} — ${z.district_name}`;
@@ -229,9 +229,17 @@ export default function ZoneField({
                     }`}
                   >
                     <span className="font-medium">{fmtZone(z)}</span>
-                    {z.municipality && (
-                      <span className="block text-[10px] text-gray-400 mt-0.5">{z.municipality}</span>
-                    )}
+                    <span className="flex items-center gap-2 mt-0.5">
+                      {z.municipality && (
+                        <span className="text-[10px] text-gray-400">{z.municipality}</span>
+                      )}
+                      {z.area_km2 != null && (
+                        <span className="text-[10px] text-gray-400">{z.area_km2.toLocaleString()} km²</span>
+                      )}
+                      {z.population != null && (
+                        <span className="text-[10px] text-gray-400">Pop. {z.population.toLocaleString()}</span>
+                      )}
+                    </span>
                   </button>
                 ))
               )}
