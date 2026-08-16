@@ -63,6 +63,15 @@ const VIEW_OPTIONS = [
   'Waterfront View',
 ];
 
+const AMENITIES_LIST = [
+  'Balcony', 'Barbecue Area', 'Built-in Wardrobes', 'Central A/C', 'Covered Parking',
+  'Private Gym', 'Private Jacuzzi', 'Kitchen Appliances', 'Maids Room', 'Pets Allowed',
+  'Private Garden', 'Private Pool', 'Shared Pool', 'Study', 'View of Water',
+  'Security', 'Concierge', 'Shared Spa', 'Shared Gym', 'Maid Service',
+  'Walk-in Closet', "View of Landmark", "Children's Play Area", 'Lobby in Building',
+  "Children's Pool", 'WiFi', 'Office',
+] as const;
+
 // All fields shown in the Validation table — used to drive the dynamic bulk-fill toolbar.
 // Add any new field here and it will automatically appear in the toolbar when blank.
 type FieldDef = { field: string; label: string; type: 'text' | 'number' | 'select'; options?: string[]; step?: string };
@@ -168,6 +177,7 @@ export default function IngestPipeline() {
   // Pipeline termination
   const [terminateConfirm, setTerminateConfirm] = useState(false);
   const [isTerminating, setIsTerminating] = useState(false);
+  const [openAmenitiesRow, setOpenAmenitiesRow] = useState<number | null>(null);
 
   // Restore pipeline session if user navigated away mid-flow
   const SESSION_KEY = 'axiom_pipeline_session';
@@ -1125,14 +1135,14 @@ export default function IngestPipeline() {
             {(() => {
               const accepted = matched.filter(r => !rejectedInValidation.has(r.rowIndex));
               const getV = (r: typeof matched[0], f: string) => String(r._conflictResolved[f] ?? r.resolvedData[f] ?? '');
-              const boolCell = (val: string) => {
-                const yes = val === 'true' || val === '1' || val?.toLowerCase() === 'yes';
-                return yes
-                  ? <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold"><span className="w-3.5 h-3.5 rounded-sm bg-emerald-100 border border-emerald-400 flex items-center justify-center text-[9px]">✓</span>Yes</span>
-                  : <span className="text-gray-300">—</span>;
+              const getArr = (r: typeof matched[0], f: string): string[] => {
+                const v = r._conflictResolved[f] ?? r.resolvedData[f];
+                if (Array.isArray(v)) return v as string[];
+                if (typeof v === 'string' && v) return v.split(/[,|;]/).map((s: string) => s.trim()).filter(Boolean);
+                return [];
               };
               const hasAnyExtended = accepted.some(r =>
-                getV(r,'floor') || getV(r,'area_sqft') || getV(r,'maid_room') || getV(r,'wifi') || getV(r,'contact_details') || getV(r,'view')
+                getV(r,'floor') || getV(r,'area_sqft') || getV(r,'contact_details') || getV(r,'view') || getArr(r,'amenities').length > 0
               );
               return (
                 <div className="mt-6 border border-blue-100 rounded-xl overflow-hidden">
@@ -1146,8 +1156,8 @@ export default function IngestPipeline() {
                         <span className="text-[11px] text-blue-400 italic">No extended field data extracted from this document</span>
                       )}
                     </div>
-                    {/* Bulk-apply toolbar for Contact Details and View */}
-                    <div className="flex flex-wrap gap-x-5 gap-y-2 items-center">
+                    {/* Bulk-apply toolbar */}
+                    <div className="flex flex-wrap gap-x-5 gap-y-2 items-start">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[11px] font-semibold text-blue-700">Contact Details:</span>
                         <input
@@ -1189,6 +1199,37 @@ export default function IngestPipeline() {
                           className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
                         >Apply all</button>
                       </div>
+                      {/* Amenities bulk-apply — additive merge, never overwrites */}
+                      <div className="flex-1 min-w-[280px]">
+                        <p className="text-[11px] font-semibold text-blue-700 mb-1">Bulk-add Amenities to all rows:</p>
+                        <div className="flex flex-wrap gap-1 mb-1.5">
+                          {AMENITIES_LIST.map(a => {
+                            const bulkAmenities = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
+                            const sel = bulkAmenities.includes(a);
+                            return (
+                              <button key={a} type="button"
+                                onClick={() => {
+                                  const cur: string[] = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
+                                  setBulkFill(prev => ({ ...prev, _amenities_bulk: (sel ? cur.filter(x => x !== a) : [...cur, a]) as unknown as string }));
+                                }}
+                                className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${sel ? 'bg-blue-600 border-blue-600 text-white' : 'border-blue-200 text-blue-600 hover:border-blue-400 bg-white'}`}
+                              >{a}</button>
+                            );
+                          })}
+                        </div>
+                        <button
+                          disabled={!((bulkFill['_amenities_bulk'] as unknown as string[] | undefined)?.length)}
+                          onClick={() => {
+                            const toAdd: string[] = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
+                            setMatched(prev => prev.map(m => {
+                              if (rejectedInValidation.has(m.rowIndex)) return m;
+                              const cur: string[] = Array.isArray(m._conflictResolved['amenities']) ? m._conflictResolved['amenities'] as string[] : [];
+                              return { ...m, _conflictResolved: { ...m._conflictResolved, amenities: Array.from(new Set([...cur, ...toAdd])) } };
+                            }));
+                          }}
+                          className="text-[11px] px-2.5 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                        >Add to all accepted rows</button>
+                      </div>
                     </div>
                   </div>
                   <div className="overflow-x-auto">
@@ -1200,8 +1241,7 @@ export default function IngestPipeline() {
                           <th className="px-2 py-2 text-left w-20 sticky left-[178px] bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Unit No.</th>
                           <th className="px-2 py-2 text-left w-16">Floor</th>
                           <th className="px-2 py-2 text-left w-24">Size (sqm)</th>
-                          <th className="px-2 py-2 text-left w-24">Maid Room</th>
-                          <th className="px-2 py-2 text-left w-16">WiFi</th>
+                          <th className="px-2 py-2 text-left min-w-[220px]">Amenities</th>
                           <th className="px-2 py-2 text-left min-w-[160px]">Contact Details</th>
                           <th className="px-2 py-2 text-left min-w-[140px]">View</th>
                         </tr>
@@ -1214,8 +1254,43 @@ export default function IngestPipeline() {
                             <td className="px-2 py-1.5 font-mono text-blue-700 sticky left-[178px] bg-white shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'unit_no') || <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-1.5">{getV(r,'floor') ? <span className="text-gray-800 font-medium">{getV(r,'floor')}</span> : <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-1.5">{getV(r,'area_sqft') ? <span className="text-gray-800 font-medium">{getV(r,'area_sqft')} sqm</span> : <span className="text-gray-300">—</span>}</td>
-                            <td className="px-2 py-1.5">{boolCell(getV(r,'maid_room'))}</td>
-                            <td className="px-2 py-1.5">{boolCell(getV(r,'wifi'))}</td>
+                            <td className="px-2 py-1.5 align-top">
+                              <div className="flex flex-wrap gap-1">
+                                {getArr(r,'amenities').map(a => (
+                                  <span key={a} className="inline-flex items-center gap-0.5 text-[9px] bg-teal-50 border border-teal-200 text-teal-700 rounded-full px-1.5 py-0.5 leading-none">
+                                    {a}
+                                    <button type="button" onClick={() => {
+                                      const next = getArr(r,'amenities').filter(x => x !== a);
+                                      handleCellEdit(r.rowIndex, 'amenities', next);
+                                    }} className="ml-0.5 text-teal-400 hover:text-red-500 leading-none">×</button>
+                                  </span>
+                                ))}
+                                <button type="button"
+                                  onClick={() => setOpenAmenitiesRow(openAmenitiesRow === r.rowIndex ? null : r.rowIndex)}
+                                  className="text-[9px] border border-dashed border-blue-300 text-blue-500 rounded-full px-1.5 py-0.5 hover:bg-blue-50 leading-none"
+                                >+ Add</button>
+                              </div>
+                              {openAmenitiesRow === r.rowIndex && (
+                                <div className="mt-1.5 p-2 bg-white border border-blue-200 rounded-lg shadow-md">
+                                  <div className="flex flex-wrap gap-1">
+                                    {AMENITIES_LIST.map(a => {
+                                      const sel = getArr(r,'amenities').includes(a);
+                                      return (
+                                        <button key={a} type="button"
+                                          onClick={() => {
+                                            const cur = getArr(r,'amenities');
+                                            handleCellEdit(r.rowIndex, 'amenities', sel ? cur.filter(x => x !== a) : [...cur, a]);
+                                          }}
+                                          className={`text-[9px] px-1.5 py-0.5 rounded-full border transition-colors ${sel ? 'bg-teal-600 border-teal-600 text-white' : 'border-gray-300 text-gray-600 hover:border-teal-400'}`}
+                                        >{a}</button>
+                                      );
+                                    })}
+                                  </div>
+                                  <button type="button" onClick={() => setOpenAmenitiesRow(null)}
+                                    className="mt-1.5 text-[10px] text-blue-500 hover:underline">Done</button>
+                                </div>
+                              )}
+                            </td>
                             <td className="px-2 py-1.5">
                               <input
                                 className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none placeholder-gray-300"
@@ -1241,7 +1316,7 @@ export default function IngestPipeline() {
                     </table>
                   </div>
                   <div className="bg-blue-50/40 px-4 py-2 border-t border-blue-100 text-[11px] text-blue-400">
-                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. Contact Details exports as Property Focal Point Info in REIMS.
+                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. Amenities write to <span className="font-mono">units.amenities[]</span> in REIMS. Contact Details exports as Property Focal Point Info.
                   </div>
                 </div>
               );

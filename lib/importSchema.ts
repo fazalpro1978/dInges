@@ -1,4 +1,4 @@
-export type FieldKind = 'string' | 'integer' | 'numeric' | 'enum' | 'url';
+export type FieldKind = 'string' | 'integer' | 'numeric' | 'enum' | 'url' | 'multiselect';
 
 export type MasterFieldDef = {
   key: string;
@@ -7,14 +7,37 @@ export type MasterFieldDef = {
   required: boolean;
   primaryKey?: boolean; // entity matching key — missing value auto-rejects the row
   enumValues?: readonly string[];
+  allowedValues?: readonly string[]; // multiselect canonical list
   aliases: string[];
 };
+
+export const AMENITIES_LIST = [
+  'Balcony', 'Barbecue Area', 'Built-in Wardrobes', 'Central A/C', 'Covered Parking',
+  'Private Gym', 'Private Jacuzzi', 'Kitchen Appliances', 'Maids Room', 'Pets Allowed',
+  'Private Garden', 'Private Pool', 'Shared Pool', 'Study', 'View of Water',
+  'Security', 'Concierge', 'Shared Spa', 'Shared Gym', 'Maid Service',
+  'Walk-in Closet', 'View of Landmark', "Children's Play Area", 'Lobby in Building',
+  "Children's Pool", 'WiFi', 'Office',
+] as const;
 
 // Extended fields: non-blocking optional attributes surfaced in the AXIOM Validation
 // stage Extended Fields panel. Not part of the core Schema Template mapping — they
 // arrive via AI extraction (PDF/image path) or manual entry in Validation.
-export type ExtendedFieldDef = { key: string; label: string; description: string };
+export type ExtendedFieldDef = {
+  key: string;
+  label: string;
+  description: string;
+  kind?: FieldKind;
+  allowedValues?: readonly string[];
+};
 export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
+  {
+    key: 'amenities',
+    label: 'Amenities',
+    kind: 'multiselect',
+    allowedValues: AMENITIES_LIST,
+    description: 'Multi-select amenity tags per unit. In flat files, separate with commas or pipes. Consolidates the deprecated maid_room and wifi boolean fields — "Maids Room" and "WiFi" are now canonical amenity values. Non-blocking — absence does not prevent import.',
+  },
   {
     key: 'contact_details',
     label: 'Contact Details',
@@ -221,6 +244,20 @@ export function castAndValidateField(field: MasterFieldDef, rawValue: unknown): 
         return { value: str, error: `Broken URL for ${field.label}: "${str}"` };
       }
       return { value: str };
+    }
+
+    case 'multiselect': {
+      // Accepts an already-parsed string[] (from Validation UI edits) or a
+      // delimited string from a source column.  Unknown values are silently
+      // dropped — never raises a validation error.
+      const raw: string[] = Array.isArray(rawValue)
+        ? (rawValue as unknown[]).map(String)
+        : String(rawValue ?? '').split(/[,|;]/).map(s => s.trim()).filter(Boolean);
+      const allowed = field.allowedValues ?? [];
+      const matched = raw
+        .map(v => allowed.find(c => c.toLowerCase() === v.toLowerCase()))
+        .filter((v): v is string => v !== undefined);
+      return { value: matched };
     }
 
     default:

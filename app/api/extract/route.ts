@@ -10,7 +10,7 @@ Extract ALL unit/property records from the provided document.
 Return ONLY a JSON array of objects. Each object must use these exact field names:
 unit_code, property, unit_no, zone, zone_code, type, config, furnishing, kitchen,
 status, rent, service_charges, deposit_amount, agency_fee, listing_type,
-bedrooms, bathrooms, parking, floor, area_sqft, maid_room, wifi, realtor_name, realtor_moci,
+bedrooms, bathrooms, parking, floor, area_sqft, amenities, realtor_name, realtor_moci,
 moci_contract_status, moci_contract_number, legal_duration,
 contract_start_date, contract_end_date, location_map_url, notes,
 contact_details, view
@@ -51,14 +51,20 @@ Normalisation rules:
 - rent: numbers only, no currency — strip "QAR", "QR", commas, ".00", "/ month", contract term text in parentheses (e.g. "QR 6,000 / month (1 year contract)" → 6000; "QAR 6,500.00" → 6500)
 - dates: YYYY-MM-DD format (for contract dates etc.; status dates use dd/mm/yy as above)
 - realtor_name: The COMPANY or BROKERAGE name that owns/manages the listing. Look for a dedicated "Company", "Agent", "Broker", "Real Estate" column or the document issuer name (e.g. "Al Emadi Enterprises" from the document header/logo/title). NEVER put a person's first name or watchman/caretaker name here (e.g. "Hussein", "Mohamed", "Azeez" are watchman names — not realtors). If no company name is identifiable, omit realtor_name entirely.
-- maid_room: true | false — set true when Room Type / config contains "+Maid" or "Maid" suffix (e.g. "2BR+Maid", "3BR+Maid"). When true, also strip "+Maid" from the config value so config stores only the BHK part (e.g. "2 BHK").
-- wifi: true | false — set true when a WIFI / WiFi / Wi-Fi column value is "Yes" or "YES". Set false when "No" or absent.
+- amenities: string[] — an array of amenity tags present for the unit. Allowed values (use these exact strings only, omit any not applicable):
+  "Balcony", "Barbecue Area", "Built-in Wardrobes", "Central A/C", "Covered Parking",
+  "Private Gym", "Private Jacuzzi", "Kitchen Appliances", "Maids Room", "Pets Allowed",
+  "Private Garden", "Private Pool", "Shared Pool", "Study", "View of Water",
+  "Security", "Concierge", "Shared Spa", "Shared Gym", "Maid Service",
+  "Walk-in Closet", "View of Landmark", "Children's Play Area", "Lobby in Building",
+  "Children's Pool", "WiFi", "Office"
+  Rules: (1) When config or Room Type contains "+Maid" or "Maid" suffix (e.g. "2BR+Maid"), add "Maids Room" to amenities AND strip "+Maid" from config so config stores only the BHK part (e.g. "2 BHK"). (2) When a WIFI/WiFi/Wi-Fi column says "Yes" or "YES", add "WiFi" to amenities. (3) When a Balcony column says "Yes", add "Balcony". (4) Omit the field entirely if no amenities are identified — do not include an empty array.
 - area_sqft: numeric size from "Size Sq.", "Size (sqm)", "Area", "Sq.m" column — store the number as-is (label says sqft but we treat it as sqm for Qatar properties).
 - floor: numeric floor number from "Floor", "Fl." column — integer only.
 - contact_details: Extract from any Watchman, Caretaker, Contact, Supervisor, or "Watchman Number" / "Watchman No." column. Format as "{Name} {Phone}" (e.g. "Hussein 51838959"). This is NOT the realtor — do not put it in realtor_name. Do not include the label "Contact:" in the value. If both a name and phone are present store them together; if only a phone number is present store it alone.
 - view: Extract from any "VIEW", "View", "Orientation", "Facing", "Outlook" column. Normalise to the closest value from this list: Back View | Beach View | Canal View | City View | Clubhouse View | Community View | Corner View | Countryside View | Courtyard View | Desert View | Downtown View | Front View | Full View | Garden View | Golf Course View | Greenery View | Internal View | Lake View | Lagoon View | Landmark View | Main Road View | Marina View | Mountain View | Nature View | Neighbourhood View | Ocean View | Open View | Panoramic View | Park View | Partial View | Playground View | Pool View | Porto Arabia View | River View | Sea View | Side View | Skyline View | Sports View | Street View | Sunrise View | Sunset View | Swimming Pool View | Unobstructed View | Waterfront View. If the source value doesn't match any of these options closely, omit the field. Do not invent values outside this list.
 - property: The BUILDING or PROPERTY name — e.g. "C25 Al Waab", "E-A3 Airport", "V35 Meisameer". The "Bldg. Code / Area" or "Building Code" column is the property field. The document issuer name (e.g. "Al Emadi Enterprises") is the REALTOR, not the property. Do not confuse the two.
-- Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, BALCONY, Viewing Time column
+- Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, Viewing Time column. Do NOT output standalone boolean maid_room or wifi fields — absorb them into amenities[] instead.
 - If a field is not present in the source, omit it entirely (do not include null values)
 - For multi-column layouts (units side by side), extract each unit as a separate record
 
