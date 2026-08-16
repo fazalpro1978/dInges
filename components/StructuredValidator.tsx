@@ -29,6 +29,7 @@ type ValidatedRow = {
   zone: string | null;
   unit_code: string | null;
   errors: string[];
+  rejected: boolean; // true when a primary key (property or unit_no) is missing
 };
 
 function computeRow(raw: Record<string, string>, zoneMap: Map<number, string>): ValidatedRow {
@@ -53,7 +54,9 @@ function computeRow(raw: Record<string, string>, zoneMap: Map<number, string>): 
     unit_code = `${slugifyProperty(String(cast.property))}-${cast.unit_no}`;
   }
 
-  return { raw, cast, zone, unit_code, errors };
+  const rejected = !cast.property || !cast.unit_no;
+
+  return { raw, cast, zone, unit_code, errors, rejected };
 }
 
 export type ValidationErrorEntry = { row: number; field: string; value: unknown; error: string };
@@ -118,20 +121,23 @@ export default function StructuredValidator({ payload, onValidated, onBack }: {
   }
 
   function proceed() {
-    const validRows   = rows.filter((r) => r.errors.length === 0);
-    const invalidRows = rows.filter((r) => r.errors.length > 0);
+    const validRows    = rows.filter((r) => r.errors.length === 0 && !r.rejected);
+    const blockedRows  = rows.filter((r) => r.errors.length > 0 || r.rejected);
     const records = validRows.map((r) => toIngestRecord({ ...r.cast, zone: r.zone, unit_code: r.unit_code }));
-    const errorSummary: ValidationErrorEntry[] = invalidRows.flatMap((r, i) =>
-      r.errors.map((err) => {
-        const field = err.split(' ')[0] ?? 'unknown';
-        return { row: rows.indexOf(r) + 1, field, value: r.raw[field] ?? null, error: err };
-      })
+    const errorSummary: ValidationErrorEntry[] = blockedRows.flatMap((r): ValidationErrorEntry[] =>
+      r.rejected
+        ? [{ row: rows.indexOf(r) + 1, field: 'property/unit_no', value: null, error: 'Missing primary key — row rejected' }]
+        : r.errors.map((err) => {
+            const field = err.split(' ')[0] ?? 'unknown';
+            return { row: rows.indexOf(r) + 1, field, value: r.raw[field] ?? null, error: err };
+          })
     );
     onValidated(records, errorSummary, rows.length);
   }
 
-  const errorCount = rows.filter((r) => r.errors.length > 0).length;
-  const validCount = rows.filter((r) => r.errors.length === 0).length;
+  const rejectedCount = rows.filter((r) => r.rejected).length;
+  const errorCount    = rows.filter((r) => !r.rejected && r.errors.length > 0).length;
+  const validCount    = rows.filter((r) => r.errors.length === 0 && !r.rejected).length;
 
   if (loadError) {
     return <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div>;
@@ -167,11 +173,12 @@ export default function StructuredValidator({ payload, onValidated, onBack }: {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Ready',              count: validCount, color: '#22c55e' },
-          { label: 'Errors (blocked)',   count: errorCount, color: '#ef4444' },
-          { label: 'Total Rows',         count: rows.length, color: '#3b82f6' },
+          { label: 'Ready',                    count: validCount,    color: '#22c55e' },
+          { label: 'Rejected — missing key',   count: rejectedCount, color: '#dc2626' },
+          { label: 'Errors (blocked)',          count: errorCount,    color: '#f97316' },
+          { label: 'Total Rows',               count: rows.length,   color: '#3b82f6' },
         ].map((c) => (
           <div key={c.label} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <p className="text-2xl font-bold" style={{ color: c.color }}>{c.count}</p>
@@ -194,8 +201,11 @@ export default function StructuredValidator({ payload, onValidated, onBack }: {
               <th className="px-2 py-2.5 text-gray-400">#</th>
               <th className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest">Status</th>
               {DISPLAY_COLS.map((k) => (
-                <th key={k} className="px-2 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest truncate">
+                <th key={k} className={`px-2 py-2.5 text-left text-[10px] font-bold uppercase tracking-widest truncate ${k === 'property' || k === 'unit_no' ? 'text-amber-600 bg-amber-50/60' : 'text-gray-500'}`}>
                   {k.replace(/_/g, ' ')}
+                  {(k === 'property' || k === 'unit_no') && (
+                    <span className="ml-1 text-[8px] font-bold bg-amber-100 text-amber-700 border border-amber-300 rounded-full px-1 py-px align-middle">PK</span>
+                  )}
                 </th>
               ))}
               <th className="px-2 py-2.5" />
@@ -203,23 +213,28 @@ export default function StructuredValidator({ payload, onValidated, onBack }: {
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const hasError = r.errors.length > 0;
+              const hasError  = !r.rejected && r.errors.length > 0;
+              const rowBg     = r.rejected ? 'bg-red-50/70' : hasError ? 'bg-orange-50/60' : '';
               return (
-                <tr key={i} className={`border-b border-gray-100 group ${hasError ? 'bg-red-50' : ''}`}>
+                <tr key={i} className={`border-b border-gray-100 group ${rowBg}`}>
                   <td className="px-2 py-2 text-gray-400 text-center">{i + 1}</td>
                   <td className="px-2 py-2 overflow-hidden">
-                    {hasError ? (
-                      <span className="text-[9px] font-bold text-red-600 bg-red-100 border border-red-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">Error</span>
+                    {r.rejected ? (
+                      <span className="text-[9px] font-bold text-red-700 bg-red-100 border border-red-300 rounded-full px-1.5 py-0.5 whitespace-nowrap">Rejected</span>
+                    ) : hasError ? (
+                      <span className="text-[9px] font-bold text-orange-600 bg-orange-100 border border-orange-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">Error</span>
                     ) : (
                       <span className="text-[9px] font-bold text-green-600 bg-green-100 border border-green-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">Ready</span>
                     )}
                   </td>
                   {DISPLAY_COLS.map((k) => {
-                    const derived = k === 'unit_code' || k === 'zone';
-                    const value = derived ? (k === 'unit_code' ? r.unit_code : r.zone) : r.cast[k];
+                    const derived    = k === 'unit_code' || k === 'zone';
+                    const primaryKey = k === 'property' || k === 'unit_no';
+                    const value      = derived ? (k === 'unit_code' ? r.unit_code : r.zone) : r.cast[k];
+                    const locked     = derived || primaryKey;
                     return (
-                      <td key={k} className="px-2 py-2 overflow-hidden">
-                        {editingIdx === i && !derived ? (
+                      <td key={k} className={`px-2 py-2 overflow-hidden ${primaryKey ? 'bg-amber-50/40' : ''}`}>
+                        {editingIdx === i && !locked ? (
                           <input
                             className="w-full bg-white border border-gray-300 rounded px-1.5 py-0.5 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
                             value={r.raw[k] ?? ''}
@@ -256,21 +271,42 @@ export default function StructuredValidator({ payload, onValidated, onBack }: {
         </table>
       </div>
 
-      {errorCount > 0 && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-1.5">
-          <p className="text-xs font-bold text-red-700 mb-2">Rows with errors (blocked until fixed):</p>
-          {rows.filter((r) => r.errors.length > 0).map((r, i) => (
+      {rejectedCount > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-4 space-y-1.5">
+          <p className="text-xs font-bold text-red-700 mb-2">Rejected rows — missing primary key (Property or Unit No). These cannot be imported:</p>
+          {rows.filter((r) => r.rejected).map((r, i) => (
             <p key={i} className="text-xs text-gray-600">
-              <span className="text-gray-900 font-mono">{r.unit_code ?? `Row ${i + 1}`}</span>
+              <span className="text-red-700 font-mono font-bold">Row {rows.indexOf(r) + 1}</span>
+              {' — '}Property: <span className="font-mono">{String(r.cast.property || '(blank)')}</span>
+              {' · '}Unit No: <span className="font-mono">{String(r.cast.unit_no || '(blank)')}</span>
+            </p>
+          ))}
+        </div>
+      )}
+
+      {errorCount > 0 && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-1.5">
+          <p className="text-xs font-bold text-orange-700 mb-2">Rows with validation errors (blocked until fixed):</p>
+          {rows.filter((r) => !r.rejected && r.errors.length > 0).map((r) => (
+            <p key={rows.indexOf(r)} className="text-xs text-gray-600">
+              <span className="text-gray-900 font-mono">{r.unit_code ?? `Row ${rows.indexOf(r) + 1}`}</span>
               {' — '}{r.errors.join(' · ')}
             </p>
           ))}
         </div>
       )}
 
-      {errorCount === 0 && (
+      {validCount > 0 && rejectedCount === 0 && errorCount === 0 && (
         <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
           All {validCount} records passed validation. Ready to match against REIMS.
+        </div>
+      )}
+
+      {validCount > 0 && (rejectedCount > 0 || errorCount > 0) && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
+          {validCount} record{validCount !== 1 ? 's' : ''} ready to proceed.
+          {rejectedCount > 0 && <span className="ml-1">{rejectedCount} rejected (missing primary key).</span>}
+          {errorCount > 0 && <span className="ml-1">{errorCount} blocked by validation errors.</span>}
         </div>
       )}
     </div>

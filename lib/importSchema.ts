@@ -5,9 +5,27 @@ export type MasterFieldDef = {
   label: string;
   kind: FieldKind;
   required: boolean;
+  primaryKey?: boolean; // entity matching key — missing value auto-rejects the row
   enumValues?: readonly string[];
   aliases: string[];
 };
+
+// Extended fields: non-blocking optional attributes surfaced in the AXIOM Validation
+// stage Extended Fields panel. Not part of the core Schema Template mapping — they
+// arrive via AI extraction (PDF/image path) or manual entry in Validation.
+export type ExtendedFieldDef = { key: string; label: string; description: string };
+export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
+  {
+    key: 'contact_details',
+    label: 'Contact Details',
+    description: 'Watchman / caretaker name and phone (format: "Name Phone"). Exported to REIMS as Property Focal Point Info. Non-blocking — absence does not prevent import.',
+  },
+  {
+    key: 'view',
+    label: 'View',
+    description: 'Unit orientation or scenic view type. Normalised to one of 44 standard values and mapped to REIMS view_types on import. Non-blocking — absence does not prevent import.',
+  },
+];
 
 export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office'] as const;
 export const ENUM_FURNISHING    = ['Furnished', 'Semi-Furnished', 'Unfurnished'] as const;
@@ -30,12 +48,12 @@ export const UNIT_CONFIGS_FULL: string[] = [
 export const MASTER_FIELDS: MasterFieldDef[] = [
   {
     key: 'property', label: 'Property Name',
-    kind: 'string', required: true,
+    kind: 'string', required: true, primaryKey: true,
     aliases: ['property name', 'property', 'building', 'building name', 'project', 'project name', 'tower', 'tower name'],
   },
   {
     key: 'unit_no', label: 'Property Unit No',
-    kind: 'string', required: true,
+    kind: 'string', required: true, primaryKey: true,
     aliases: ['property unit no', 'unit no', 'unit number', 'room', 'room no', 'room number', 'unit'],
   },
   {

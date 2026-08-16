@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { MASTER_FIELDS, BATCH_FIELDS, suggestMapping } from '@/lib/importSchema';
+import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS, suggestMapping } from '@/lib/importSchema';
 import RealtorNameField from './RealtorNameField';
 import type { Realtor } from './RealtorField';
 import ZoneField from './ZoneField';
@@ -187,17 +187,21 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
         </div>
         <div className="divide-y divide-gray-100">
           {MASTER_FIELDS.map((f) => (
-            <div key={f.key} className="grid grid-cols-[1fr_1fr_1fr] gap-4 px-4 py-3 items-center">
+            <div key={f.key} className={`grid grid-cols-[1fr_1fr_1fr] gap-4 px-4 py-3 items-center ${f.primaryKey ? 'bg-amber-50/40' : ''}`}>
               <div>
-                <p className="text-sm text-gray-800">
-                  {f.label} {f.required && <span className="text-red-500 text-xs">*</span>}
-                </p>
-                <p className="text-[10px] text-gray-400 font-mono">{f.key}{f.enumValues ? ' · enum' : ''}</p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <p className="text-sm text-gray-800">{f.label}</p>
+                  {f.primaryKey
+                    ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300 uppercase tracking-wide">Primary Key</span>
+                    : f.required && <span className="text-red-500 text-xs">*</span>}
+                </div>
+                <p className="text-[10px] text-gray-400 font-mono mt-0.5">{f.key}{f.enumValues ? ' · enum' : ''}</p>
+                {f.primaryKey && <p className="text-[10px] text-amber-600 mt-0.5">Required for entity matching — missing → row rejected</p>}
               </div>
               <select
                 value={mapping[f.key] ?? ''}
                 onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value || null }))}
-                className="bg-white border border-gray-300 rounded px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-blue-500"
+                className={`bg-white border rounded px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none ${f.primaryKey ? 'border-amber-300 focus:border-amber-500' : 'border-gray-300 focus:border-blue-500'}`}
               >
                 <option value="">— Not mapped (null) —</option>
                 {headers.map((h) => <option key={h} value={h}>{h}</option>)}
@@ -205,6 +209,28 @@ export default function StructuredMapper({ fileName: initialFileName, file, onMa
               <span className="text-xs text-gray-500 truncate">
                 {mapping[f.key] ? `e.g. "${sampleFor(mapping[f.key]!)}"` : '—'}
               </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Extended Fields — informational only, handled in Validation stage */}
+      <div className="rounded-lg border border-blue-100 overflow-hidden">
+        <div className="px-4 py-2.5 bg-blue-50 border-b border-blue-100">
+          <p className="text-xs font-bold text-blue-700 uppercase tracking-widest">Extended Fields — Optional Normalisation</p>
+          <p className="text-[11px] text-blue-500 mt-0.5">Non-blocking attributes. These are populated via AI extraction or manual entry in the Validation stage — not mapped here. Missing values never block import.</p>
+        </div>
+        <div className="divide-y divide-blue-50">
+          {EXTENDED_FIELDS.map((f) => (
+            <div key={f.key} className="grid grid-cols-[1fr_2fr] gap-4 px-4 py-3 items-start">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm text-gray-700">{f.label}</p>
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-600 border border-blue-200 uppercase tracking-wide">Optional</span>
+                </div>
+                <p className="text-[10px] text-gray-400 font-mono mt-0.5">{f.key}</p>
+              </div>
+              <p className="text-[11px] text-gray-500 leading-relaxed pt-0.5">{f.description}</p>
             </div>
           ))}
         </div>
