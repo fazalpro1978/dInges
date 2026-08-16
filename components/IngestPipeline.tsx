@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
+import * as XLSX from 'xlsx';
 import TopBar from './TopBar';
 import { useNav } from './AppShell';
 import StructuredMapper, { type MappedPayload } from './StructuredMapper';
@@ -8,6 +9,7 @@ import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
 import ZoneField, { type ZoneEntry } from './ZoneField';
 import { Badge, actionBadge } from './StructuredImportShared';
+import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
 import supabase from '../lib/supabaseClient';
 
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
@@ -494,6 +496,67 @@ export default function IngestPipeline() {
     setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
   };
 
+  // ── Validation audit export — XLSX in Schema Template layout ─────────────────
+  const generateValidationExport = useCallback((acceptedRows: MatchedRecord[]) => {
+    const allFieldDefs = [...MASTER_FIELDS, ...BATCH_FIELDS, ...EXTENDED_FIELDS];
+
+    // Header row — labels, with PRIMARY KEY marker for property/unit_no
+    const headers = allFieldDefs.map(f => {
+      const isPK      = 'primaryKey' in f && (f as { primaryKey?: boolean }).primaryKey;
+      const isReq     = 'required'   in f && (f as { required?: boolean }).required;
+      const suffix    = isPK ? ' [PRIMARY KEY] *' : isReq ? ' *' : '';
+      return f.label + suffix;
+    });
+
+    // Data rows
+    const dataRows = acceptedRows.map(r => {
+      const resolved = { ...r.resolvedData, ...r._conflictResolved } as Record<string, unknown>;
+      return allFieldDefs.map(f => {
+        const val = resolved[f.key];
+        if (val === null || val === undefined) return '';
+        if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+        return String(val);
+      });
+    });
+
+    // Build worksheet
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+    ws['!cols'] = allFieldDefs.map(f => ({ wch: Math.max(f.label.length + 6, 20) }));
+
+    // Style note row below data
+    const noteRow = allFieldDefs.map((_, i) =>
+      i === 0 ? `Axiom Validation Export — ${acceptedRows.length} accepted record(s) — ${new Date().toLocaleString('en-GB')}` : ''
+    );
+    XLSX.utils.sheet_add_aoa(ws, [noteRow], { origin: -1 });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Accepted Records');
+
+    // Instructions tab
+    const instrRows = [
+      ['Axiom — Validation Audit Export'],
+      [''],
+      ['This file contains the accepted records from the AXIOM Validation stage.'],
+      ['It mirrors the Schema Template layout so it can be cross-checked against the source file.'],
+      [''],
+      ['Column key:'],
+      ['  [PRIMARY KEY] * — Property Name and Unit No. Entity matching keys. Missing = row rejected.'],
+      ['  * — Required field. Must be populated before import.'],
+      ['  No marker — Optional / extended normalisation field. Absence does not block import.'],
+      [''],
+      ['Extended fields (Contact Details, View) are populated via AI extraction or manual entry'],
+      ['in the AXIOM Validation stage, not from the Schema Template mapping step.'],
+    ];
+    const wsInstr = XLSX.utils.aoa_to_sheet(instrRows);
+    wsInstr['!cols'] = [{ wch: 90 }];
+    XLSX.utils.book_append_sheet(wb, wsInstr, 'Notes');
+
+    // Trigger download
+    const ts   = new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '');
+    const name = `axiom-validation-export-${ts}.xlsx`;
+    XLSX.writeFile(wb, name);
+  }, []);
+
   const handleTerminate = async () => {
     setIsTerminating(true);
     try {
@@ -832,13 +895,27 @@ export default function IngestPipeline() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setRejectedInValidation(new Set())}
+                  onClick={() => {
+                    setRejectedInValidation(new Set());
+                    generateValidationExport(matched);
+                  }}
                   className="text-xs px-3 py-1.5 border border-green-300 text-green-700 rounded-lg hover:bg-green-50 font-semibold"
                 >Accept All</button>
                 <button
                   onClick={() => setRejectedInValidation(new Set(matched.map(r => r.rowIndex)))}
                   className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
                 >Reject All</button>
+                <button
+                  onClick={() => {
+                    const accepted = matched.filter(r => !rejectedInValidation.has(r.rowIndex));
+                    generateValidationExport(accepted);
+                  }}
+                  title="Download audit export of currently accepted records"
+                  className="text-xs px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold flex items-center gap-1"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Export
+                </button>
               </div>
             </div>
 
