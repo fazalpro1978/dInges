@@ -26,7 +26,7 @@ async function generateEntityCode(name: string): Promise<string | null> {
 
 // Syncs a realtor into cr_entity_codes so Code Registry Developer/Company picks it up
 async function syncToEntityCodes(name: string, classification: string | null): Promise<void> {
-  const { data: existing } = await reims
+  const { data: existing } = await registry
     .from('cr_entity_codes')
     .select('entity_code')
     .ilike('company_name', name)
@@ -46,7 +46,7 @@ async function syncToEntityCodes(name: string, classification: string | null): P
 }
 
 export async function GET() {
-  const { data, error } = await reims
+  const { data, error } = await registry
     .from('realtors')
     .select('id, name, moci_id, classification')
     .order('name');
