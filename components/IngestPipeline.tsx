@@ -299,10 +299,12 @@ export default function IngestPipeline() {
 
   // ── Inline cell editing for Validation table ──────────────────────────────
 
-  const handleCellEdit = useCallback((rowIndex: number, field: string, value: string) => {
-    const coerced: unknown = (field === 'zone_code' || field === 'bathrooms')
-      ? (value === '' ? undefined : Number(value))
-      : value;
+  const handleCellEdit = useCallback((rowIndex: number, field: string, value: string | string[]) => {
+    const coerced: unknown = Array.isArray(value)
+      ? value
+      : (field === 'zone_code' || field === 'bathrooms')
+        ? (value === '' ? undefined : Number(value))
+        : value;
     // zone_code → zone name auto-populate (not the reverse: zone code is authority-assigned)
     const extra: Record<string, unknown> = {};
     if (field === 'zone_code' && value) {
