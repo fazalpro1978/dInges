@@ -18,6 +18,7 @@ export const AMENITIES_LIST = [
   'Security', 'Concierge', 'Shared Spa', 'Shared Gym', 'Maid Service',
   'Walk-in Closet', 'View of Landmark', "Children's Play Area", 'Lobby in Building',
   "Children's Pool", 'WiFi', 'Office',
+  'Large Backyard', 'Small Backyard', 'Rowhouse',
 ] as const;
 
 // Extended fields: non-blocking optional attributes surfaced in the AXIOM Validation
@@ -47,6 +48,11 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
     key: 'view',
     label: 'View',
     description: 'Unit orientation or scenic view type. Normalised to one of 44 standard values and mapped to REIMS view_types on import. Non-blocking — absence does not prevent import.',
+  },
+  {
+    key: 'design_type',
+    label: 'Design Type',
+    description: 'Layout variant code or unit designation extracted from the config/bedroom column or status field. Examples: "Type B", "Standard", "Medium", "Mock up unit". Stored in Classification → Unit Type in REIMS. Non-blocking — absence does not prevent import.',
   },
 ];
 

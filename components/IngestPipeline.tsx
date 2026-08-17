@@ -1171,7 +1171,7 @@ export default function IngestPipeline() {
                 return [];
               };
               const hasAnyExtended = accepted.some(r =>
-                getV(r,'floor') || getV(r,'area_sqft') || getV(r,'contact_details') || getV(r,'view') || getArr(r,'amenities').length > 0
+                getV(r,'floor') || getV(r,'area_sqft') || getV(r,'contact_details') || getV(r,'view') || getV(r,'design_type') || getArr(r,'amenities').length > 0
               );
               return (
                 <div className="mt-6 border border-blue-100 rounded-xl overflow-hidden">
@@ -1293,6 +1293,7 @@ export default function IngestPipeline() {
                           <th className="px-2 py-2 text-left w-16">Floor</th>
                           <th className="px-2 py-2 text-left w-24">Size (sqm)</th>
                           <th className="px-2 py-2 text-left min-w-[220px]">Amenities</th>
+                          <th className="px-2 py-2 text-left min-w-[120px]">Design Type</th>
                           <th className="px-2 py-2 text-left min-w-[160px]">Contact Details</th>
                           <th className="px-2 py-2 text-left min-w-[140px]">View</th>
                         </tr>
@@ -1345,6 +1346,15 @@ export default function IngestPipeline() {
                             <td className="px-2 py-1.5">
                               <input
                                 className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none placeholder-gray-300"
+                                placeholder="e.g. Type B"
+                                defaultValue={getV(r,'design_type')}
+                                onBlur={e => handleCellEdit(r.rowIndex, 'design_type', e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'design_type', e.currentTarget.value); }}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none placeholder-gray-300"
                                 placeholder="Name Phone"
                                 defaultValue={getV(r,'contact_details')}
                                 onBlur={e => handleCellEdit(r.rowIndex, 'contact_details', e.target.value)}
@@ -1367,7 +1377,7 @@ export default function IngestPipeline() {
                     </table>
                   </div>
                   <div className="bg-blue-50/40 px-4 py-2 border-t border-blue-100 text-[11px] text-blue-400">
-                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. Amenities write to <span className="font-mono">units.amenities[]</span> in REIMS. Contact Details exports as Property Focal Point Info.
+                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. Amenities write to <span className="font-mono">units.amenities[]</span> in REIMS. Design Type writes to <span className="font-mono">units.design_type</span> (Classification → Unit Type). Contact Details exports as Property Focal Point Info.
                   </div>
                 </div>
               );
