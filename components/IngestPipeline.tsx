@@ -178,6 +178,13 @@ export default function IngestPipeline() {
   const [terminateConfirm, setTerminateConfirm] = useState(false);
   const [isTerminating, setIsTerminating] = useState(false);
   const [openAmenitiesRow, setOpenAmenitiesRow] = useState<number | null>(null);
+  // Tracks whether any amenities bulk-add has been applied so the revert button
+  // knows there is something to undo.
+  const [amenitiesBulkDirty, setAmenitiesBulkDirty] = useState(false);
+  // Snapshot of resolvedData.amenities per rowIndex captured on stage-2 entry.
+  // Used as the revert target — isolates the original uploaded values from any
+  // bulk-add or inline chip edits performed during Validation.
+  const amenitiesBaseline = useRef<Map<number, string[]> | null>(null);
 
   // Restore pipeline session if user navigated away mid-flow
   const SESSION_KEY = 'axiom_pipeline_session';
@@ -245,6 +252,26 @@ export default function IngestPipeline() {
       }));
     } catch {}
   }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, excludedIdx, fileName, fileSize, summary, runId]);
+
+  // Amenities baseline — snapshot resolvedData.amenities on stage-2 entry so
+  // bulk edits can be reverted. Reset when leaving stage 2.
+  useEffect(() => {
+    if (stage === 2 && matched.length > 0 && amenitiesBaseline.current === null) {
+      const map = new Map<number, string[]>();
+      for (const m of matched) {
+        const base = Array.isArray(m.resolvedData.amenities)
+          ? (m.resolvedData.amenities as string[])
+          : [];
+        map.set(m.rowIndex, [...base]);
+      }
+      amenitiesBaseline.current = map;
+      setAmenitiesBulkDirty(false);
+    }
+    if (stage !== 2) {
+      amenitiesBaseline.current = null;
+      setAmenitiesBulkDirty(false);
+    }
+  }, [stage, matched]);
 
   // Stage 0, structured (CSV/XLSX) sub-flow
   const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
@@ -1219,18 +1246,40 @@ export default function IngestPipeline() {
                             );
                           })}
                         </div>
-                        <button
-                          disabled={!((bulkFill['_amenities_bulk'] as unknown as string[] | undefined)?.length)}
-                          onClick={() => {
-                            const toAdd: string[] = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
-                            setMatched(prev => prev.map(m => {
-                              if (rejectedInValidation.has(m.rowIndex)) return m;
-                              const cur: string[] = Array.isArray(m._conflictResolved['amenities']) ? m._conflictResolved['amenities'] as string[] : [];
-                              return { ...m, _conflictResolved: { ...m._conflictResolved, amenities: Array.from(new Set([...cur, ...toAdd])) } };
-                            }));
-                          }}
-                          className="text-[11px] px-2.5 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
-                        >Add to all accepted rows</button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            disabled={!((bulkFill['_amenities_bulk'] as unknown as string[] | undefined)?.length)}
+                            onClick={() => {
+                              const toAdd: string[] = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
+                              setMatched(prev => prev.map(m => {
+                                if (rejectedInValidation.has(m.rowIndex)) return m;
+                                const cur: string[] = Array.isArray(m._conflictResolved['amenities'])
+                                  ? m._conflictResolved['amenities'] as string[]
+                                  : Array.isArray(m.resolvedData['amenities'])
+                                    ? m.resolvedData['amenities'] as string[]
+                                    : [];
+                                return { ...m, _conflictResolved: { ...m._conflictResolved, amenities: Array.from(new Set([...cur, ...toAdd])) } };
+                              }));
+                              setAmenitiesBulkDirty(true);
+                            }}
+                            className="text-[11px] px-2.5 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                          >Add to all accepted rows</button>
+                          <button
+                            disabled={!amenitiesBulkDirty}
+                            title="Revert all rows to the amenities extracted from the uploaded file"
+                            onClick={() => {
+                              const baseline = amenitiesBaseline.current;
+                              if (!baseline) return;
+                              setMatched(prev => prev.map(m => {
+                                const base = baseline.get(m.rowIndex) ?? [];
+                                return { ...m, _conflictResolved: { ...m._conflictResolved, amenities: [...base] } };
+                              }));
+                              setBulkFill(prev => ({ ...prev, _amenities_bulk: [] as unknown as string }));
+                              setAmenitiesBulkDirty(false);
+                            }}
+                            className="text-[11px] px-2.5 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded disabled:opacity-40"
+                          >↩ Revert to uploaded values</button>
+                        </div>
                       </div>
                     </div>
                   </div>
