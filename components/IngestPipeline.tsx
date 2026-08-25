@@ -400,9 +400,16 @@ export default function IngestPipeline() {
       }),
     });
     if (res.ok) {
+      const pfx = master_code.slice(0, 8); // CAT+ENTITY+AGENT+ZONE
+      setMatched(prev => prev.map((m, i) => {
+        if (excludedIdx.has(i)) return m;
+        const unitNo = String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '').trim();
+        const sc = unitNo ? `${pfx}-${unitNo}` : null;
+        return sc ? { ...m, _conflictResolved: { ...m._conflictResolved, smart_code: sc } } : m;
+      }));
       updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1 });
     }
-  }, [mcState, effectiveAgentCode, bulkZone.code, matched]);
+  }, [mcState, effectiveAgentCode, bulkZone.code, matched, excludedIdx]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
@@ -972,6 +979,11 @@ export default function IngestPipeline() {
                         <span className="text-xs font-bold text-blue-700 font-mono">{String(r.resolvedData.unit_no)}</span>
                       </span>
                     ) : null}
+                    {r._conflictResolved.smart_code ? (
+                      <span className="inline-flex items-center shrink-0 bg-green-50 border border-green-200 rounded px-2 py-0.5">
+                        <span className="font-mono text-xs font-bold text-green-700 tracking-wider">{String(r._conflictResolved.smart_code)}</span>
+                      </span>
+                    ) : null}
                     {r.existingSnapshot && (
                       <span className="text-xs text-gray-400 hidden sm:inline">
                         was: {r.existingSnapshot.status} · QAR {r.existingSnapshot.rent?.toLocaleString()}
@@ -1010,9 +1022,12 @@ export default function IngestPipeline() {
               ))}
             </div>
 
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex items-center justify-end gap-3">
+              {!mcState.generated_code && (
+                <p className="text-xs text-amber-600">Apply Master Code to records before proceeding</p>
+              )}
               <button
-                disabled={unresolvedConflicts > 0}
+                disabled={unresolvedConflicts > 0 || !mcState.generated_code}
                 onClick={() => setStage(2)}
                 className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
               >
