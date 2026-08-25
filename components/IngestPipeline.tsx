@@ -404,19 +404,6 @@ export default function IngestPipeline() {
     }
   }, [matched, excludedIdx, getCR, userAgentCode, updateCR]);
 
-  // Override modal: intercept stage-2 cell edits when Smart Code already generated
-  const handleCellEditWithOverride = useCallback((rowIndex: number, field: string, value: string | string[]) => {
-    const cr = getCR(rowIndex);
-    if (cr.generatedSmartCode && (field === 'type_code' || field === 'entity_code' || field === 'zone_code' || field === 'config')) {
-      // Smart Code impacting field — require override modal
-      const before = String((matched.find(m => m.rowIndex === rowIndex)?._conflictResolved ?? {})[field]
-        ?? (matched.find(m => m.rowIndex === rowIndex)?.resolvedData ?? {})[field] ?? '');
-      setOverrideModal({ rowIndex, field, before, after: Array.isArray(value) ? value.join(', ') : value, registryId: cr.generatedSmartCode });
-      return;
-    }
-    handleCellEdit(rowIndex, field, value);
-  }, [getCR, matched, handleCellEdit]);
-
   // ── Stage 0: Upload & Extract ─────────────────────────────────────────────
 
   const runMatch = useCallback(async (units: Record<string, unknown>[]) => {
@@ -480,6 +467,18 @@ export default function IngestPipeline() {
     ));
     setEditingCell(null);
   }, [zones]);
+
+  // Override modal: intercept stage-2 cell edits when Smart Code already generated
+  const handleCellEditWithOverride = useCallback((rowIndex: number, field: string, value: string | string[]) => {
+    const cr = getCR(rowIndex);
+    if (cr.generatedSmartCode && (field === 'type_code' || field === 'entity_code' || field === 'zone_code' || field === 'config')) {
+      const before = String((matched.find(m => m.rowIndex === rowIndex)?._conflictResolved ?? {})[field]
+        ?? (matched.find(m => m.rowIndex === rowIndex)?.resolvedData ?? {})[field] ?? '');
+      setOverrideModal({ rowIndex, field, before, after: Array.isArray(value) ? value.join(', ') : value, registryId: cr.generatedSmartCode });
+      return;
+    }
+    handleCellEdit(rowIndex, field, value);
+  }, [getCR, matched, handleCellEdit]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
