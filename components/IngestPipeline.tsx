@@ -952,11 +952,23 @@ export default function IngestPipeline() {
                   setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
                     ? m
                     : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }));
-                  // Auto-populate entity code in Code Registry by fuzzy-matching realtor name → company_name
-                  const realtorWords = bulkRealtor.name.toLowerCase().split(/\s+/);
-                  const matchedEntity = entityCodes.find(e =>
-                    realtorWords.some(w => w.length > 3 && e.company_name.toLowerCase().includes(w))
-                  );
+                  // Auto-populate entity code: substring match first, then scored word match
+                  const STOPWORDS = new Set(['real','estate','property','group','holding','company','qsc','qatar','al','el','the','and','of','development','properties','international','investments','investment']);
+                  const rName = bulkRealtor.name.toLowerCase().trim();
+                  let matchedEntity = entityCodes.find(e => {
+                    const cn = e.company_name.toLowerCase();
+                    return cn.includes(rName) || rName.includes(cn);
+                  });
+                  if (!matchedEntity) {
+                    const rWords = rName.split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
+                    let best = 0;
+                    entityCodes.forEach(e => {
+                      const cn = e.company_name.toLowerCase();
+                      const score = rWords.filter(w => cn.includes(w)).length;
+                      if (score > best) { best = score; matchedEntity = e; }
+                    });
+                    if (best === 0) matchedEntity = undefined;
+                  }
                   if (matchedEntity) {
                     matched.forEach((m, i) => {
                       if (!excludedIdx.has(i)) {
