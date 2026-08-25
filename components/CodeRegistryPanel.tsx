@@ -100,7 +100,7 @@ export default function CodeRegistryPanel({
       const d = await res.json();
       if (!res.ok) { setAddTypeErr(d.error ?? 'Failed'); return; }
       onAddTypeConfig(d.typeConfig as TypeConfig);
-      setNewType({ type_code: '', configuration: '', category: 'R' });
+      setNewType({ type_code: '', core_type: '', configuration: '', category: 'R' });
       setAddTypeOpen(false);
     } finally {
       setIsAdding(false);
