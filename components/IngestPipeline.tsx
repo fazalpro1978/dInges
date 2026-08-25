@@ -9,6 +9,8 @@ import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
 import ZoneField, { type ZoneEntry } from './ZoneField';
 import MasterCodePanel, { type MCState, type EntityCode, type AgentEntry } from './MasterCodePanel';
+import OverrideGovernanceModal from './OverrideGovernanceModal';
+import { buildMasterPrefix } from '@/lib/buildMasterCode';
 import { Badge, actionBadge } from './StructuredImportShared';
 import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
 import supabase from '../lib/supabaseClient';
@@ -169,10 +171,11 @@ export default function IngestPipeline() {
   const effectiveAgentCode = selectedAgentCode || agentCode;
   const [mcState, setMcState] = useState<MCState>({
     category: 'R', entity_code: '', check_status: 'idle',
-    existing_matches: [], generated_code: null,
-    date_seg: '', time_seg: '', seq_num: 100,
+    existing_matches: [], unit_conflicts: [], override_confirmed: false,
+    generated_code: null, date_seg: '', time_seg: '', seq_num: 100, locked: false,
   });
   const updateMc = (next: Partial<MCState>) => setMcState(prev => ({ ...prev, ...next }));
+  const [overrideModalOpen, setOverrideModalOpen] = useState(false);
 
   // Stage 2 → Validation: per-row reject + inline cell editing + dynamic bulk fill
   const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
@@ -374,6 +377,13 @@ export default function IngestPipeline() {
     setEditingCell(null);
   }, [zones]);
 
+  // Auto-open override modal when check detects unit-level conflicts
+  useEffect(() => {
+    if (mcState.check_status === 'existing' && mcState.unit_conflicts.length > 0 && !mcState.override_confirmed) {
+      setOverrideModalOpen(true);
+    }
+  }, [mcState.check_status, mcState.unit_conflicts, mcState.override_confirmed]);
+
   // ── Master Code Phase 2 register ─────────────────────────────────────────
   const STOPWORDS = new Set(['real','estate','property','group','holding','company','qsc','qatar','al','el','the','and','of','development','properties','international','investments','investment']);
 
@@ -396,7 +406,7 @@ export default function IngestPipeline() {
       const sc = unitNo ? `${pfx}-${unitNo}` : null;
       return sc ? { ...m, _conflictResolved: { ...m._conflictResolved, smart_code: sc } } : m;
     }));
-    updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1 });
+    updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1, locked: true });
 
     // Phase 2 governance write — non-blocking; 409 = already registered, both are fine
     const token = await supabase.auth.getSession().then(r => r.data.session?.access_token ?? '');
@@ -834,7 +844,7 @@ export default function IngestPipeline() {
         )}
 
         {/* ── Stage 1: Match & Review ───────────────────────────────────── */}
-        {stage === 1 && (
+        {stage === 1 && (<>
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-start justify-between mb-4">
               <div>
@@ -959,8 +969,15 @@ export default function IngestPipeline() {
             </div>
 
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-              {matched.map((r, i) => (
-                <div key={i} className={`border rounded-lg p-3 ${r.matchType === 'fuzzy' ? 'border-amber-300 bg-amber-50/20' : 'border-gray-200'}`}>
+              {matched.map((r, i) => {
+                const pfx = buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: bulkZone.code });
+                const computedSC = pfx && r.resolvedData.unit_no ? `${pfx}-${r.resolvedData.unit_no}` : null;
+                const isConflicting = computedSC ? mcState.unit_conflicts.includes(computedSC) : false;
+                return (
+                <div key={i} className={`border rounded-lg p-3 ${
+                  isConflicting ? 'border-red-400 bg-red-50/30' :
+                  r.matchType === 'fuzzy' ? 'border-amber-300 bg-amber-50/20' : 'border-gray-200'
+                }`}>
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -981,7 +998,13 @@ export default function IngestPipeline() {
                         <span className="text-xs font-bold text-blue-700 font-mono">{String(r.resolvedData.unit_no)}</span>
                       </span>
                     ) : null}
-                    {r._conflictResolved.smart_code ? (
+                    {isConflicting && computedSC && (
+                      <span className="inline-flex items-center gap-1 shrink-0 bg-red-100 border border-red-400 rounded px-2 py-0.5">
+                        <span className="text-[9px] font-bold text-red-600 uppercase">CONFLICT</span>
+                        <span className="font-mono text-xs font-bold text-red-700">{computedSC}</span>
+                      </span>
+                    )}
+                    {!isConflicting && r._conflictResolved.smart_code ? (
                       <span className="inline-flex items-center shrink-0 bg-green-50 border border-green-200 rounded px-2 py-0.5">
                         <span className="font-mono text-xs font-bold text-green-700 tracking-wider">{String(r._conflictResolved.smart_code)}</span>
                       </span>
@@ -1021,7 +1044,8 @@ export default function IngestPipeline() {
                     onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-3">
@@ -1037,7 +1061,20 @@ export default function IngestPipeline() {
               </button>
             </div>
           </div>
-        )}
+
+          {overrideModalOpen && (
+            <OverrideGovernanceModal
+              prefix={buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: bulkZone.code }) ?? ''}
+              unitConflicts={mcState.unit_conflicts}
+              propertyRef={mcState.existing_matches[0]?.property_ref}
+              onCancel={() => setOverrideModalOpen(false)}
+              onConfirm={() => {
+                updateMc({ override_confirmed: true });
+                setOverrideModalOpen(false);
+              }}
+            />
+          )}
+        </>)}
 
         {/* ── Stage 2: Validation ───────────────────────────────────────── */}
         {stage === 2 && (

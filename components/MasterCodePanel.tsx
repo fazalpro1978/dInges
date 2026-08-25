@@ -6,14 +6,17 @@ export type EntityCode  = { entity_code: string; company_name: string };
 export type AgentEntry  = { agent_code: string; full_name: string; role?: string | null; [k: string]: unknown };
 
 export type MCState = {
-  category:       'R' | 'C';
-  entity_code:    string;
-  check_status:   'idle' | 'checking' | 'clear' | 'existing';
+  category:         'R' | 'C';
+  entity_code:      string;
+  check_status:     'idle' | 'checking' | 'clear' | 'existing';
   existing_matches: Array<{ master_code: string; created_at: string; property_ref?: string | null }>;
-  generated_code: string | null;
-  date_seg:       string;   // DDMM — locked at check time
-  time_seg:       string;   // HHMM — locked at check time
-  seq_num:        number;   // starts 100, log-only
+  unit_conflicts:   string[];   // smart_codes already in units (e.g. ['RAARAA66-311'])
+  override_confirmed: boolean;  // Admin/SU confirmed override after conflict
+  generated_code:   string | null;
+  date_seg:         string;   // DDMM — locked at check time
+  time_seg:         string;   // HHMM — locked at check time
+  seq_num:          number;   // starts 100, log-only
+  locked:           boolean;  // true after Apply — prefix is immutable
 };
 
 type Props = {
@@ -57,27 +60,34 @@ export default function MasterCodePanel({
       onStateChange({
         check_status:     data.hasConflict ? 'existing' : 'clear',
         existing_matches: data.matches ?? [],
+        unit_conflicts:   data.unitConflicts ?? [],
       });
     } catch {
       onStateChange({ check_status: 'idle' });
     }
   };
 
+  const hasUnitConflicts = state.unit_conflicts.length > 0;
+  const conflictIsBlocking = state.check_status === 'existing' && !state.override_confirmed;
+
   const statusColor = {
     idle:     '#6b7280',
     checking: '#3b82f6',
     clear:    '#16a34a',
-    existing: '#d97706',
+    existing: '#dc2626',  // red
   }[state.check_status];
 
   const statusLabel = {
     idle:     prefixOk ? '⬤ Prefix ready — run check' : '◯ Fill Category + Entity',
     checking: '⟳ Checking registry…',
     clear:    '✓ No conflicts — ready to apply',
-    existing: `⚠ ${state.existing_matches.length} existing code${state.existing_matches.length !== 1 ? 's' : ''} found`,
+    existing: hasUnitConflicts
+      ? `⛔ ${state.unit_conflicts.length} previously executed unit${state.unit_conflicts.length !== 1 ? 's' : ''} — override required`
+      : `⚠ Master Code prefix exists — override required`,
   }[state.check_status];
 
-  const canApply = state.check_status === 'clear' && state.generated_code === null;
+  const canApply = (state.check_status === 'clear' || (state.check_status === 'existing' && state.override_confirmed))
+    && state.generated_code === null;
 
   // Formatted prefix for display: R · ASM · AA · 66
   const prefixDisplay = prefix
@@ -93,13 +103,16 @@ export default function MasterCodePanel({
 
         {/* Market Category */}
         <div className="mb-3">
-          <p className="text-[9px] text-gray-400 uppercase tracking-wide mb-1">Market Category</p>
+          <p className="text-[9px] text-gray-400 uppercase tracking-wide mb-1">
+            Market Category {state.locked && <span className="text-amber-500 ml-1">🔒 locked</span>}
+          </p>
           <div className="flex gap-2">
             {(['R', 'C'] as const).map(cat => (
               <button
                 key={cat}
-                onClick={() => onStateChange({ category: cat, check_status: 'idle', existing_matches: [], generated_code: null })}
-                className={`flex-1 text-[10px] font-semibold py-1 rounded border transition-colors ${
+                disabled={state.locked}
+                onClick={() => onStateChange({ category: cat, check_status: 'idle', existing_matches: [], unit_conflicts: [], override_confirmed: false, generated_code: null })}
+                className={`flex-1 text-[10px] font-semibold py-1 rounded border transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
                   state.category === cat
                     ? cat === 'R'
                       ? 'bg-blue-600 text-white border-blue-600'
@@ -118,8 +131,9 @@ export default function MasterCodePanel({
           <label className="text-[9px] text-gray-400 uppercase tracking-wide">Entity (Realtor)</label>
           <select
             value={state.entity_code}
-            onChange={e => onStateChange({ entity_code: e.target.value, check_status: 'idle', existing_matches: [], generated_code: null })}
-            className="w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 mt-0.5"
+            disabled={state.locked}
+            onChange={e => onStateChange({ entity_code: e.target.value, check_status: 'idle', existing_matches: [], unit_conflicts: [], override_confirmed: false, generated_code: null })}
+            className="w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 mt-0.5 disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
             <option value="">— Select —</option>
             {entityCodes.map(e => (
@@ -135,11 +149,12 @@ export default function MasterCodePanel({
           <label className="text-[9px] text-gray-400 uppercase tracking-wide">Agent</label>
           <select
             value={agentCode}
+            disabled={state.locked}
             onChange={e => {
               onAgentChange(e.target.value);
-              onStateChange({ check_status: 'idle', existing_matches: [], generated_code: null });
+              onStateChange({ check_status: 'idle', existing_matches: [], unit_conflicts: [], override_confirmed: false, generated_code: null });
             }}
-            className="w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 mt-0.5"
+            className="w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 mt-0.5 disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
             <option value="">— Select agent —</option>
             {agents.map(a => (
@@ -226,7 +241,7 @@ export default function MasterCodePanel({
 
         <div className="mt-auto space-y-2">
           {/* Check button — Phase 1 */}
-          {prefixOk && (state.check_status === 'idle') && (
+          {prefixOk && state.check_status === 'idle' && !state.locked && (
             <button
               onClick={runCheck}
               className="w-full text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold"
@@ -237,7 +252,13 @@ export default function MasterCodePanel({
               Checking…
             </button>
           )}
-          {(state.check_status === 'clear' || state.check_status === 'existing') && !state.generated_code && (
+          {state.check_status === 'existing' && !state.generated_code && (
+            <button
+              onClick={runCheck}
+              className="w-full text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-semibold animate-pulse"
+            >⚠ Check Registry — CONFLICT</button>
+          )}
+          {state.check_status === 'clear' && !state.generated_code && (
             <button
               onClick={runCheck}
               className="w-full text-[10px] text-gray-500 border border-gray-200 rounded py-0.5 hover:bg-gray-100"
