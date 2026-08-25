@@ -8,7 +8,7 @@ import StructuredMapper, { type MappedPayload } from './StructuredMapper';
 import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
 import ZoneField, { type ZoneEntry } from './ZoneField';
-import MasterCodePanel, { type MCState, type EntityCode } from './MasterCodePanel';
+import MasterCodePanel, { type MCState, type EntityCode, type AgentEntry } from './MasterCodePanel';
 import { Badge, actionBadge } from './StructuredImportShared';
 import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
 import supabase from '../lib/supabaseClient';
@@ -162,10 +162,11 @@ export default function IngestPipeline() {
 
   // Master Code panel
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
-  const [agentCode, setAgentCode] = useState('');
-  const [agentName, setAgentName] = useState('');
-  const [manualAgentCode, setManualAgentCode] = useState('');
-  const effectiveAgentCode = agentCode || manualAgentCode;
+  const [agents, setAgents] = useState<AgentEntry[]>([]);
+  const [agentCode, setAgentCode] = useState('');   // pre-selected from profile; overrideable by dropdown
+  const [, setAgentName] = useState('');
+  const [selectedAgentCode, setSelectedAgentCode] = useState('');
+  const effectiveAgentCode = selectedAgentCode || agentCode;
   const [mcState, setMcState] = useState<MCState>({
     category: 'R', entity_code: '', check_status: 'idle',
     existing_matches: [], generated_code: null,
@@ -230,8 +231,9 @@ export default function IngestPipeline() {
             supabase.auth.getSession().then(({ data }) => {
               const token = data.session?.access_token ?? '';
               const h = { Authorization: `Bearer ${token}` };
-              fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { setAgentCode(d.agent_code ?? ''); setAgentName(d.full_name ?? ''); }).catch(() => {});
+              fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { const ac = d.agent_code ?? ''; setAgentCode(ac); setSelectedAgentCode(ac); }).catch(() => {});
               fetch('/api/master-code/entity-codes', { headers: h }).then(r => r.json()).then(d => setEntityCodes(d.entityCodes ?? [])).catch(() => {});
+              fetch('/api/master-code/agents', { headers: h }).then(r => r.json()).then(d => setAgents(d.agents ?? [])).catch(() => {});
             });
           }
           return;
@@ -936,12 +938,12 @@ export default function IngestPipeline() {
                 <MasterCodePanel
                   state={mcState}
                   agentCode={effectiveAgentCode}
-                  agentName={agentName}
                   zoneCode={bulkZone.code}
                   entityCodes={entityCodes}
+                  agents={agents}
                   recordCount={matched.length - excludedIdx.size}
                   onStateChange={updateMc}
-                  onAgentCodeChange={setManualAgentCode}
+                  onAgentChange={setSelectedAgentCode}
                   onApply={handleMcApply}
                 />
               </div>

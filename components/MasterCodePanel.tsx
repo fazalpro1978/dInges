@@ -2,7 +2,8 @@
 import React from 'react';
 import { buildMasterPrefix } from '@/lib/buildMasterCode';
 
-export type EntityCode = { entity_code: string; company_name: string };
+export type EntityCode  = { entity_code: string; company_name: string };
+export type AgentEntry  = { agent_code: string; full_name: string; role?: string | null; [k: string]: unknown };
 
 export type MCState = {
   category:       'R' | 'C';
@@ -16,20 +17,20 @@ export type MCState = {
 };
 
 type Props = {
-  state:        MCState;
-  agentCode:    string;
-  agentName:    string;
-  zoneCode:     string;
-  entityCodes:  EntityCode[];
-  recordCount:  number;
+  state:         MCState;
+  agentCode:     string;   // currently selected agent_code
+  zoneCode:      string;
+  entityCodes:   EntityCode[];
+  agents:        AgentEntry[];
+  recordCount:   number;
   onStateChange: (next: Partial<MCState>) => void;
-  onAgentCodeChange: (code: string) => void;  // fallback when profile has no agent_code
-  onApply:      () => void;   // Phase 2 register + apply to records
+  onAgentChange: (code: string) => void;
+  onApply:       () => void;
 };
 
 export default function MasterCodePanel({
-  state, agentCode, agentName, zoneCode, entityCodes, recordCount,
-  onStateChange, onAgentCodeChange, onApply,
+  state, agentCode, zoneCode, entityCodes, agents, recordCount,
+  onStateChange, onAgentChange, onApply,
 }: Props) {
   const prefix = buildMasterPrefix({
     category: state.category,
@@ -129,30 +130,24 @@ export default function MasterCodePanel({
           </select>
         </div>
 
-        {/* Agent — pre-filled from profile; editable fallback if profile has no agent_code */}
+        {/* Agent — dropdown from cr_agents, pre-selected from profile */}
         <div className="mb-3">
           <label className="text-[9px] text-gray-400 uppercase tracking-wide">Agent</label>
-          {agentCode ? (
-            <div className="flex items-center gap-1 border border-blue-200 bg-blue-50 rounded px-1.5 py-0.5 mt-0.5">
-              <span className="font-mono font-bold text-blue-700 text-xs">{agentCode}</span>
-              <span className="text-blue-500 text-xs truncate">{agentName}</span>
-            </div>
-          ) : (
-            <div className="mt-0.5">
-              <input
-                maxLength={2}
-                placeholder="AA"
-                value={agentCode}
-                onChange={e => {
-                  const v = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
-                  onAgentCodeChange(v);
-                  onStateChange({ check_status: 'idle', existing_matches: [], generated_code: null });
-                }}
-                className="w-full border border-amber-300 bg-amber-50 rounded px-1.5 py-0.5 text-xs font-mono font-bold text-amber-800 focus:outline-none focus:border-blue-400"
-              />
-              <p className="text-[8px] text-amber-600 mt-0.5">Enter your 2-letter agent code — profile has none set</p>
-            </div>
-          )}
+          <select
+            value={agentCode}
+            onChange={e => {
+              onAgentChange(e.target.value);
+              onStateChange({ check_status: 'idle', existing_matches: [], generated_code: null });
+            }}
+            className="w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 mt-0.5"
+          >
+            <option value="">— Select agent —</option>
+            {agents.map(a => (
+              <option key={a.agent_code} value={a.agent_code}>
+                {a.full_name}{a.role ? ` · ${a.role}` : ''} · {a.agent_code}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Zone — read-only */}
