@@ -947,9 +947,25 @@ export default function IngestPipeline() {
               />
               <button
                 disabled={!bulkRealtor.name.trim() || matched.length === excludedIdx.size}
-                onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
-                  ? m
-                  : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }))}
+                onClick={() => {
+                  // Apply realtor to matched records
+                  setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                    ? m
+                    : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }));
+                  // Auto-populate entity code in Code Registry by fuzzy-matching realtor name → company_name
+                  const realtorWords = bulkRealtor.name.toLowerCase().split(/\s+/);
+                  const matchedEntity = entityCodes.find(e =>
+                    realtorWords.some(w => w.length > 3 && e.company_name.toLowerCase().includes(w))
+                  );
+                  if (matchedEntity) {
+                    matched.forEach((m, i) => {
+                      if (!excludedIdx.has(i)) {
+                        const next = { ...getCR(m.rowIndex).fields, entity_code: matchedEntity.entity_code };
+                        updateCR(m.rowIndex, { fields: next, checkStatus: 'idle', existingMatches: [] });
+                      }
+                    });
+                  }
+                }}
                 className="mt-2 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold"
               >
                 Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
