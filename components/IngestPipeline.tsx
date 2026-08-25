@@ -387,9 +387,21 @@ export default function IngestPipeline() {
       category: mcState.category, entity_code: mcState.entity_code,
       agent_code: effectiveAgentCode, zone_code: zc, date_seg, time_seg,
     });
+    const pfx = master_code.slice(0, 8); // CAT+ENTITY+AGENT+ZONE — deterministic, no DB needed
+
+    // Apply chips immediately — display is independent of registry write
+    setMatched(prev => prev.map((m, i) => {
+      if (excludedIdx.has(i)) return m;
+      const unitNo = String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '').trim();
+      const sc = unitNo ? `${pfx}-${unitNo}` : null;
+      return sc ? { ...m, _conflictResolved: { ...m._conflictResolved, smart_code: sc } } : m;
+    }));
+    updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1 });
+
+    // Phase 2 governance write — non-blocking; 409 = already registered, both are fine
     const token = await supabase.auth.getSession().then(r => r.data.session?.access_token ?? '');
     const propertyRef = matched[0]?.resolvedData?.property as string | undefined;
-    const res = await fetch('/api/master-code/register', {
+    fetch('/api/master-code/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({
@@ -398,17 +410,7 @@ export default function IngestPipeline() {
         zone_code: zc, date_seg, time_seg, seq_num: mcState.seq_num,
         property_ref: propertyRef ?? null,
       }),
-    });
-    if (res.ok) {
-      const pfx = master_code.slice(0, 8); // CAT+ENTITY+AGENT+ZONE
-      setMatched(prev => prev.map((m, i) => {
-        if (excludedIdx.has(i)) return m;
-        const unitNo = String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '').trim();
-        const sc = unitNo ? `${pfx}-${unitNo}` : null;
-        return sc ? { ...m, _conflictResolved: { ...m._conflictResolved, smart_code: sc } } : m;
-      }));
-      updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1 });
-    }
+    }).catch(() => {});
   }, [mcState, effectiveAgentCode, bulkZone.code, matched, excludedIdx]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
