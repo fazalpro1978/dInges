@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 
 export type TypeConfig    = { type_code: string; configuration: string; category: string };
-export type EntityCode    = { entity_code: string; entity_name: string };
+export type EntityCode    = { entity_code: string; company_name: string };
 
 export type CRFields = {
   type_code:    string;
@@ -213,7 +213,7 @@ export default function CodeRegistryPanel({
               <option value="">— Select —</option>
               {entityCodes.map(e => (
                 <option key={e.entity_code} value={e.entity_code}>
-                  {e.entity_code} · {e.entity_name}
+                  {e.entity_code} · {e.company_name}
                 </option>
               ))}
             </select>

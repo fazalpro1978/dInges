@@ -9,8 +9,8 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await registry
     .from('cr_entity_codes')
-    .select('entity_code, entity_name')
-    .order('entity_name');
+    .select('entity_code, company_name')
+    .order('company_name');
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ entityCodes: data ?? [] });
