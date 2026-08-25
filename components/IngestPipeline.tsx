@@ -164,6 +164,8 @@ export default function IngestPipeline() {
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
   const [agentCode, setAgentCode] = useState('');
   const [agentName, setAgentName] = useState('');
+  const [manualAgentCode, setManualAgentCode] = useState('');
+  const effectiveAgentCode = agentCode || manualAgentCode;
   const [mcState, setMcState] = useState<MCState>({
     category: 'R', entity_code: '', check_status: 'idle',
     existing_matches: [], generated_code: null,
@@ -381,7 +383,7 @@ export default function IngestPipeline() {
     const zc = bulkZone.code || '00';
     const master_code = buildMasterCode({
       category: mcState.category, entity_code: mcState.entity_code,
-      agent_code: agentCode, zone_code: zc, date_seg, time_seg,
+      agent_code: effectiveAgentCode, zone_code: zc, date_seg, time_seg,
     });
     const token = await supabase.auth.getSession().then(r => r.data.session?.access_token ?? '');
     const propertyRef = matched[0]?.resolvedData?.property as string | undefined;
@@ -390,7 +392,7 @@ export default function IngestPipeline() {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         master_code, category: mcState.category,
-        entity_code: mcState.entity_code || null, agent_code: agentCode || null,
+        entity_code: mcState.entity_code || null, agent_code: effectiveAgentCode || null,
         zone_code: zc, date_seg, time_seg, seq_num: mcState.seq_num,
         property_ref: propertyRef ?? null,
       }),
@@ -398,7 +400,7 @@ export default function IngestPipeline() {
     if (res.ok) {
       updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1 });
     }
-  }, [mcState, agentCode, bulkZone.code, matched]);
+  }, [mcState, effectiveAgentCode, bulkZone.code, matched]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
@@ -933,12 +935,13 @@ export default function IngestPipeline() {
               <div className="col-span-2">
                 <MasterCodePanel
                   state={mcState}
-                  agentCode={agentCode}
+                  agentCode={effectiveAgentCode}
                   agentName={agentName}
                   zoneCode={bulkZone.code}
                   entityCodes={entityCodes}
                   recordCount={matched.length - excludedIdx.size}
                   onStateChange={updateMc}
+                  onAgentCodeChange={setManualAgentCode}
                   onApply={handleMcApply}
                 />
               </div>

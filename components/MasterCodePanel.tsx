@@ -23,12 +23,13 @@ type Props = {
   entityCodes:  EntityCode[];
   recordCount:  number;
   onStateChange: (next: Partial<MCState>) => void;
+  onAgentCodeChange: (code: string) => void;  // fallback when profile has no agent_code
   onApply:      () => void;   // Phase 2 register + apply to records
 };
 
 export default function MasterCodePanel({
   state, agentCode, agentName, zoneCode, entityCodes, recordCount,
-  onStateChange, onApply,
+  onStateChange, onAgentCodeChange, onApply,
 }: Props) {
   const prefix = buildMasterPrefix({
     category: state.category,
@@ -128,13 +129,30 @@ export default function MasterCodePanel({
           </select>
         </div>
 
-        {/* Agent — read-only */}
+        {/* Agent — pre-filled from profile; editable fallback if profile has no agent_code */}
         <div className="mb-3">
           <label className="text-[9px] text-gray-400 uppercase tracking-wide">Agent</label>
-          <div className="flex items-center gap-1 border border-blue-200 bg-blue-50 rounded px-1.5 py-0.5 mt-0.5">
-            <span className="font-mono font-bold text-blue-700 text-xs">{agentCode || '—'}</span>
-            <span className="text-blue-500 text-xs truncate">{agentName}</span>
-          </div>
+          {agentCode ? (
+            <div className="flex items-center gap-1 border border-blue-200 bg-blue-50 rounded px-1.5 py-0.5 mt-0.5">
+              <span className="font-mono font-bold text-blue-700 text-xs">{agentCode}</span>
+              <span className="text-blue-500 text-xs truncate">{agentName}</span>
+            </div>
+          ) : (
+            <div className="mt-0.5">
+              <input
+                maxLength={2}
+                placeholder="AA"
+                value={agentCode}
+                onChange={e => {
+                  const v = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
+                  onAgentCodeChange(v);
+                  onStateChange({ check_status: 'idle', existing_matches: [], generated_code: null });
+                }}
+                className="w-full border border-amber-300 bg-amber-50 rounded px-1.5 py-0.5 text-xs font-mono font-bold text-amber-800 focus:outline-none focus:border-blue-400"
+              />
+              <p className="text-[8px] text-amber-600 mt-0.5">Enter your 2-letter agent code — profile has none set</p>
+            </div>
+          )}
         </div>
 
         {/* Zone — read-only */}
