@@ -970,9 +970,10 @@ export default function IngestPipeline() {
                     if (best === 0) matchedEntity = undefined;
                   }
                   if (matchedEntity) {
+                    const entityCode = matchedEntity.entity_code;
                     matched.forEach((m, i) => {
                       if (!excludedIdx.has(i)) {
-                        const next = { ...getCR(m.rowIndex).fields, entity_code: matchedEntity.entity_code };
+                        const next = { ...getCR(m.rowIndex).fields, entity_code: entityCode };
                         updateCR(m.rowIndex, { fields: next, checkStatus: 'idle', existingMatches: [] });
                       }
                     });
