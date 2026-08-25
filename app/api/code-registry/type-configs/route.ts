@@ -23,10 +23,13 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (!auth.ok) return auth.response;
 
-  const { type_code, configuration, category } = await req.json();
+  const { type_code, core_type, configuration, category } = await req.json();
 
   if (!type_code || typeof type_code !== 'string' || type_code.trim().length !== 2) {
     return NextResponse.json({ error: 'type_code must be exactly 2 characters' }, { status: 400 });
+  }
+  if (!core_type?.trim()) {
+    return NextResponse.json({ error: 'core_type is required (e.g. Apartment, Villa)' }, { status: 400 });
   }
   if (!['R', 'C'].includes(category)) {
     return NextResponse.json({ error: 'category must be R or C' }, { status: 400 });
@@ -37,7 +40,7 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await registry
     .from('cr_property_type_configs')
-    .insert({ type_code: type_code.trim().toUpperCase(), configuration: configuration.trim(), category })
+    .insert({ type_code: type_code.trim().toUpperCase(), core_type: core_type.trim(), configuration: configuration.trim(), category })
     .select()
     .single();
 

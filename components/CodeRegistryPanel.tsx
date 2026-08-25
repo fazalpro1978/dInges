@@ -56,7 +56,7 @@ export default function CodeRegistryPanel({
   onStateChange, onInspect, onAddTypeConfig,
 }: Props) {
   const [addTypeOpen, setAddTypeOpen] = useState(false);
-  const [newType, setNewType] = useState({ type_code: '', configuration: '', category: 'R' });
+  const [newType, setNewType] = useState({ type_code: '', core_type: '', configuration: '', category: 'R' });
   const [addTypeErr, setAddTypeErr] = useState('');
   const [isAdding, setIsAdding] = useState(false);
 
@@ -87,6 +87,7 @@ export default function CodeRegistryPanel({
   const handleAddType = async () => {
     setAddTypeErr('');
     if (!newType.type_code.trim() || newType.type_code.trim().length !== 2) { setAddTypeErr('Type code must be 2 characters'); return; }
+    if (!newType.core_type.trim()) { setAddTypeErr('Core Type is required (e.g. Apartment, Villa)'); return; }
     if (!newType.configuration.trim()) { setAddTypeErr('Label is required'); return; }
     setIsAdding(true);
     try {
@@ -94,7 +95,7 @@ export default function CodeRegistryPanel({
       const res = await fetch('/api/code-registry/type-configs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(newType),
+        body: JSON.stringify({ type_code: newType.type_code, core_type: newType.core_type, configuration: newType.configuration, category: newType.category }),
       });
       const d = await res.json();
       if (!res.ok) { setAddTypeErr(d.error ?? 'Failed'); return; }
@@ -162,7 +163,11 @@ export default function CodeRegistryPanel({
               onChange={e => setNewType(p => ({ ...p, type_code: e.target.value.toUpperCase() }))}
               className="w-full border border-blue-200 rounded px-1.5 py-0.5 text-xs mb-1 focus:outline-none focus:border-blue-400"
             />
-            <input placeholder="Label (e.g. Master — Villa)" value={newType.configuration}
+            <input placeholder="Core Type (e.g. Apartment, Villa)" value={newType.core_type}
+              onChange={e => setNewType(p => ({ ...p, core_type: e.target.value }))}
+              className="w-full border border-blue-200 rounded px-1.5 py-0.5 text-xs mb-1 focus:outline-none focus:border-blue-400"
+            />
+            <input placeholder="Label / Config (e.g. Master — Villa)" value={newType.configuration}
               onChange={e => setNewType(p => ({ ...p, configuration: e.target.value }))}
               className="w-full border border-blue-200 rounded px-1.5 py-0.5 text-xs mb-1 focus:outline-none focus:border-blue-400"
             />
