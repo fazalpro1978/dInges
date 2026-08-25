@@ -12,7 +12,7 @@ const serviceClient = () =>
 // AXIOM is SU/AD only — any authenticated user with those roles is allowed
 export async function requireAuth(
   req: NextRequest,
-): Promise<{ ok: true; uid: string; role: Role } | { ok: false; response: NextResponse }> {
+): Promise<{ ok: true; uid: string; role: Role; agent_code: string; full_name: string } | { ok: false; response: NextResponse }> {
   const token = req.headers.get('authorization')?.replace('Bearer ', '').trim();
 
   if (!token) {
@@ -28,7 +28,7 @@ export async function requireAuth(
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, is_active')
+    .select('role, is_active, agent_code, full_name')
     .eq('id', user.id)
     .single();
 
@@ -36,7 +36,13 @@ export async function requireAuth(
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 
-  return { ok: true, uid: user.id, role: profile.role as Role };
+  return {
+    ok: true,
+    uid: user.id,
+    role: profile.role as Role,
+    agent_code: (profile.agent_code as string | null) ?? '',
+    full_name:  (profile.full_name  as string | null) ?? '',
+  };
 }
 
 /** API key check for server-to-server calls (REIMS → AXIOM) */

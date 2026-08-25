@@ -8,6 +8,7 @@ import StructuredMapper, { type MappedPayload } from './StructuredMapper';
 import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
 import ZoneField, { type ZoneEntry } from './ZoneField';
+import MasterCodePanel, { type MCState, type EntityCode } from './MasterCodePanel';
 import { Badge, actionBadge } from './StructuredImportShared';
 import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
 import supabase from '../lib/supabaseClient';
@@ -159,6 +160,17 @@ export default function IngestPipeline() {
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
   const [zones, setZones] = useState<ZoneEntry[]>([]);
 
+  // Master Code panel
+  const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
+  const [agentCode, setAgentCode] = useState('');
+  const [agentName, setAgentName] = useState('');
+  const [mcState, setMcState] = useState<MCState>({
+    category: 'R', entity_code: '', check_status: 'idle',
+    existing_matches: [], generated_code: null,
+    date_seg: '', time_seg: '', seq_num: 100,
+  });
+  const updateMc = (next: Partial<MCState>) => setMcState(prev => ({ ...prev, ...next }));
+
   // Stage 2 → Validation: per-row reject + inline cell editing + dynamic bulk fill
   const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
   const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
@@ -213,6 +225,12 @@ export default function IngestPipeline() {
             setStage(s.savedStage);
             fetch('/api/realtors').then(r => r.json()).then(d => setRealtors(d.realtors ?? [])).catch(() => {});
             fetch('/api/zones').then(r => r.json()).then(d => setZones(d.zones ?? [])).catch(() => {});
+            supabase.auth.getSession().then(({ data }) => {
+              const token = data.session?.access_token ?? '';
+              const h = { Authorization: `Bearer ${token}` };
+              fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { setAgentCode(d.agent_code ?? ''); setAgentName(d.full_name ?? ''); }).catch(() => {});
+              fetch('/api/master-code/entity-codes', { headers: h }).then(r => r.json()).then(d => setEntityCodes(d.entityCodes ?? [])).catch(() => {});
+            });
           }
           return;
         }
@@ -317,6 +335,12 @@ export default function IngestPipeline() {
         .then(r => r.json())
         .then(d => setZones(d.zones ?? []))
         .catch(() => {});
+      supabase.auth.getSession().then(({ data }) => {
+        const token = data.session?.access_token ?? '';
+        const h = { Authorization: `Bearer ${token}` };
+        fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { setAgentCode(d.agent_code ?? ''); setAgentName(d.full_name ?? ''); }).catch(() => {});
+        fetch('/api/master-code/entity-codes', { headers: h }).then(r => r.json()).then(d => setEntityCodes(d.entityCodes ?? [])).catch(() => {});
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Match failed');
     } finally {
@@ -345,6 +369,36 @@ export default function IngestPipeline() {
     ));
     setEditingCell(null);
   }, [zones]);
+
+  // ── Master Code Phase 2 register ─────────────────────────────────────────
+  const STOPWORDS = new Set(['real','estate','property','group','holding','company','qsc','qatar','al','el','the','and','of','development','properties','international','investments','investment']);
+
+  const handleMcApply = useCallback(async () => {
+    const { buildMasterCode, getNowSegments } = await import('@/lib/buildMasterCode');
+    const { date_seg, time_seg } = mcState.date_seg
+      ? { date_seg: mcState.date_seg, time_seg: mcState.time_seg }
+      : getNowSegments();
+    const zc = bulkZone.code || '00';
+    const master_code = buildMasterCode({
+      category: mcState.category, entity_code: mcState.entity_code,
+      agent_code: agentCode, zone_code: zc, date_seg, time_seg,
+    });
+    const token = await supabase.auth.getSession().then(r => r.data.session?.access_token ?? '');
+    const propertyRef = matched[0]?.resolvedData?.property as string | undefined;
+    const res = await fetch('/api/master-code/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        master_code, category: mcState.category,
+        entity_code: mcState.entity_code || null, agent_code: agentCode || null,
+        zone_code: zc, date_seg, time_seg, seq_num: mcState.seq_num,
+        property_ref: propertyRef ?? null,
+      }),
+    });
+    if (res.ok) {
+      updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1 });
+    }
+  }, [mcState, agentCode, bulkZone.code, matched]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
@@ -795,57 +849,99 @@ export default function IngestPipeline() {
               </div>
             )}
 
-            <div className="mb-4 border border-blue-200 bg-blue-50 rounded-lg p-3">
-              <label className="flex items-center gap-2 text-xs font-semibold text-blue-800 mb-2">
-                <input
-                  type="checkbox"
-                  checked={excludedIdx.size === 0}
-                  onChange={e => setExcludedIdx(e.target.checked ? new Set() : new Set(matched.map((_, i) => i)))}
-                />
-                Select all — bulk apply Realtor to {matched.length - excludedIdx.size} of {matched.length} records
-              </label>
-              <RealtorField
-                name={bulkRealtor.name}
-                moci={bulkRealtor.moci}
-                realtors={realtors}
-                onChange={setBulkRealtor}
-                onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
-              />
-              <button
-                disabled={!bulkRealtor.name.trim() || matched.length === excludedIdx.size}
-                onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
-                  ? m
-                  : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }))}
-                className="mt-2 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold"
-              >
-                Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
-              </button>
-            </div>
+            {/* ── 3-column bulk panel ─────────────────────────────────── */}
+            <div className="grid grid-cols-3 border border-gray-200 rounded-xl overflow-hidden mb-4">
 
-            <div className="mb-4">
-              <ZoneField
-                code={bulkZone.code}
-                name={bulkZone.name}
-                zones={zones}
-                onChange={next => setBulkZone(next)}
-                onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
-              />
-              <button
-                disabled={(!bulkZone.code && !bulkZone.name) || matched.length === excludedIdx.size}
-                onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
-                  ? m
-                  : {
-                      ...m,
-                      _conflictResolved: {
-                        ...m._conflictResolved,
-                        ...(bulkZone.code ? { zone_code: Number(bulkZone.code) } : {}),
-                        ...(bulkZone.name ? { zone: bulkZone.name } : {}),
-                      },
-                    }))}
-                className="mt-2 text-xs px-3 py-1.5 rounded bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold"
-              >
-                Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
-              </button>
+              {/* Col A: Record Fields */}
+              <div className="p-4 bg-blue-50 border-r border-gray-200">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-blue-400 mb-2">Record Fields</p>
+                <label className="flex items-center gap-2 text-xs font-semibold text-blue-800 mb-2">
+                  <input
+                    type="checkbox"
+                    checked={excludedIdx.size === 0}
+                    onChange={e => setExcludedIdx(e.target.checked ? new Set() : new Set(matched.map((_, i) => i)))}
+                  />
+                  Select all — {matched.length - excludedIdx.size} of {matched.length} records
+                </label>
+                <RealtorField
+                  name={bulkRealtor.name}
+                  moci={bulkRealtor.moci}
+                  realtors={realtors}
+                  onChange={setBulkRealtor}
+                  onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
+                />
+                <button
+                  disabled={!bulkRealtor.name.trim() || matched.length === excludedIdx.size}
+                  onClick={() => {
+                    setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                      ? m
+                      : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }));
+                    // Auto-populate entity from realtor name
+                    const rName = bulkRealtor.name.toLowerCase().trim();
+                    let matchedEntity = entityCodes.find(e => {
+                      const cn = e.company_name.toLowerCase();
+                      return cn.includes(rName) || rName.includes(cn);
+                    });
+                    if (!matchedEntity) {
+                      const rWords = rName.split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
+                      let best = 0;
+                      entityCodes.forEach(e => {
+                        const cn = e.company_name.toLowerCase();
+                        const score = rWords.filter(w => cn.includes(w)).length;
+                        if (score > best) { best = score; matchedEntity = e; }
+                      });
+                      if (best === 0) matchedEntity = undefined;
+                    }
+                    if (matchedEntity) {
+                      const ec = matchedEntity.entity_code;
+                      updateMc({ entity_code: ec, check_status: 'idle', existing_matches: [], generated_code: null });
+                    }
+                  }}
+                  className="mt-2 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold"
+                >
+                  Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
+                </button>
+
+                <div className="mt-3">
+                  <ZoneField
+                    code={bulkZone.code}
+                    name={bulkZone.name}
+                    zones={zones}
+                    onChange={next => setBulkZone(next)}
+                    onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+                  />
+                  <button
+                    disabled={(!bulkZone.code && !bulkZone.name) || matched.length === excludedIdx.size}
+                    onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                      ? m
+                      : {
+                          ...m,
+                          _conflictResolved: {
+                            ...m._conflictResolved,
+                            ...(bulkZone.code ? { zone_code: Number(bulkZone.code) } : {}),
+                            ...(bulkZone.name ? { zone: bulkZone.name } : {}),
+                          },
+                        }))}
+                    className="mt-2 text-xs px-3 py-1.5 rounded bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold"
+                  >
+                    Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Col B + C: Master Code Panel */}
+              <div className="col-span-2">
+                <MasterCodePanel
+                  state={mcState}
+                  agentCode={agentCode}
+                  agentName={agentName}
+                  zoneCode={bulkZone.code}
+                  entityCodes={entityCodes}
+                  recordCount={matched.length - excludedIdx.size}
+                  onStateChange={updateMc}
+                  onApply={handleMcApply}
+                />
+              </div>
             </div>
 
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
