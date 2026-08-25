@@ -11,10 +11,6 @@ import ZoneField, { type ZoneEntry } from './ZoneField';
 import { Badge, actionBadge } from './StructuredImportShared';
 import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
 import supabase from '../lib/supabaseClient';
-import CodeRegistryPanel, { type TypeConfig, type EntityCode, type CRCardState, buildPrefix } from './CodeRegistryPanel';
-import InspectionDrawer from './InspectionDrawer';
-import OverrideModal from './OverrideModal';
-import AuditTrail from './AuditTrail';
 
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
 
@@ -277,50 +273,6 @@ export default function IngestPipeline() {
     }
   }, [stage, matched]);
 
-  // ── Code Registry state ───────────────────────────────────────────────────
-  const [codeRegistry, setCodeRegistry] = useState<Record<number, CRCardState>>({});
-  const [typeConfigs,  setTypeConfigs]  = useState<TypeConfig[]>([]);
-  const [entityCodes,  setEntityCodes]  = useState<EntityCode[]>([]);
-  const [userAgentCode, setUserAgentCode] = useState('');
-  const [userAgentName, setUserAgentName] = useState('');
-  const [userRole,      setUserRole]      = useState('');
-  const [drawerCard,    setDrawerCard]    = useState<number | null>(null);   // rowIndex
-  const [drawerReason,  setDrawerReason]  = useState('');
-  const [drawerText,    setDrawerText]    = useState('');
-  const [overrideModal, setOverrideModal] = useState<{
-    rowIndex:    number;
-    field:       string;
-    before:      string;
-    after:       string;
-    registryId?: string;
-  } | null>(null);
-  const [showAuditTrail, setShowAuditTrail] = useState(false);
-
-  // Fetch Code Registry reference data + user profile on stage-1 entry
-  useEffect(() => {
-    if (stage !== 1) return;
-    (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token ?? '';
-        const headers = { Authorization: `Bearer ${token}` };
-        const [tcRes, ecRes, meRes] = await Promise.all([
-          fetch('/api/code-registry/type-configs', { headers }),
-          fetch('/api/code-registry/entity-codes', { headers }),
-          fetch('/api/auth/me', { headers }),
-        ]);
-        if (tcRes.ok) { const d = await tcRes.json(); setTypeConfigs(d.typeConfigs ?? []); }
-        if (ecRes.ok) { const d = await ecRes.json(); setEntityCodes(d.entityCodes ?? []); }
-        if (meRes.ok) {
-          const d = await meRes.json();
-          setUserAgentCode(d.agent_code ?? '');
-          setUserAgentName(d.full_name  ?? '');
-          setUserRole(d.role ?? '');
-        }
-      } catch {}
-    })();
-  }, [stage]);
-
   // Stage 0, structured (CSV/XLSX) sub-flow
   const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -329,80 +281,6 @@ export default function IngestPipeline() {
   // Batch audit log
   const [batchErrorSummary, setBatchErrorSummary] = useState<{ row: number; field: string; value: unknown; error: string }[]>([]);
   const [batchTotalRows, setBatchTotalRows] = useState(0);
-
-  // ── Code Registry helpers ─────────────────────────────────────────────────
-
-  const updateCR = useCallback((rowIndex: number, patch: Partial<CRCardState>) => {
-    setCodeRegistry(prev => ({
-      ...prev,
-      [rowIndex]: { ...(prev[rowIndex] ?? {
-        fields: { type_code: '', entity_code: '', agent_code: '', zone_code: '' },
-        prefix: null, checkStatus: 'idle', existingMatches: [],
-        resolution: 'unresolved', linkedSmartCode: null, generatedSmartCode: null,
-      }), ...patch },
-    }));
-  }, []);
-
-  const getCR = useCallback((rowIndex: number): CRCardState => codeRegistry[rowIndex] ?? {
-    fields: { type_code: '', entity_code: '', agent_code: userAgentCode, zone_code: '' },
-    prefix: null, checkStatus: 'idle', existingMatches: [],
-    resolution: 'unresolved', linkedSmartCode: null, generatedSmartCode: null,
-  }, [codeRegistry, userAgentCode]);
-
-  // Governance gate check: all non-excluded cards have CR fields + no unresolved EXISTING
-  const crGateBlocked = useCallback((): string | null => {
-    for (const r of matched) {
-      if (excludedIdx.has(matched.indexOf(r))) continue;
-      const cr = getCR(r.rowIndex);
-      if (!cr.fields.type_code || !cr.fields.entity_code) return 'Code Registry fields incomplete — fill Type and Entity for all records';
-      if (cr.checkStatus === 'existing' && cr.resolution === 'unresolved') return 'EXISTING duplicates detected — resolve each flagged card before advancing';
-    }
-    return null;
-  }, [matched, excludedIdx, getCR]);
-
-  // Phase 2: batch generate codes when governance gate passes
-  const generateSmartCodes = useCallback(async (): Promise<boolean> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token ?? '';
-    const records: { cardId: string; type_code: string; entity_code: string; agent_code: string; zone_code: number; building_name?: string; unit_ref?: string }[] = [];
-    const links:   { cardId: string; smart_code: string; registry_id: string }[] = [];
-
-    for (const r of matched) {
-      if (excludedIdx.has(matched.indexOf(r))) continue;
-      const cr = getCR(r.rowIndex);
-      const cardId = String(r.rowIndex);
-      if (cr.resolution === 'link' && cr.linkedSmartCode) {
-        links.push({ cardId, smart_code: cr.linkedSmartCode, registry_id: cr.linkedSmartCode });
-      } else {
-        records.push({
-          cardId,
-          type_code:    cr.fields.type_code,
-          entity_code:  cr.fields.entity_code,
-          agent_code:   userAgentCode,
-          zone_code:    Number(String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '0')),
-          building_name: String(r.resolvedData.property ?? ''),
-          unit_ref:     String(r.resolvedData.unit_no ?? ''),
-        });
-      }
-    }
-
-    try {
-      const res = await fetch('/api/code-registry/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ records, links }),
-      });
-      const data = await res.json();
-      for (const result of data.results ?? []) {
-        if (result.smart_code && !result.error) {
-          updateCR(Number(result.cardId), { generatedSmartCode: result.smart_code });
-        }
-      }
-      return !data.results?.some((r: { error?: string }) => r.error);
-    } catch {
-      return false;
-    }
-  }, [matched, excludedIdx, getCR, userAgentCode, updateCR]);
 
   // ── Stage 0: Upload & Extract ─────────────────────────────────────────────
 
@@ -467,18 +345,6 @@ export default function IngestPipeline() {
     ));
     setEditingCell(null);
   }, [zones]);
-
-  // Override modal: intercept stage-2 cell edits when Smart Code already generated
-  const handleCellEditWithOverride = useCallback((rowIndex: number, field: string, value: string | string[]) => {
-    const cr = getCR(rowIndex);
-    if (cr.generatedSmartCode && (field === 'type_code' || field === 'entity_code' || field === 'zone_code' || field === 'config')) {
-      const before = String((matched.find(m => m.rowIndex === rowIndex)?._conflictResolved ?? {})[field]
-        ?? (matched.find(m => m.rowIndex === rowIndex)?.resolvedData ?? {})[field] ?? '');
-      setOverrideModal({ rowIndex, field, before, after: Array.isArray(value) ? value.join(', ') : value, registryId: cr.generatedSmartCode });
-      return;
-    }
-    handleCellEdit(rowIndex, field, value);
-  }, [getCR, matched, handleCellEdit]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
@@ -947,38 +813,9 @@ export default function IngestPipeline() {
               />
               <button
                 disabled={!bulkRealtor.name.trim() || matched.length === excludedIdx.size}
-                onClick={() => {
-                  // Apply realtor to matched records
-                  setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
-                    ? m
-                    : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }));
-                  // Auto-populate entity code: substring match first, then scored word match
-                  const STOPWORDS = new Set(['real','estate','property','group','holding','company','qsc','qatar','al','el','the','and','of','development','properties','international','investments','investment']);
-                  const rName = bulkRealtor.name.toLowerCase().trim();
-                  let matchedEntity = entityCodes.find(e => {
-                    const cn = e.company_name.toLowerCase();
-                    return cn.includes(rName) || rName.includes(cn);
-                  });
-                  if (!matchedEntity) {
-                    const rWords = rName.split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
-                    let best = 0;
-                    entityCodes.forEach(e => {
-                      const cn = e.company_name.toLowerCase();
-                      const score = rWords.filter(w => cn.includes(w)).length;
-                      if (score > best) { best = score; matchedEntity = e; }
-                    });
-                    if (best === 0) matchedEntity = undefined;
-                  }
-                  if (matchedEntity) {
-                    const entityCode = matchedEntity.entity_code;
-                    matched.forEach((m, i) => {
-                      if (!excludedIdx.has(i)) {
-                        const next = { ...getCR(m.rowIndex).fields, entity_code: entityCode };
-                        updateCR(m.rowIndex, { fields: next, checkStatus: 'idle', existingMatches: [] });
-                      }
-                    });
-                  }
-                }}
+                onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                  ? m
+                  : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }))}
                 className="mt-2 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold"
               >
                 Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
@@ -1046,54 +883,40 @@ export default function IngestPipeline() {
                       onChange={updated => setMatched(prev => prev.map((m, mi) => mi === i ? updated : m))}
                     />
                   )}
-                  <CodeRegistryPanel
-                    rowIndex={r.rowIndex}
-                    state={getCR(r.rowIndex)}
-                    typeConfigs={typeConfigs}
-                    entityCodes={entityCodes}
-                    agentCode={userAgentCode}
-                    agentName={userAgentName}
-                    zoneCodeFromRecord={String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '')}
-                    onStateChange={patch => updateCR(r.rowIndex, patch)}
-                    onInspect={() => { setDrawerCard(r.rowIndex); setDrawerReason(''); setDrawerText(''); }}
-                    onAddTypeConfig={cfg => setTypeConfigs(prev => [...prev, cfg].sort((a, b) => a.configuration.localeCompare(b.configuration)))}
+                  <RealtorField
+                    name={String(r._conflictResolved.realtor_name ?? r.resolvedData.realtor_name ?? '')}
+                    moci={String(r._conflictResolved.realtor_moci ?? r.resolvedData.realtor_moci ?? '')}
+                    realtors={realtors}
+                    onChange={next => setMatched(prev => prev.map((m, mi) => mi === i
+                      ? { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: next.name, realtor_moci: next.moci } }
+                      : m))}
+                    onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
+                  />
+                  <ZoneField
+                    code={String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '')}
+                    name={String(r._conflictResolved.zone ?? r.resolvedData.zone ?? '')}
+                    zones={zones}
+                    onChange={next => setMatched(prev => prev.map((m, mi) => mi === i ? {
+                      ...m, _conflictResolved: {
+                        ...m._conflictResolved,
+                        zone_code: next.code ? Number(next.code) : undefined,
+                        zone: next.name,
+                      },
+                    } : m))}
+                    onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
                   />
                 </div>
               ))}
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-3">
-              {(() => {
-                const crBlock = crGateBlocked();
-                const blocked = unresolvedConflicts > 0 || !!crBlock;
-                const tip = unresolvedConflicts > 0
-                  ? `${unresolvedConflicts} conflict${unresolvedConflicts > 1 ? 's' : ''} must be resolved`
-                  : crBlock ?? '';
-                return (
-                  <>
-                    {tip && <p className="text-xs text-amber-600 max-w-sm text-right">{tip}</p>}
-                    <button
-                      disabled={blocked || isProcessing}
-                      onClick={async () => {
-                        setIsProcessing(true);
-                        setError(null);
-                        try {
-                          const ok = await generateSmartCodes();
-                          if (!ok) { setError('Some Smart Codes failed to generate — check the cards and retry.'); return; }
-                          setStage(2);
-                        } catch (e) {
-                          setError(e instanceof Error ? e.message : 'Code generation failed');
-                        } finally {
-                          setIsProcessing(false);
-                        }
-                      }}
-                      className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
-                    >
-                      {isProcessing ? 'Generating codes…' : `Review ${matched.length} Records →`}
-                    </button>
-                  </>
-                );
-              })()}
+            <div className="mt-6 flex justify-end">
+              <button
+                disabled={unresolvedConflicts > 0}
+                onClick={() => setStage(2)}
+                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
+              >
+                Review {matched.length} Records →
+              </button>
             </div>
           </div>
         )}
@@ -1560,17 +1383,6 @@ export default function IngestPipeline() {
               );
             })()}
 
-            {/* Override Audit Trail toggle */}
-            <div className="mt-4">
-              <button
-                onClick={() => setShowAuditTrail(v => !v)}
-                className="text-xs text-blue-600 hover:underline flex items-center gap-1"
-              >
-                {showAuditTrail ? '▲ Hide' : '▼ Show'} Override Audit Trail
-              </button>
-              {showAuditTrail && <AuditTrail isSuperuser={userRole === 'superuser'} />}
-            </div>
-
             <div className="mt-6 flex justify-between items-center">
               <div className="flex items-center gap-2">
                 <button
@@ -1776,64 +1588,6 @@ export default function IngestPipeline() {
           </div>
         )}
       </main>
-
-      {/* ── Inspection Drawer (EXISTING duplicate side-by-side view) ─────────── */}
-      {drawerCard !== null && (() => {
-        const r = matched.find(m => m.rowIndex === drawerCard);
-        if (!r) return null;
-        return (
-          <InspectionDrawer
-            cardIndex={drawerCard}
-            record={{
-              property: String(r._conflictResolved.property ?? r.resolvedData.property ?? ''),
-              unit_no:  String(r._conflictResolved.unit_no  ?? r.resolvedData.unit_no  ?? ''),
-              config:   String(r._conflictResolved.config   ?? r.resolvedData.config   ?? ''),
-              type:     String(r._conflictResolved.type     ?? r.resolvedData.type     ?? ''),
-            }}
-            crState={getCR(drawerCard)}
-            overrideReason={drawerReason}
-            setOverrideReason={setDrawerReason}
-            overrideText={drawerText}
-            setOverrideText={setDrawerText}
-            onClose={() => setDrawerCard(null)}
-            onResolve={(resolution, linkedCode) => {
-              updateCR(drawerCard, { resolution, linkedSmartCode: linkedCode ?? null });
-              setDrawerCard(null);
-            }}
-          />
-        );
-      })()}
-
-      {/* ── Override Modal (post-generation edit gate, strict mode) ──────────── */}
-      {overrideModal && (
-        <OverrideModal
-          fieldChanged={overrideModal.field}
-          valueBefore={overrideModal.before}
-          valueAfter={overrideModal.after}
-          onCancel={() => setOverrideModal(null)}
-          onConfirm={async (reasonCode, reasonText) => {
-            // Persist the cell edit that triggered the modal
-            handleCellEdit(overrideModal.rowIndex, overrideModal.field, overrideModal.after);
-            // Write the override audit record via API
-            const { data: { session } } = await supabase.auth.getSession();
-            const token = session?.access_token ?? '';
-            await fetch('/api/code-registry/override', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({
-                registry_id:  overrideModal.registryId,
-                smart_code:   getCR(overrideModal.rowIndex).generatedSmartCode ?? '',
-                field_changed: overrideModal.field,
-                value_before:  overrideModal.before,
-                value_after:   overrideModal.after,
-                reason_code:   reasonCode,
-                reason_text:   reasonText,
-              }),
-            });
-            setOverrideModal(null);
-          }}
-        />
-      )}
 
       {/* ── Pipeline Termination Confirmation Modal ────────────────────────── */}
       {terminateConfirm && (
