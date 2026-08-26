@@ -1175,8 +1175,9 @@ export default function IngestPipeline() {
                   <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold">
                     <th className="px-3 py-2 text-left w-8 sticky left-0 z-20 bg-gray-50">#</th>
                     <th className="px-2 py-2 text-left w-10 sticky left-8 z-20 bg-gray-50">Match</th>
-                    <th className="px-2 py-2 text-left min-w-[130px] sticky left-[88px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Property</th>
-                    <th className="px-2 py-2 text-left w-16 sticky left-[218px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Unit No.</th>
+                    <th className="px-2 py-2 text-left min-w-[130px] sticky left-[88px] z-20 bg-gray-50">Property</th>
+                    <th className="px-2 py-2 text-left min-w-[144px] sticky left-[218px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Smart Code</th>
+                    <th className="px-2 py-2 text-left w-16 sticky left-[362px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Unit No.</th>
                     <th className="px-2 py-2 text-left w-14">Zone #</th>
                     <th className="px-2 py-2 text-left min-w-[100px]">Zone</th>
                     <th className="px-2 py-2 text-left w-20">Type</th>
@@ -1207,12 +1208,19 @@ export default function IngestPipeline() {
                         <td className={`px-2 py-1.5 sticky left-8 z-10 ${bgRow}`}>{actionBadge(r.action)}</td>
 
                         {/* Property — sticky, read-only */}
-                        <td className={`px-2 py-1.5 sticky left-[88px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                        <td className={`px-2 py-1.5 sticky left-[88px] z-10 ${bgRow}`}>
                           <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>
                         </td>
 
-                        {/* Unit No — sticky, read-only */}
+                        {/* Smart Code — sticky, read-only */}
                         <td className={`px-2 py-1.5 sticky left-[218px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                          {getVal('smart_code')
+                            ? <span className="font-mono text-xs font-bold text-green-700 tracking-wider bg-green-50 px-1.5 py-0.5 rounded">{getVal('smart_code')}</span>
+                            : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+
+                        {/* Unit No — sticky, read-only */}
+                        <td className={`px-2 py-1.5 sticky left-[362px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
                           <span className={!getVal('unit_no') ? 'text-red-500 font-bold' : 'text-blue-700 font-mono font-medium'}>{getVal('unit_no') || '!'}</span>
                         </td>
 
