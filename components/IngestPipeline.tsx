@@ -1638,6 +1638,22 @@ export default function IngestPipeline() {
                         {hasExisting && <option value="replace">Delete &amp; Re-insert</option>}
                       </select>
                     </div>
+                    {/* Secondary info row: Type · Config · Furnishing · Status · Rent */}
+                    {decision !== 'skip' && (
+                      <div className="mt-1.5 ml-8 flex items-center gap-2 flex-wrap">
+                        {[
+                          finalData.type       ? { label: String(finalData.type),       color: 'text-violet-600' }  : null,
+                          finalData.config     ? { label: String(finalData.config),     color: 'text-indigo-600' }  : null,
+                          finalData.furnishing ? { label: String(finalData.furnishing), color: finalData.furnishing === 'Furnished' ? 'text-green-600' : finalData.furnishing === 'Semi-furnished' ? 'text-amber-600' : 'text-gray-500' } : null,
+                          finalData.status     ? { label: String(finalData.status),     color: finalData.status === 'Available' ? 'text-green-600 font-semibold' : 'text-gray-500' } : null,
+                          finalData.rent       ? { label: `QAR ${Number(finalData.rent).toLocaleString()}`, color: 'text-emerald-700 font-semibold' } : null,
+                        ].filter(Boolean).map((item, idx, arr) => (
+                          <span key={idx} className={`text-[11px] ${item!.color}`}>
+                            {item!.label}{idx < arr.length - 1 ? <span className="text-gray-300 ml-2">·</span> : null}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {diffFields.length > 0 && decision !== 'skip' && (
                       <div className="mt-2 ml-8 flex flex-wrap gap-2">
                         {diffFields.map(d => (
