@@ -419,11 +419,14 @@ export default function IngestPipeline() {
     const pfx = master_code.slice(0, 8); // CAT+ENTITY+AGENT+ZONE — deterministic, no DB needed
 
     // Apply chips immediately — display is independent of registry write
+    // Both master_code (16-digit property-level) and smart_code (unit-level) travel with each record
     setMatched(prev => prev.map((m, i) => {
       if (excludedIdx.has(i)) return m;
       const unitNo = String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '').trim();
       const sc = unitNo ? `${pfx}-${unitNo}` : null;
-      return sc ? { ...m, _conflictResolved: { ...m._conflictResolved, smart_code: sc } } : m;
+      return sc
+        ? { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: sc } }
+        : { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
     }));
     updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1, locked: true });
 
@@ -1212,11 +1215,20 @@ export default function IngestPipeline() {
                           <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>
                         </td>
 
-                        {/* Smart Code — sticky, read-only */}
+                        {/* Smart Code — sticky, read-only; stacks 16-digit master_code over unit smart_code */}
                         <td className={`px-2 py-1.5 sticky left-[218px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
-                          {getVal('smart_code')
-                            ? <span className="font-mono text-xs font-bold text-green-700 tracking-wider bg-green-50 px-1.5 py-0.5 rounded">{getVal('smart_code')}</span>
-                            : <span className="text-gray-300 text-xs">—</span>}
+                          {(getVal('master_code') || getVal('smart_code')) ? (
+                            <div className="flex flex-col gap-0.5">
+                              {getVal('master_code') && (
+                                <span className="font-mono text-[10px] font-bold text-blue-700 tracking-widest leading-tight">{getVal('master_code')}</span>
+                              )}
+                              {getVal('smart_code') && (
+                                <span className="font-mono text-[10px] font-bold text-green-700 tracking-wider bg-green-50 px-1 py-px rounded leading-tight">{getVal('smart_code')}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 text-xs">—</span>
+                          )}
                         </td>
 
                         {/* Unit No — sticky, read-only */}
