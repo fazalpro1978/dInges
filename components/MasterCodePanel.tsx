@@ -151,8 +151,10 @@ export default function MasterCodePanel({
             value={agentCode}
             disabled={state.locked}
             onChange={e => {
-              onAgentChange(e.target.value);
-              onStateChange({ check_status: 'idle', existing_matches: [], unit_conflicts: [], override_confirmed: false, generated_code: null });
+              const val = e.target.value;
+              onAgentChange(val);
+              // Defer state reset so the native select closes cleanly before re-render
+              setTimeout(() => onStateChange({ check_status: 'idle', existing_matches: [], unit_conflicts: [], override_confirmed: false, generated_code: null }), 0);
             }}
             className="w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 mt-0.5 disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
