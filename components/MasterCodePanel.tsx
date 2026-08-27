@@ -3,7 +3,7 @@ import React from 'react';
 import { buildMasterPrefix } from '@/lib/buildMasterCode';
 
 export type EntityCode  = { entity_code: string; company_name: string };
-export type AgentEntry  = { agent_code: string; full_name: string; role?: string | null; [k: string]: unknown };
+export type AgentEntry  = { agent_code: string; full_name: string; email?: string | null; [k: string]: unknown };
 
 export type MCState = {
   category:         'R' | 'C';
@@ -161,7 +161,7 @@ export default function MasterCodePanel({
             <option value="">— Select agent —</option>
             {agents.map(a => (
               <option key={a.agent_code} value={a.agent_code}>
-                {a.full_name}{a.role ? ` · ${a.role}` : ''} · {a.agent_code}
+                {a.full_name} · {a.agent_code}
               </option>
             ))}
           </select>

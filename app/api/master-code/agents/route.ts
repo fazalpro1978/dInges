@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await registry
     .from('cr_agents')
-    .select('agent_code, full_name, role')
+    .select('agent_code, full_name, email')
     .order('full_name');
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
