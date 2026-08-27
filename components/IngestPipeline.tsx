@@ -387,6 +387,25 @@ export default function IngestPipeline() {
   // ── Master Code Phase 2 register ─────────────────────────────────────────
   const STOPWORDS = new Set(['real','estate','property','group','holding','company','qsc','qatar','al','el','the','and','of','development','properties','international','investments','investment']);
 
+  const autoPopulateEntity = useCallback((realtorName: string) => {
+    if (!realtorName.trim() || mcState.locked) return;
+    const rName = realtorName.toLowerCase().trim();
+    let matched = entityCodes.find(e => {
+      const cn = e.company_name.toLowerCase();
+      return cn.includes(rName) || rName.includes(cn);
+    });
+    if (!matched) {
+      const rWords = rName.split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
+      let best = 0;
+      entityCodes.forEach(e => {
+        const score = rWords.filter(w => e.company_name.toLowerCase().includes(w)).length;
+        if (score > best) { best = score; matched = e; }
+      });
+      if (best === 0) matched = undefined;
+    }
+    if (matched) updateMc({ entity_code: matched.entity_code, check_status: 'idle', existing_matches: [], unit_conflicts: [], generated_code: null });
+  }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
+
   const handleMcApply = useCallback(async () => {
     const { buildMasterCode, getNowSegments } = await import('@/lib/buildMasterCode');
     const { date_seg, time_seg } = mcState.date_seg
@@ -890,7 +909,7 @@ export default function IngestPipeline() {
                   name={bulkRealtor.name}
                   moci={bulkRealtor.moci}
                   realtors={realtors}
-                  onChange={setBulkRealtor}
+                  onChange={r => { setBulkRealtor(r); autoPopulateEntity(r.name); }}
                   onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
                 />
                 <button
@@ -899,26 +918,7 @@ export default function IngestPipeline() {
                     setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
                       ? m
                       : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }));
-                    // Auto-populate entity from realtor name
-                    const rName = bulkRealtor.name.toLowerCase().trim();
-                    let matchedEntity = entityCodes.find(e => {
-                      const cn = e.company_name.toLowerCase();
-                      return cn.includes(rName) || rName.includes(cn);
-                    });
-                    if (!matchedEntity) {
-                      const rWords = rName.split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
-                      let best = 0;
-                      entityCodes.forEach(e => {
-                        const cn = e.company_name.toLowerCase();
-                        const score = rWords.filter(w => cn.includes(w)).length;
-                        if (score > best) { best = score; matchedEntity = e; }
-                      });
-                      if (best === 0) matchedEntity = undefined;
-                    }
-                    if (matchedEntity) {
-                      const ec = matchedEntity.entity_code;
-                      updateMc({ entity_code: ec, check_status: 'idle', existing_matches: [], generated_code: null });
-                    }
+                    autoPopulateEntity(bulkRealtor.name);
                   }}
                   className="mt-2 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold"
                 >
