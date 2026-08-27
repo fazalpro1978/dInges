@@ -1619,7 +1619,15 @@ export default function IngestPipeline() {
                       <span className="text-xs text-gray-400 w-6">#{r.rowIndex + 1}</span>
                       {actionBadge(r.action)}
                       <span className="font-medium text-sm truncate flex-1">{String(finalData.property ?? finalData.unit_code ?? '—')}</span>
-                      <span className="text-xs text-gray-500">{String(finalData.unit_no ?? '')}</span>
+                      {/* Dual-stack: 16-digit master_code over unit smart_code — mirrors Validation column */}
+                      <div className="flex flex-col gap-0.5 items-end shrink-0">
+                        {finalData.master_code
+                          ? <span className="font-mono text-[10px] font-bold text-blue-700 tracking-widest leading-tight">{String(finalData.master_code)}</span>
+                          : null}
+                        {finalData.smart_code
+                          ? <span className="font-mono text-[10px] font-bold text-green-700 tracking-wider bg-green-50 px-1 py-px rounded leading-tight">{String(finalData.smart_code)}</span>
+                          : <span className="text-xs text-gray-400">{String(finalData.unit_no ?? '')}</span>}
+                      </div>
                       <select
                         value={decision}
                         onChange={e => setRecordActions(prev => ({ ...prev, [r.rowIndex]: e.target.value as RecordDecision }))}
