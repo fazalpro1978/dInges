@@ -17,7 +17,7 @@ import supabase from '../lib/supabaseClient';
 
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
 
-type RecordDecision = 'import' | 'skip' | 'replace';
+type RecordDecision = 'import' | 'skip' | 'replace' | 'backfill';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ type MatchedRecord = {
   resolvedData: Record<string, unknown>;
   action: RowAction | 'unresolved';
   conflictFields: Record<string, ConflictField> | null;
-  existingSnapshot: { status: string; rent: number; furnishing: string } | null;
+  existingSnapshot: { status: string; rent: number; furnishing: string; smart_code?: string | null } | null;
   _conflictResolved: Record<string, unknown>;
 };
 
@@ -165,6 +165,7 @@ export default function IngestPipeline() {
   // Master Code panel
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
   const [agents, setAgents] = useState<AgentEntry[]>([]);
+  const [userRole, setUserRole] = useState<string>('');
   const [agentCode, setAgentCode] = useState('');   // pre-selected from profile; overrideable by dropdown
   const [, setAgentName] = useState('');
   const [selectedAgentCode, setSelectedAgentCode] = useState('');
@@ -234,7 +235,7 @@ export default function IngestPipeline() {
             supabase.auth.getSession().then(({ data }) => {
               const token = data.session?.access_token ?? '';
               const h = { Authorization: `Bearer ${token}` };
-              fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { const ac = d.agent_code ?? ''; setAgentCode(ac); setSelectedAgentCode(ac); }).catch(() => {});
+              fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { const ac = d.agent_code ?? ''; setAgentCode(ac); setSelectedAgentCode(ac); setUserRole(d.role ?? ''); }).catch(() => {});
               fetch('/api/master-code/entity-codes', { headers: h }).then(r => r.json()).then(d => setEntityCodes(d.entityCodes ?? [])).catch(() => {});
               fetch('/api/master-code/agents', { headers: h }).then(r => r.json()).then(d => setAgents(d.agents ?? [])).catch(() => {});
             });
@@ -345,7 +346,7 @@ export default function IngestPipeline() {
       supabase.auth.getSession().then(({ data }) => {
         const token = data.session?.access_token ?? '';
         const h = { Authorization: `Bearer ${token}` };
-        fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { setAgentCode(d.agent_code ?? ''); setAgentName(d.full_name ?? ''); }).catch(() => {});
+        fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { setAgentCode(d.agent_code ?? ''); setAgentName(d.full_name ?? ''); setUserRole(d.role ?? ''); }).catch(() => {});
         fetch('/api/master-code/entity-codes', { headers: h }).then(r => r.json()).then(d => setEntityCodes(d.entityCodes ?? [])).catch(() => {});
       });
     } catch (e) {
@@ -522,11 +523,17 @@ export default function IngestPipeline() {
       const decision = recordActions[r.rowIndex] ?? 'import';
       if (decision === 'skip') acc.skip++;
       else if (decision === 'replace') acc.replace++;
+      else if (decision === 'backfill') acc.backfill++;
       else if (r.action === 'new') acc.insert++;
-      else acc.update++;
+      else {
+        const sc = r.existingSnapshot?.smart_code;
+        const incomingSc = (r._conflictResolved.smart_code ?? r.resolvedData.smart_code ?? '') as string;
+        if (sc && sc !== incomingSc) acc.duplicate++;
+        else acc.update++;
+      }
       return acc;
     },
-    { insert: 0, update: 0, replace: 0, skip: 0 },
+    { insert: 0, update: 0, replace: 0, skip: 0, backfill: 0, duplicate: 0 },
   );
 
   // ── Stage 2 → Validation → Stage 3: write staged_records ─────────────────
@@ -561,7 +568,19 @@ export default function IngestPipeline() {
       setStagedRecords(sData.records ?? []);
 
       const actions: Record<number, RecordDecision> = {};
-      activeMatched.forEach(r => { actions[r.rowIndex] = 'import'; });
+      activeMatched.forEach(r => {
+        const sc = r.existingSnapshot?.smart_code;
+        const incomingSc = (r._conflictResolved.smart_code ?? r.resolvedData.smart_code ?? '') as string;
+        if (!r.existingSnapshot) {
+          actions[r.rowIndex] = 'import';
+        } else if (!sc) {
+          actions[r.rowIndex] = 'backfill'; // existing unit, no smart_code yet
+        } else if (sc !== incomingSc) {
+          actions[r.rowIndex] = 'skip';     // smart_code conflict — default to skip
+        } else {
+          actions[r.rowIndex] = 'import';
+        }
+      });
       setRecordActions(actions);
 
       setStage(3); // Stage Analysis
@@ -590,10 +609,23 @@ export default function IngestPipeline() {
             return { stagedId: stagedRec.id, decision: 'rejected' as const };
           }
           const finalData = { ...r.resolvedData, ...r._conflictResolved };
+          let resolvedData: Record<string, unknown>;
+          if (decision === 'backfill') {
+            // Field-level patch — only stamp smart_code + master_code on existing unit
+            resolvedData = {
+              ...finalData,
+              __patch_only:   true,
+              __patch_fields: ['smart_code', 'master_code'],
+            };
+          } else if (decision === 'replace') {
+            resolvedData = { ...finalData, __force_delete: true };
+          } else {
+            resolvedData = finalData;
+          }
           return {
             stagedId: stagedRec.id,
             decision: 'approved' as const,
-            resolvedData: decision === 'replace' ? { ...finalData, __force_delete: true } : finalData,
+            resolvedData,
           };
         })
         .filter((a): a is NonNullable<typeof a> => a !== null);
@@ -1593,6 +1625,8 @@ export default function IngestPipeline() {
               <div className="flex items-center gap-2">
                 <Badge label={`${stageSummary.insert} Insert`} color="#22c55e" />
                 <Badge label={`${stageSummary.update} Update`} color="#3b82f6" />
+                {stageSummary.backfill > 0 && <Badge label={`${stageSummary.backfill} Backfill`} color="#0891b2" />}
+                {stageSummary.duplicate > 0 && <Badge label={`${stageSummary.duplicate} Duplicate`} color="#d97706" />}
                 {stageSummary.replace > 0 && <Badge label={`${stageSummary.replace} Replace`} color="#f97316" />}
                 {stageSummary.skip > 0 && <Badge label={`${stageSummary.skip} Skip`} color="#9ca3af" />}
               </div>
@@ -1603,6 +1637,11 @@ export default function IngestPipeline() {
                 const finalData = { ...r.resolvedData, ...r._conflictResolved } as Record<string, unknown>;
                 const decision = recordActions[r.rowIndex] ?? 'import';
                 const hasExisting = r.existingSnapshot !== null;
+                const existingSc = r.existingSnapshot?.smart_code ?? null;
+                const incomingSc = String(finalData.smart_code ?? '');
+                const isBackfill  = hasExisting && !existingSc;
+                const isDuplicate = hasExisting && !!existingSc && existingSc !== incomingSc;
+                const isAdmin = ['superuser', 'administrator'].includes(userRole);
                 const diffFields: { field: string; from: unknown; to: unknown }[] = [];
                 if (r.existingSnapshot) {
                   (['status', 'rent', 'furnishing'] as const).forEach(f => {
@@ -1613,11 +1652,21 @@ export default function IngestPipeline() {
                     }
                   });
                 }
+                const cardBorder = isDuplicate ? 'border-amber-300 bg-amber-50/30'
+                  : isBackfill ? 'border-cyan-200 bg-cyan-50/20'
+                  : decision === 'skip' ? 'border-gray-200 bg-gray-50 opacity-60'
+                  : 'border-gray-200';
                 return (
-                  <div key={i} className={`border rounded-lg p-3 ${decision === 'skip' ? 'border-gray-200 bg-gray-50 opacity-60' : 'border-gray-200'}`}>
+                  <div key={i} className={`border rounded-lg p-3 ${cardBorder}`}>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-400 w-6">#{r.rowIndex + 1}</span>
                       {actionBadge(r.action)}
+                      {isBackfill && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#cffafe', color: '#0e7490' }}>BACKFILL</span>
+                      )}
+                      {isDuplicate && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>⚠ DUPLICATE</span>
+                      )}
                       <span className="font-medium text-sm truncate flex-1">{String(finalData.property ?? finalData.unit_code ?? '—')}</span>
                       {/* Dual-stack: 16-digit master_code over unit smart_code — mirrors Validation column */}
                       <div className="flex flex-col gap-0.5 items-end shrink-0">
@@ -1630,13 +1679,32 @@ export default function IngestPipeline() {
                       </div>
                       <select
                         value={decision}
+                        disabled={isDuplicate && !isAdmin}
                         onChange={e => setRecordActions(prev => ({ ...prev, [r.rowIndex]: e.target.value as RecordDecision }))}
-                        className="text-xs border border-gray-300 rounded px-2 py-1 bg-white font-medium"
+                        className={`text-xs border rounded px-2 py-1 bg-white font-medium ${isDuplicate && !isAdmin ? 'border-amber-300 cursor-not-allowed opacity-60' : 'border-gray-300'}`}
                       >
-                        <option value="import">{r.action === 'new' ? 'Insert' : 'Update'}</option>
-                        <option value="skip">Skip</option>
-                        {hasExisting && <option value="replace">Delete &amp; Re-insert</option>}
+                        {isBackfill ? (
+                          <>
+                            <option value="backfill">Patch smart_code only</option>
+                            <option value="skip">Skip</option>
+                          </>
+                        ) : isDuplicate ? (
+                          <>
+                            <option value="skip">Skip</option>
+                            {isAdmin && <option value="backfill">Override: Patch smart_code</option>}
+                            {isAdmin && <option value="replace">Override: Delete &amp; Re-insert</option>}
+                          </>
+                        ) : (
+                          <>
+                            <option value="import">{r.action === 'new' ? 'Insert' : 'Update'}</option>
+                            <option value="skip">Skip</option>
+                            {hasExisting && <option value="replace">Delete &amp; Re-insert</option>}
+                          </>
+                        )}
                       </select>
+                      {isDuplicate && !isAdmin && (
+                        <span className="text-[10px] text-amber-700 font-semibold">🔒 Admin only</span>
+                      )}
                     </div>
                     {/* Secondary info row: Type · Config · Furnishing · Status · Rent */}
                     {decision !== 'skip' && (
@@ -1661,6 +1729,14 @@ export default function IngestPipeline() {
                             <span className="capitalize">{d.field}</span>: {String(d.from)} → {String(d.to)}
                           </span>
                         ))}
+                      </div>
+                    )}
+                    {isDuplicate && (
+                      <div className="mt-2 ml-8 flex flex-wrap gap-2 items-center">
+                        <span className="text-[11px] text-amber-700">Existing smart_code:</span>
+                        <span className="font-mono text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-px rounded">{existingSc}</span>
+                        <span className="text-[11px] text-gray-400">→ incoming:</span>
+                        <span className="font-mono text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-px rounded">{incomingSc || '—'}</span>
                       </div>
                     )}
                     {decision === 'replace' && (

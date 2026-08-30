@@ -48,13 +48,13 @@ export async function POST(req: NextRequest) {
     }
 
     const [unitsRes, aliasRes] = await Promise.all([
-      reims.from('units').select('id, unit_code, property, unit_no, status, rent, furnishing, type, config, zone'),
+      reims.from('units').select('id, unit_code, property, unit_no, status, rent, furnishing, type, config, zone, smart_code'),
       reims.from('building_aliases').select('canonical_name, alias').limit(500),
     ]);
 
     const existingUnits = (unitsRes.data ?? []) as {
       id: string; unit_code: string; property: string; unit_no: string;
-      status: string; rent: number; furnishing: string; type: string; config: string; zone: string;
+      status: string; rent: number; furnishing: string; type: string; config: string; zone: string; smart_code: string | null;
     }[];
 
     const aliasMap = new Map<string, string>(
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
         resolvedData,
         action,
         conflictFields:   hasConflicts ? conflictFields : null,
-        existingSnapshot: matched ? { status: matched.status, rent: matched.rent, furnishing: matched.furnishing } : null,
+        existingSnapshot: matched ? { status: matched.status, rent: matched.rent, furnishing: matched.furnishing, smart_code: matched.smart_code ?? null } : null,
       };
     });
 

@@ -102,12 +102,16 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', a.stagedId);
 
+      const effectiveMatchType = (payload as Record<string, unknown>).__patch_only
+        ? 'backfill'
+        : staged.match_type;
+
       const { error: vettedErr } = await admin.from('vetted_records').insert({
         staged_id:   a.stagedId,
         run_id:      runId,
         payload,
         source_file: run?.source_file ?? null,
-        match_type:  staged.match_type,
+        match_type:  effectiveMatchType,
         approved_by: reviewer,
       });
 
