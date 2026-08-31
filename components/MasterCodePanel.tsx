@@ -57,6 +57,11 @@ export default function MasterCodePanel({
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
+      if (!res.ok) {
+        console.error('[MC Check] error:', data);
+        onStateChange({ check_status: 'idle' });
+        return;
+      }
       onStateChange({
         check_status:     data.hasConflict ? 'existing' : 'clear',
         existing_matches: data.matches ?? [],
