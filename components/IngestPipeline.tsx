@@ -442,8 +442,14 @@ export default function IngestPipeline() {
         entity_code: mcState.entity_code || null, agent_code: effectiveAgentCode || null,
         zone_code: zc, date_seg, time_seg, seq_num: mcState.seq_num,
         property_ref: propertyRef ?? null,
+        batch_id: null,
       }),
-    }).catch(() => {});
+    }).then(async r => {
+      if (!r.ok && r.status !== 409) {
+        const body = await r.json().catch(() => ({}));
+        console.error('[MC Register] failed', r.status, body);
+      }
+    }).catch(err => console.error('[MC Register] network error', err));
   }, [mcState, effectiveAgentCode, bulkZone.code, matched, excludedIdx]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────

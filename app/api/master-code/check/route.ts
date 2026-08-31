@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     .filter(Boolean);
 
   return NextResponse.json({
-    hasConflict: (regData?.length ?? 0) > 0,
+    hasConflict: (regData?.length ?? 0) > 0 || unitConflicts.length > 0,
     matches:      regData ?? [],
     unitConflicts,
   });
