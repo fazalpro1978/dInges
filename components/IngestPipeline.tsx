@@ -1131,22 +1131,6 @@ export default function IngestPipeline() {
             </div>
           </div>
 
-          {overrideModalOpen && (
-            <OverrideGovernanceModal
-              prefix={buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: bulkZone.code }) ?? ''}
-              unitConflicts={mcState.unit_conflicts}
-              propertyRef={mcState.existing_matches[0]?.property_ref}
-              onCancel={() => setOverrideModalOpen(false)}
-              onConfirm={(result: OverrideResult) => {
-                updateMc({
-                  override_confirmed:      true,
-                  override_selected_units: result.selectedUnits,
-                  override_reason:         result.reason,
-                });
-                setOverrideModalOpen(false);
-              }}
-            />
-          )}
         </>)}
 
         {/* ── Stage 2: Validation ───────────────────────────────────────── */}
@@ -1956,6 +1940,24 @@ export default function IngestPipeline() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Override governance modal — rendered at root level to escape any parent stacking context */}
+      {overrideModalOpen && (
+        <OverrideGovernanceModal
+          prefix={buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: bulkZone.code }) ?? ''}
+          unitConflicts={mcState.unit_conflicts}
+          propertyRef={mcState.existing_matches[0]?.property_ref}
+          onCancel={() => setOverrideModalOpen(false)}
+          onConfirm={(result: OverrideResult) => {
+            updateMc({
+              override_confirmed:      true,
+              override_selected_units: result.selectedUnits,
+              override_reason:         result.reason,
+            });
+            setOverrideModalOpen(false);
+          }}
+        />
       )}
     </div>
   );
