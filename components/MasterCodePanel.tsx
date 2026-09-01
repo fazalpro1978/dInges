@@ -22,20 +22,21 @@ export type MCState = {
 };
 
 type Props = {
-  state:         MCState;
-  agentCode:     string;   // currently selected agent_code
-  zoneCode:      string;
-  entityCodes:   EntityCode[];
-  agents:        AgentEntry[];
-  recordCount:   number;
-  onStateChange: (next: Partial<MCState>) => void;
-  onAgentChange: (code: string) => void;
-  onApply:       () => void;
+  state:           MCState;
+  agentCode:       string;   // currently selected agent_code
+  zoneCode:        string;
+  entityCodes:     EntityCode[];
+  agents:          AgentEntry[];
+  recordCount:     number;
+  onStateChange:   (next: Partial<MCState>) => void;
+  onAgentChange:   (code: string) => void;
+  onApply:         () => void;
+  onOpenOverride?: () => void;
 };
 
 export default function MasterCodePanel({
   state, agentCode, zoneCode, entityCodes, agents, recordCount,
-  onStateChange, onAgentChange, onApply,
+  onStateChange, onAgentChange, onApply, onOpenOverride,
 }: Props) {
   const prefix = buildMasterPrefix({
     category: state.category,
@@ -262,10 +263,17 @@ export default function MasterCodePanel({
             </button>
           )}
           {state.check_status === 'existing' && !state.generated_code && (
-            <button
-              onClick={runCheck}
-              className="w-full text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-semibold animate-pulse"
-            >⚠ Check Registry — CONFLICT</button>
+            hasUnitConflicts && onOpenOverride ? (
+              <button
+                onClick={onOpenOverride}
+                className="w-full text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-semibold animate-pulse"
+              >⛔ Review Conflicts &amp; Override</button>
+            ) : (
+              <button
+                onClick={runCheck}
+                className="w-full text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-semibold animate-pulse"
+              >⚠ Check Registry — CONFLICT</button>
+            )
           )}
           {state.check_status === 'clear' && !state.generated_code && (
             <button

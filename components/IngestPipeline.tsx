@@ -1032,6 +1032,7 @@ export default function IngestPipeline() {
                   onStateChange={updateMc}
                   onAgentChange={setSelectedAgentCode}
                   onApply={handleMcApply}
+                  onOpenOverride={() => setOverrideModalOpen(true)}
                 />
               </div>
             </div>
