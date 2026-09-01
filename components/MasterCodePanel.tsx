@@ -12,6 +12,8 @@ export type MCState = {
   existing_matches: Array<{ master_code: string; created_at: string; property_ref?: string | null }>;
   unit_conflicts:   string[];   // smart_codes already in units (e.g. ['RAARAA66-311'])
   override_confirmed: boolean;  // Admin/SU confirmed override after conflict
+  override_selected_units: string[];  // subset of unit_conflicts chosen for override
+  override_reason:  string;     // mandatory audit reason
   generated_code:   string | null;
   date_seg:         string;   // DDMM — locked at check time
   time_seg:         string;   // HHMM — locked at check time

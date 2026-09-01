@@ -9,7 +9,7 @@ import StructuredValidator from './StructuredValidator';
 import RealtorField, { type Realtor } from './RealtorField';
 import ZoneField, { type ZoneEntry } from './ZoneField';
 import MasterCodePanel, { type MCState, type EntityCode, type AgentEntry } from './MasterCodePanel';
-import OverrideGovernanceModal from './OverrideGovernanceModal';
+import OverrideGovernanceModal, { type OverrideResult } from './OverrideGovernanceModal';
 import { buildMasterPrefix } from '@/lib/buildMasterCode';
 import { Badge, actionBadge } from './StructuredImportShared';
 import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
@@ -173,6 +173,7 @@ export default function IngestPipeline() {
   const [mcState, setMcState] = useState<MCState>({
     category: 'R', entity_code: '', check_status: 'idle',
     existing_matches: [], unit_conflicts: [], override_confirmed: false,
+    override_selected_units: [], override_reason: '',
     generated_code: null, date_seg: '', time_seg: '', seq_num: 100, locked: false,
   });
   const updateMc = (next: Partial<MCState>) => setMcState(prev => ({ ...prev, ...next }));
@@ -419,11 +420,18 @@ export default function IngestPipeline() {
     });
     const pfx = master_code.slice(0, 8); // CAT+ENTITY+AGENT+ZONE — deterministic, no DB needed
 
-    // Apply chips immediately — display is independent of registry write
-    // Both master_code (16-digit property-level) and smart_code (unit-level) travel with each record
+    // Conflict units NOT selected for override → skip (no smart_code applied this run)
+    const conflictSkipNos = new Set(
+      mcState.unit_conflicts
+        .filter(sc => !mcState.override_selected_units.includes(sc))
+        .map(sc => sc.slice(sc.indexOf('-') + 1)),
+    );
+
+    // Apply chips — both identifiers travel with each record; skip conflict units not overridden
     setMatched(prev => prev.map((m, i) => {
       if (excludedIdx.has(i)) return m;
       const unitNo = String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '').trim();
+      if (conflictSkipNos.has(unitNo)) return m; // leave unchanged — classifies as 'skip' in stage 3
       const sc = unitNo ? `${pfx}-${unitNo}` : null;
       return sc
         ? { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: sc } }
@@ -434,6 +442,21 @@ export default function IngestPipeline() {
     // Phase 2 governance write — non-blocking; 409 = already registered, both are fine
     const token = await supabase.auth.getSession().then(r => r.data.session?.access_token ?? '');
     const propertyRef = matched[0]?.resolvedData?.property as string | undefined;
+
+    // Audit log for override units
+    if (mcState.override_selected_units.length > 0) {
+      fetch('/api/master-code/log-override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          prefix: pfx,
+          smart_codes: mcState.override_selected_units,
+          reason: mcState.override_reason,
+          property_ref: propertyRef ?? null,
+        }),
+      }).catch(err => console.error('[MC Override Log] error', err));
+    }
+
     fetch('/api/master-code/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -617,7 +640,6 @@ export default function IngestPipeline() {
           const finalData = { ...r.resolvedData, ...r._conflictResolved };
           let resolvedData: Record<string, unknown>;
           if (decision === 'backfill') {
-            // Field-level patch — only stamp smart_code + master_code on existing unit
             resolvedData = {
               ...finalData,
               __patch_only:   true,
@@ -627,6 +649,11 @@ export default function IngestPipeline() {
             resolvedData = { ...finalData, __force_delete: true };
           } else {
             resolvedData = finalData;
+          }
+          // Tag single-unit or bulk overrides for the REIMS worker
+          const sc = String(finalData.smart_code ?? '');
+          if (sc && mcState.override_selected_units.includes(sc)) {
+            resolvedData = { ...resolvedData, __override_duplicate: true };
           }
           return {
             stagedId: stagedRec.id,
@@ -1109,8 +1136,12 @@ export default function IngestPipeline() {
               unitConflicts={mcState.unit_conflicts}
               propertyRef={mcState.existing_matches[0]?.property_ref}
               onCancel={() => setOverrideModalOpen(false)}
-              onConfirm={() => {
-                updateMc({ override_confirmed: true });
+              onConfirm={(result: OverrideResult) => {
+                updateMc({
+                  override_confirmed:      true,
+                  override_selected_units: result.selectedUnits,
+                  override_reason:         result.reason,
+                });
                 setOverrideModalOpen(false);
               }}
             />
