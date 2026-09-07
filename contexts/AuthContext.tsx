@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchProfile = useCallback(async (authUser: User) => {
     const { data } = await supabase
       .from('profiles')
-      .select('id,email,full_name,role,is_active,registration_status')
+      .select('id,email,full_name,role,is_active,registration_status,axiom_upload_authorised,platforms')
       .eq('id', authUser.id)
       .single();
 
@@ -61,6 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // AXIOM: only superuser and administrator can access
     if (!['superuser','administrator'].includes(data.role)) {
+      await supabase.auth.signOut();
+      router.replace('/login?reason=no-access');
+      return;
+    }
+
+    // Must have explicit AXIOM platform access (boolean flag OR platforms array)
+    const hasAxiomAccess =
+      data.axiom_upload_authorised === true ||
+      (data.platforms as string[] | null)?.includes('axiom') === true;
+    if (!hasAxiomAccess) {
       await supabase.auth.signOut();
       router.replace('/login?reason=no-access');
       return;

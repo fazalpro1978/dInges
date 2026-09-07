@@ -28,7 +28,7 @@ export async function requireAuth(
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, is_active, agent_code, full_name, axiom_upload_authorised')
+    .select('role, is_active, agent_code, full_name, axiom_upload_authorised, platforms')
     .eq('id', user.id)
     .single();
 
@@ -36,7 +36,13 @@ export async function requireAuth(
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 
-  if (!profile.axiom_upload_authorised) {
+  // Accept either the boolean flag OR the platforms array containing 'axiom'
+  const hasAxiomAccess =
+    (profile.axiom_upload_authorised as boolean | null) === true ||
+    (profile.platforms as string[] | null)?.includes('axiom') === true ||
+    ['superuser', 'administrator'].includes(profile.role);
+
+  if (!hasAxiomAccess) {
     return { ok: false, response: NextResponse.json({ error: 'AXIOM upload not authorised for this account' }, { status: 403 }) };
   }
 
@@ -46,7 +52,7 @@ export async function requireAuth(
     role: profile.role as Role,
     agent_code:               (profile.agent_code               as string | null)  ?? '',
     full_name:                (profile.full_name                as string | null)  ?? '',
-    axiom_upload_authorised:  (profile.axiom_upload_authorised  as boolean | null) ?? false,
+    axiom_upload_authorised:  hasAxiomAccess,
   };
 }
 
