@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Must have explicit AXIOM platform access (boolean flag OR platforms array)
     const hasAxiomAccess =
       data.axiom_upload_authorised === true ||
-      (data.platforms as string[] | null)?.includes('axiom') === true;
+      (data.platforms as string[] | null)?.includes('dinges') === true;
     if (!hasAxiomAccess) {
       await supabase.auth.signOut();
       router.replace('/login?reason=no-access');

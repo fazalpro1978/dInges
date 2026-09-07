@@ -39,7 +39,7 @@ export async function requireAuth(
   // Accept either the boolean flag OR the platforms array containing 'axiom'
   const hasAxiomAccess =
     (profile.axiom_upload_authorised as boolean | null) === true ||
-    (profile.platforms as string[] | null)?.includes('axiom') === true ||
+    (profile.platforms as string[] | null)?.includes('dinges') === true ||
     ['superuser', 'administrator'].includes(profile.role);
 
   if (!hasAxiomAccess) {
