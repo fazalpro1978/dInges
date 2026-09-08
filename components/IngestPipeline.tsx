@@ -192,6 +192,7 @@ export default function IngestPipeline() {
   // Stage 4 → REIMS Queue (manual confirmation — no auto-polling)
   const [approveResult, setApproveResult] = useState<{ approved: number; exported: number } | null>(null);
   const [forceCompleting, setForceCompleting] = useState(false);
+  const [confirmForceClose, setConfirmForceClose] = useState(false);
   const [schemaErrors, setSchemaErrors] = useState<Array<{ stagedId: string; rowIndex?: number; errors: { field: string; label: string; rule: string; value?: unknown }[] }>>([]);
 
   // Pipeline termination
@@ -1833,21 +1834,46 @@ export default function IngestPipeline() {
             {/* Admin / Superuser actions */}
             <div className="flex flex-col items-center gap-3">
               <p className="text-[11px] text-gray-400 uppercase tracking-widest">Administrator · Superuser</p>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={forceComplete}
-                  disabled={forceCompleting}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
-                >
-                  {forceCompleting ? 'Marking Done…' : 'Mark as Done'}
-                </button>
-                <button
-                  onClick={reset}
-                  className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors"
-                >
-                  Start Over
-                </button>
-              </div>
+              {!confirmForceClose ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setConfirmForceClose(true)}
+                    className="px-4 py-2 border border-gray-300 hover:bg-gray-50 text-gray-600 text-sm font-semibold rounded-lg transition-colors"
+                  >
+                    Force Close
+                  </button>
+                  <button
+                    onClick={reset}
+                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors"
+                  >
+                    Start Over
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-left max-w-sm">
+                  <p className="text-sm font-bold text-red-700 mb-1">⚠ Records will NOT be imported</p>
+                  <p className="text-xs text-red-600 mb-3">
+                    Force Close marks this run as done in Axiom without importing the{' '}
+                    <span className="font-semibold">{approveResult?.approved ?? activeMatched.length} records</span>{' '}
+                    into REIMS Units Inventory. Use only if REIMS has already imported these records via a different path.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmForceClose(false)}
+                      className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={forceComplete}
+                      disabled={forceCompleting}
+                      className="px-4 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors"
+                    >
+                      {forceCompleting ? 'Closing…' : 'Yes, Force Close Without Importing'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
