@@ -410,34 +410,66 @@ export default function IngestPipeline() {
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
   const handleMcApply = useCallback(async () => {
+    // AccessGate: verify axiom_upload_authorised before any smart_code generation
+    const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').single();
+    if (!profile?.axiom_upload_authorised) {
+      setError('Smart Code generation requires upload authorisation.');
+      return;
+    }
+
     const { buildMasterCode, getNowSegments } = await import('@/lib/buildMasterCode');
     const { date_seg, time_seg } = mcState.date_seg
       ? { date_seg: mcState.date_seg, time_seg: mcState.time_seg }
       : getNowSegments();
-    const zc = bulkZone.code || '00';
+    const zc = (bulkZone.code || '00').padStart(2, '0');
     const master_code = buildMasterCode({
       category: mcState.category, entity_code: mcState.entity_code,
       agent_code: effectiveAgentCode, zone_code: zc, date_seg, time_seg,
     });
-    const pfx = master_code.slice(0, 8); // CAT+ENTITY+AGENT+ZONE — deterministic, no DB needed
+    const pfx = master_code.slice(0, 8);
 
-    // Conflict units NOT selected for override → skip (no smart_code applied this run)
-    const conflictSkipNos = new Set(
-      mcState.unit_conflicts
-        .filter(sc => !mcState.override_selected_units.includes(sc))
-        .map(sc => sc.slice(sc.indexOf('-') + 1)),
+    // DynamicTypeMapping: resolve 2-char type code from unit config field
+    const resolveTypeCode = async (config: unknown): Promise<string> => {
+      const { data } = await supabase
+        .from('cr_property_type_configs')
+        .select('type_code')
+        .eq('config_key', String(config ?? ''))
+        .maybeSingle();
+      return (data?.type_code as string | null) ?? 'XX';
+    };
+
+    // SequenceGenerator + NaturalKeyDeduplication: assign unique smart_code via atomic RPC
+    const updatedMatched = await Promise.all(
+      matched.map(async (m, i) => {
+        if (excludedIdx.has(i)) return m;
+        const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
+        const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
+          p_category:  mcState.category,
+          p_entity:    mcState.entity_code,
+          p_agent:     (effectiveAgentCode || '00').slice(0, 2),
+          p_zone_code: zc,
+          p_type_code: typeCode,
+          p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
+          p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
+          p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
+          p_zone_name: bulkZone.name,
+        });
+        if (!assignment) return { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
+        if (assignment.action === 'patch') {
+          return {
+            ...m,
+            _conflictResolved: {
+              ...m._conflictResolved,
+              master_code,
+              smart_code: assignment.smart_code,
+              __patch_only: true,
+            },
+          };
+        }
+        return { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: assignment.smart_code } };
+      })
     );
-
-    // Apply chips — both identifiers travel with each record; skip conflict units not overridden
-    setMatched(prev => prev.map((m, i) => {
-      if (excludedIdx.has(i)) return m;
-      const unitNo = String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '').trim();
-      if (conflictSkipNos.has(unitNo)) return m; // leave unchanged — classifies as 'skip' in stage 3
-      const sc = unitNo ? `${pfx}-${unitNo}` : null;
-      return sc
-        ? { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: sc } }
-        : { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
-    }));
+    setMatched(updatedMatched);
     updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1, locked: true });
 
     // Phase 2 governance write — non-blocking; 409 = already registered, both are fine
@@ -474,7 +506,7 @@ export default function IngestPipeline() {
         console.error('[MC Register] failed', r.status, body);
       }
     }).catch(err => console.error('[MC Register] network error', err));
-  }, [mcState, effectiveAgentCode, bulkZone.code, matched, excludedIdx]);
+  }, [mcState, effectiveAgentCode, bulkZone.code, bulkZone.name, matched, excludedIdx]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
@@ -1040,9 +1072,8 @@ export default function IngestPipeline() {
 
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => {
-                const pfx = buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: bulkZone.code });
-                const computedSC = pfx && r.resolvedData.unit_no ? `${pfx}-${r.resolvedData.unit_no}` : null;
-                const isConflicting = computedSC ? mcState.unit_conflicts.includes(computedSC) : false;
+                const computedSC = (r._conflictResolved.smart_code as string | null) ?? null;
+                const isConflicting = r._conflictResolved.__patch_only === true;
                 return (
                 <div key={i} className={`border rounded-lg p-3 ${
                   isConflicting ? 'border-red-400 bg-red-50/30' :
@@ -1069,14 +1100,14 @@ export default function IngestPipeline() {
                       </span>
                     ) : null}
                     {isConflicting && computedSC && (
-                      <span className="inline-flex items-center gap-1 shrink-0 bg-red-100 border border-red-400 rounded px-2 py-0.5">
-                        <span className="text-[9px] font-bold text-red-600 uppercase">CONFLICT</span>
-                        <span className="font-mono text-xs font-bold text-red-700">{computedSC}</span>
+                      <span className="inline-flex items-center gap-1 shrink-0 bg-amber-100 border border-amber-400 rounded px-2 py-0.5">
+                        <span className="text-[9px] font-bold text-amber-600 uppercase">PATCH</span>
+                        <span className="font-mono text-xs font-bold text-amber-700">{computedSC}</span>
                       </span>
                     )}
-                    {!isConflicting && r._conflictResolved.smart_code ? (
+                    {!isConflicting && computedSC ? (
                       <span className="inline-flex items-center shrink-0 bg-green-50 border border-green-200 rounded px-2 py-0.5">
-                        <span className="font-mono text-xs font-bold text-green-700 tracking-wider">{String(r._conflictResolved.smart_code)}</span>
+                        <span className="font-mono text-xs font-bold text-green-700 tracking-wider">{computedSC}</span>
                       </span>
                     ) : null}
                     {r.existingSnapshot && (
