@@ -431,7 +431,7 @@ export default function IngestPipeline() {
     // DynamicTypeMapping: resolve 2-char type code from unit config field
     const resolveTypeCode = async (config: unknown): Promise<string> => {
       const { data } = await supabase
-        .from('cr_property_type_configs')
+        .from('cr_config_type_map')
         .select('type_code')
         .eq('config_key', String(config ?? ''))
         .maybeSingle();
