@@ -527,7 +527,7 @@ export default function IngestPipeline() {
 
   const handleFile = useCallback(async (file: File) => {
     const ext = file.name.toLowerCase().split('.').pop() ?? '';
-    if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') {
+    if (ext === 'csv') {
       setError(null);
       setFileName(file.name);
       setFileSize(file.size);
@@ -924,7 +924,7 @@ export default function IngestPipeline() {
                 <div>
                   <div className="text-4xl mb-3">📂</div>
                   <p className="text-sm font-medium text-gray-700">Drop file here or click to browse</p>
-                  <p className="text-xs text-gray-400 mt-1">CSV/XLSX → manual column mapping · PDF/Image → Claude AI extraction</p>
+                  <p className="text-xs text-gray-400 mt-1">CSV → manual column mapping · XLSX / PDF / Image → Claude AI extraction</p>
                 </div>
               )}
             </div>

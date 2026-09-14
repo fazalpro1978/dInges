@@ -118,6 +118,42 @@ Normalisation rules:
 - If a field is not present in the source, omit it entirely (do not include null values)
 - For multi-column layouts (units side by side), extract each unit as a separate record
 
+PATTERN G — Full-Financials Structured Table (Qatar property management leasing sheets):
+Triggered when the source has columns: Property | Location | Type | Description | Monthly Rent | Security Deposit | Kahramaa Deposit | Contract Processing Charge | Utilities | Amenities | PHOTOS | Contact Person | Kahrama Limit | Commission | Start Date | Booking Validity
+
+Column rules specific to Pattern G:
+- Property column contains "Flat # {num} ({property_code})" compound format:
+  * unit_no = the flat/unit number only (e.g. "109" from "Flat # 109 (CAP120 DJ)")
+  * property = the code in parentheses, e.g. "CAP120 DJ". If a section header row above the data group names the property differently, use that instead. This split rule applies ONLY to this compound format.
+- Location column: display text = zone name (→ zone field). If a [LINK:url] annotation is present on the cell, that URL → location_map_url.
+- Type column: "Flat" → type = "Apartment"; "Villa" → "Villa"; "Office" → "Office"; "Studio" → "Studio"
+- Description column: parse multiple sub-fields from one cell (separator is " - " or newline):
+  * Furnishing prefix in parentheses: "(Fully Furnished)" → Furnished; "(Semi Furnished)" → Semi-Furnished; "(Unfurnished)" → Unfurnished
+  * Bedroom count: "N Bedroom" → config = "N BHK"; "Studio" → config = "Studio"
+  * Bathroom count: "N Bathroom" or "N.N Bathroom" → bathrooms (numeric, e.g. 1.5)
+  * Parking: "Without Parking" → parking = 0; "One Dedicated Parking" → parking = 1; "Two Dedicated Parking" → parking = 2
+  * "Hall - Kitchen" or "Open Kitchen" or "Closed Kitchen" → kitchen field (YES / OPEN / CLOSE); treat "Hall - Kitchen" as CLOSE (enclosed)
+  * Strip the separator " - " between elements; it is not meaningful data.
+- Monthly Rent → rent (numeric)
+- Security Deposit → deposit_amount (numeric; strip "QAR", "QR", commas)
+- Kahramaa Deposit → extract amount into notes as "Kahramaa Deposit: {raw value}"
+- Contract Processing Charge → agency_fee (numeric amount; strip "QR", "QAR", "(Cash)" etc.)
+- Utilities column:
+  * Contains "Water & Electricity" AND "Including" → notes append "W&E: Included"
+  * Contains "Water & Electricity" AND "Excluding" → notes append "W&E: Excluded"
+  * Contains "Electricity, Gas & Marafeq" → notes append "W&E: Marafeq (confirm W&E status)"
+  * "Free Internet" or "WiFi" keyword → add "WiFi" to amenities
+  * Other utility text → append verbatim to notes as "Utilities: {text}"
+- Amenities column: free-text list → map keywords to allowed amenities[] values (Swimming pool/Pool → "Shared Pool"; Gym → "Shared Gym"; Steam → omit or "Shared Spa"; Rooftop → note only)
+- PHOTOS column: cell display text "PHOTOS" is ignored. If a [LINK:url] annotation is present → notes append "Media: {url}"
+- Contact Person column: may be formatted as "Name - Phone" or "Label - Phone" (e.g. "Security - 50032543") → contact_details = "{Name} {Phone}" (treat the label before " - " as the name)
+- Kahrama Limit column: append to notes as "Kahrama Limit: {raw value}"
+- Commission column: calculate agency_fee override only if agency_fee not already set: "1 Week" → round(rent × 12 / 52); "2 Week" → round(rent × 12 / 26); "1 Month" → rent. Append commission period to notes as "Commission: {raw value}".
+- Start Date column: "Immediately" → omit contract_start_date (available now); actual date → contract_start_date in YYYY-MM-DD
+- Booking Validity column: period stated (e.g. "2 Days", "7 Days") → notes append "Booking Validity: {value}"; blank or "N/A" → omit
+- Repeated header rows between data groups (same header text as row 3) must be discarded — treat them as section separators, not data.
+- section sub-header rows like "CURRENTLY AVAILABLE PROPERTIES (01,02 & 03 BHKS)" or "Available 01 Bedroom Apartments..." are context only — discard as data rows.
+
 Return raw JSON array only. No markdown, no explanation.`;
 
 function getClient() {
@@ -187,10 +223,29 @@ export async function POST(req: NextRequest) {
       const wb   = xlsx.read(buf, { type: 'buffer', cellDates: true });
       const rows: string[] = [];
       wb.SheetNames.forEach(name => {
-        const ws   = wb.Sheets[name];
-        const data = xlsx.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' });
+        const ws = wb.Sheets[name];
+        // Collect hyperlinks keyed by cell reference (e.g. "B4")
+        const links: Record<string, string> = {};
+        Object.entries(ws).forEach(([ref, cell]) => {
+          if (!ref.startsWith('!') && (cell as any).l?.Target) {
+            links[ref] = (cell as any).l.Target as string;
+          }
+        });
+        const range = xlsx.utils.decode_range(ws['!ref'] ?? 'A1');
+        const data: string[][] = [];
+        for (let r = range.s.r; r <= range.e.r; r++) {
+          const row: string[] = [];
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            const ref  = xlsx.utils.encode_cell({ r, c });
+            const cell = ws[ref];
+            const val  = cell ? xlsx.utils.format_cell(cell) : '';
+            const url  = links[ref];
+            row.push(url ? `${val} [LINK:${url}]` : val);
+          }
+          data.push(row);
+        }
         rows.push(`=== Sheet: ${name} ===`);
-        rows.push(data.map(r => (r as unknown[]).join('\t')).join('\n'));
+        rows.push(data.map(r => r.join('\t')).join('\n'));
       });
 
       const msg = await client.messages.create({
