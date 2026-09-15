@@ -232,6 +232,37 @@ export async function POST(req: NextRequest) {
     else if (['xlsx', 'xls', 'csv'].includes(ext)) {
       const wb   = xlsx.read(buf, { type: 'buffer', cellDates: true });
       const rows: string[] = [];
+
+      // Identify the best header row: the row with the most non-empty cells
+      // within the first 30 rows.
+      function findHeaderRow(grid: string[][]): number {
+        let best = 0, bestCount = 0;
+        for (let i = 0; i < Math.min(grid.length, 30); i++) {
+          const count = grid[i].filter(c => c.trim() !== '').length;
+          if (count > bestCount) { bestCount = count; best = i; }
+        }
+        return best;
+      }
+
+      // Keep only the header row + actual data rows (skip blanks, section
+      // sub-headers, and repeated header rows). Cap at 300 rows per sheet.
+      function filterRows(grid: string[][], headerIdx: number): string[][] {
+        const header = grid[headerIdx];
+        const headerKey = header.slice(0, 4).join('|');
+        const result: string[][] = [header];
+        let dataCount = 0;
+        for (let i = headerIdx + 1; i < grid.length && dataCount < 300; i++) {
+          const row = grid[i];
+          const nonEmpty = row.filter(c => c.trim() !== '').length;
+          if (nonEmpty === 0) continue;                            // blank
+          if (nonEmpty <= 2) continue;                             // section sub-header
+          if (row.slice(0, 4).join('|') === headerKey) continue;  // repeated header
+          result.push(row);
+          dataCount++;
+        }
+        return result;
+      }
+
       wb.SheetNames.forEach(name => {
         const ws = wb.Sheets[name];
         // Collect hyperlinks keyed by cell reference (e.g. "B4")
@@ -242,7 +273,7 @@ export async function POST(req: NextRequest) {
           }
         });
         const range = xlsx.utils.decode_range(ws['!ref'] ?? 'A1');
-        const data: string[][] = [];
+        const grid: string[][] = [];
         for (let r = range.s.r; r <= range.e.r; r++) {
           const row: string[] = [];
           for (let c = range.s.c; c <= range.e.c; c++) {
@@ -252,10 +283,12 @@ export async function POST(req: NextRequest) {
             const url  = links[ref];
             row.push(url ? `${val} [LINK:${url}]` : val);
           }
-          data.push(row);
+          grid.push(row);
         }
-        rows.push(`=== Sheet: ${name} ===`);
-        rows.push(data.map(r => r.join('\t')).join('\n'));
+        const headerIdx = findHeaderRow(grid);
+        const filtered  = filterRows(grid, headerIdx);
+        rows.push(`=== Sheet: ${name} (${filtered.length - 1} data rows) ===`);
+        rows.push(filtered.map(r => r.join('\t')).join('\n'));
       });
 
       const msg = await client.messages.stream({
