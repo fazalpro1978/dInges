@@ -235,18 +235,18 @@ export async function POST(req: NextRequest) {
 
       // Identify the best header row: the row with the most non-empty cells
       // within the first 30 rows.
-      function findHeaderRow(grid: string[][]): number {
+      const findHeaderRow = (grid: string[][]): number => {
         let best = 0, bestCount = 0;
         for (let i = 0; i < Math.min(grid.length, 30); i++) {
           const count = grid[i].filter(c => c.trim() !== '').length;
           if (count > bestCount) { bestCount = count; best = i; }
         }
         return best;
-      }
+      };
 
       // Keep only the header row + actual data rows (skip blanks, section
       // sub-headers, and repeated header rows). Cap at 300 rows per sheet.
-      function filterRows(grid: string[][], headerIdx: number): string[][] {
+      const filterRows = (grid: string[][], headerIdx: number): string[][] => {
         const header = grid[headerIdx];
         const headerKey = header.slice(0, 4).join('|');
         const result: string[][] = [header];
@@ -261,7 +261,7 @@ export async function POST(req: NextRequest) {
           dataCount++;
         }
         return result;
-      }
+      };
 
       wb.SheetNames.forEach(name => {
         const ws = wb.Sheets[name];
