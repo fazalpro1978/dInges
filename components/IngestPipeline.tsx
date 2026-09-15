@@ -1119,8 +1119,8 @@ export default function IngestPipeline() {
                         onClick={() => {
                           const chMap = new Map<number, { zone_code?: number; zone?: string }>();
                           entries.forEach(([prop, g]) => {
-                            const autoCode = g.zoneCodes.size === 1 ? [...g.zoneCodes][0] : '';
-                            const autoName = g.zoneNames.size === 1 ? [...g.zoneNames][0] : '';
+                            const autoCode = g.zoneCodes.size === 1 ? Array.from(g.zoneCodes)[0] : '';
+                            const autoName = g.zoneNames.size === 1 ? Array.from(g.zoneNames)[0] : '';
                             const sel = groupZoneSelections[prop] ?? (autoCode ? { code: autoCode, name: autoName } : null);
                             if (sel?.code || sel?.name) {
                               g.indices.forEach(idx => chMap.set(idx, {
@@ -1138,8 +1138,8 @@ export default function IngestPipeline() {
                   {/* Group rows */}
                   <div className="divide-y divide-gray-100">
                     {entries.map(([prop, g]) => {
-                      const autoCode = g.zoneCodes.size === 1 ? [...g.zoneCodes][0] : '';
-                      const autoName = g.zoneNames.size === 1 ? [...g.zoneNames][0] : '';
+                      const autoCode = g.zoneCodes.size === 1 ? Array.from(g.zoneCodes)[0] : '';
+                      const autoName = g.zoneNames.size === 1 ? Array.from(g.zoneNames)[0] : '';
                       const sel = groupZoneSelections[prop] ?? { code: autoCode, name: autoName };
                       const isConsistent = g.zoneCodes.size <= 1 && g.zoneNames.size <= 1;
                       const hasZone = g.zoneNames.size > 0;
