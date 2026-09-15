@@ -161,6 +161,7 @@ export default function IngestPipeline() {
   const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
   const [zones, setZones] = useState<ZoneEntry[]>([]);
+  const [groupZoneSelections, setGroupZoneSelections] = useState<Record<string, { code: string; name: string }>>({});
 
   // Master Code panel
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
@@ -330,6 +331,7 @@ export default function IngestPipeline() {
       setRejectedInValidation(new Set());
       setBulkRealtor({ name: '', moci: '' });
       setBulkZone({ code: '', name: '' });
+      setGroupZoneSelections({});
       setSummary(matchData.summary);
       setStructuredStage('idle');
       setPendingFile(null);
@@ -727,6 +729,7 @@ export default function IngestPipeline() {
     setBatchErrorSummary([]); setBatchTotalRows(0);
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
     setRecordActions({}); setRejectedInValidation(new Set()); setEditingCell(null);
+    setGroupZoneSelections({});
     setApproveResult(null); setSchemaErrors([]);
     setFileName(''); setFileSize(0); setError(null);
     setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
@@ -1069,6 +1072,152 @@ export default function IngestPipeline() {
                 />
               </div>
             </div>
+
+            {/* ── Multi-Zone Group Assignment ──────────────────────────────────── */}
+            {(() => {
+              type GInfo = { indices: number[]; zoneCodes: Set<string>; zoneNames: Set<string> };
+              const groups = new Map<string, GInfo>();
+              matched.forEach((m, i) => {
+                const prop = String(m._conflictResolved.property ?? m.resolvedData.property ?? '—');
+                if (!groups.has(prop)) groups.set(prop, { indices: [], zoneCodes: new Set(), zoneNames: new Set() });
+                const g = groups.get(prop)!;
+                g.indices.push(i);
+                const zc = String(m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? '');
+                const zn = String(m._conflictResolved.zone ?? m.resolvedData.zone ?? '');
+                if (zc) g.zoneCodes.add(zc);
+                if (zn) g.zoneNames.add(zn);
+              });
+              if (groups.size <= 1) return null;
+              const entries = [...groups.entries()];
+
+              function applyToGroup(indices: number[], code: string, name: string) {
+                if (!code && !name) return;
+                setMatched(prev => prev.map((m, i) => indices.includes(i) ? {
+                  ...m, _conflictResolved: {
+                    ...m._conflictResolved,
+                    ...(code ? { zone_code: Number(code) } : {}),
+                    ...(name ? { zone: name } : {}),
+                  },
+                } : m));
+              }
+
+              return (
+                <div className="mb-4 border border-violet-200 rounded-xl overflow-hidden bg-white">
+                  {/* Header */}
+                  <div className="bg-violet-50 border-b border-violet-100 px-4 py-2 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-violet-500">Multi-Zone Group Assignment</span>
+                      <span className="text-[10px] text-violet-400">{entries.length} property groups detected</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setExcludedIdx(new Set())}
+                        className="text-[10px] text-violet-400 hover:text-violet-600 underline"
+                      >Show all records</button>
+                      <button
+                        className="text-[10px] px-2.5 py-1 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold transition-colors"
+                        onClick={() => {
+                          const chMap = new Map<number, { zone_code?: number; zone?: string }>();
+                          entries.forEach(([prop, g]) => {
+                            const autoCode = g.zoneCodes.size === 1 ? [...g.zoneCodes][0] : '';
+                            const autoName = g.zoneNames.size === 1 ? [...g.zoneNames][0] : '';
+                            const sel = groupZoneSelections[prop] ?? (autoCode ? { code: autoCode, name: autoName } : null);
+                            if (sel?.code || sel?.name) {
+                              g.indices.forEach(idx => chMap.set(idx, {
+                                ...(sel.code ? { zone_code: Number(sel.code) } : {}),
+                                ...(sel.name ? { zone: sel.name } : {}),
+                              }));
+                            }
+                          });
+                          if (chMap.size) setMatched(prev => prev.map((m, i) => { const ch = chMap.get(i); return ch ? { ...m, _conflictResolved: { ...m._conflictResolved, ...ch } } : m; }));
+                        }}
+                      >Apply All Groups</button>
+                    </div>
+                  </div>
+
+                  {/* Group rows */}
+                  <div className="divide-y divide-gray-100">
+                    {entries.map(([prop, g]) => {
+                      const autoCode = g.zoneCodes.size === 1 ? [...g.zoneCodes][0] : '';
+                      const autoName = g.zoneNames.size === 1 ? [...g.zoneNames][0] : '';
+                      const sel = groupZoneSelections[prop] ?? { code: autoCode, name: autoName };
+                      const isConsistent = g.zoneCodes.size <= 1 && g.zoneNames.size <= 1;
+                      const hasZone = g.zoneNames.size > 0;
+                      const isFullyApplied = !!sel.name && g.indices.every(idx => {
+                        const m = matched[idx];
+                        return String(m._conflictResolved.zone ?? m.resolvedData.zone ?? '') === sel.name;
+                      });
+                      const onlyGroupShown = !matched.some((_, i) => !g.indices.includes(i) && !excludedIdx.has(i));
+
+                      return (
+                        <div key={prop} className={`px-4 py-2.5 flex items-center gap-3 ${isFullyApplied ? 'bg-green-50/40' : 'hover:bg-violet-50/30'} transition-colors`}>
+                          {/* Name + count */}
+                          <div className="w-36 shrink-0">
+                            <div className="font-semibold text-xs text-gray-800 truncate" title={prop}>{prop}</div>
+                            <div className="text-[10px] text-gray-400">{g.indices.length} record{g.indices.length !== 1 ? 's' : ''}</div>
+                          </div>
+
+                          {/* Zone status */}
+                          <div className="w-48 shrink-0 text-[10px]">
+                            {!hasZone ? (
+                              <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">No zone extracted</span>
+                            ) : isConsistent ? (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 truncate inline-block max-w-full" title={autoName}>✓ {autoName}</span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">Mixed ({g.zoneNames.size} zones)</span>
+                            )}
+                          </div>
+
+                          {/* Zone selector */}
+                          <div className="flex-1 min-w-0">
+                            <select
+                              value={sel.code}
+                              onChange={e => {
+                                const z = zones.find(z => z.zone_code === Number(e.target.value));
+                                setGroupZoneSelections(prev => ({ ...prev, [prop]: { code: e.target.value, name: z?.district_name ?? '' } }));
+                              }}
+                              className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-violet-400 transition-colors"
+                            >
+                              <option value="">— Select zone —</option>
+                              {zones.map(z => <option key={z.zone_code} value={String(z.zone_code)}>Zone {z.zone_code} — {z.district_name}</option>)}
+                            </select>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              disabled={!sel.code && !sel.name}
+                              onClick={() => applyToGroup(g.indices, sel.code, sel.name)}
+                              className={`text-[10px] px-2.5 py-1 rounded font-semibold transition-colors ${
+                                isFullyApplied
+                                  ? 'bg-green-100 text-green-700 border border-green-200 cursor-default'
+                                  : 'bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-40'
+                              }`}
+                            >
+                              {isFullyApplied ? '✓ Done' : `Apply ${g.indices.length}`}
+                            </button>
+                            <button
+                              title={onlyGroupShown ? 'Showing only this group' : `Filter records list to ${prop} only`}
+                              onClick={() => onlyGroupShown
+                                ? setExcludedIdx(new Set())
+                                : setExcludedIdx(new Set(matched.map((_, i) => i).filter(i => !g.indices.includes(i))))
+                              }
+                              className={`text-[10px] px-2 py-1 rounded border transition-colors ${
+                                onlyGroupShown
+                                  ? 'border-violet-400 bg-violet-100 text-violet-700 font-semibold'
+                                  : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                              }`}
+                            >
+                              {onlyGroupShown ? '✕ Filter' : 'Filter'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => {
