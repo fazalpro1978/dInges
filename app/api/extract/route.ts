@@ -172,6 +172,8 @@ function parseUnits(text: string): Record<string, unknown>[] {
   }
 }
 
+export const maxDuration = 300; // 5-min Vercel function timeout
+
 export async function POST(req: NextRequest) {
   const form = await req.formData();
   const file = form.get('file') as File | null;
@@ -190,7 +192,7 @@ export async function POST(req: NextRequest) {
       const b64       = buf.toString('base64');
       const mediaType = (ext === 'jpg' ? 'image/jpeg' : `image/${ext}`) as 'image/jpeg' | 'image/png' | 'image/webp';
 
-      const msg = await client.messages.create({
+      const msg = await client.messages.stream({
         model: MODEL,
         max_tokens: 16000,
         messages: [{
@@ -200,7 +202,7 @@ export async function POST(req: NextRequest) {
             { type: 'text', text: SCHEMA_PROMPT },
           ],
         }],
-      });
+      }).finalMessage();
 
       const text = msg.content.find(b => b.type === 'text')?.text ?? '[]';
       units = parseUnits(text);
@@ -210,7 +212,7 @@ export async function POST(req: NextRequest) {
     else if (ext === 'pdf') {
       const b64 = buf.toString('base64');
 
-      const msg = await client.messages.create({
+      const msg = await client.messages.stream({
         model: MODEL,
         max_tokens: 16000,
         messages: [{
@@ -220,7 +222,7 @@ export async function POST(req: NextRequest) {
             { type: 'text', text: SCHEMA_PROMPT },
           ] as any,
         }],
-      });
+      }).finalMessage();
 
       const text = msg.content.find(b => b.type === 'text')?.text ?? '[]';
       units = parseUnits(text);
@@ -256,7 +258,7 @@ export async function POST(req: NextRequest) {
         rows.push(data.map(r => r.join('\t')).join('\n'));
       });
 
-      const msg = await client.messages.create({
+      const msg = await client.messages.stream({
         model: MODEL,
         max_tokens: 64000,
         system: 'You are a data extraction engine. Output only a raw JSON array with no prose, no markdown, no explanation — the response must start with [ and end with ].',
@@ -264,7 +266,7 @@ export async function POST(req: NextRequest) {
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}`,
         }],
-      });
+      }).finalMessage();
 
       const text = msg.content.find(b => b.type === 'text')?.text ?? '[]';
       units = parseUnits(text);
