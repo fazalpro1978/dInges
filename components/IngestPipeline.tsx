@@ -412,9 +412,14 @@ export default function IngestPipeline() {
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
   const handleMcApply = useCallback(async () => {
-    // AccessGate: verify axiom_upload_authorised before any smart_code generation
-    const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').single();
-    if (!profile?.axiom_upload_authorised) {
+    // AccessGate: superuser/administrator role, dinges platform, or explicit flag
+    const { data: profile } = await supabase
+      .from('profiles').select('axiom_upload_authorised, role, platforms').single();
+    const hasAxiomAccess =
+      profile?.axiom_upload_authorised === true ||
+      ['superuser', 'administrator'].includes(profile?.role ?? '') ||
+      (profile?.platforms as string[] | null)?.includes('dinges') === true;
+    if (!hasAxiomAccess) {
       setError('Smart Code generation requires upload authorisation.');
       return;
     }
@@ -433,7 +438,7 @@ export default function IngestPipeline() {
     // DynamicTypeMapping: resolve 2-char type code from unit config field
     const resolveTypeCode = async (config: unknown): Promise<string> => {
       const { data } = await supabase
-        .from('cr_config_type_map')
+        .from('cr_property_type_configs')
         .select('type_code')
         .eq('config_key', String(config ?? ''))
         .maybeSingle();
