@@ -161,7 +161,15 @@ function getClient() {
 }
 
 function parseUnits(text: string): Record<string, unknown>[] {
-  return JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+  const stripped = text.replace(/```json\n?|\n?```/g, '').trim();
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    // Model prefixed the JSON with prose — find the array
+    const match = stripped.match(/\[[\s\S]*\]/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error('No valid JSON array in model response');
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -250,7 +258,8 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 16000,
+        max_tokens: 64000,
+        system: 'You are a data extraction engine. Output only a raw JSON array with no prose, no markdown, no explanation — the response must start with [ and end with ].',
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}`,
