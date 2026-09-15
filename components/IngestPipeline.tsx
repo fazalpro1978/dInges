@@ -1088,9 +1088,9 @@ export default function IngestPipeline() {
                 if (zn) g.zoneNames.add(zn);
               });
               if (groups.size <= 1) return null;
-              const entries = [...groups.entries()];
+              const entries = Array.from(groups.entries());
 
-              function applyToGroup(indices: number[], code: string, name: string) {
+              const applyToGroup = (indices: number[], code: string, name: string) => {
                 if (!code && !name) return;
                 setMatched(prev => prev.map((m, i) => indices.includes(i) ? {
                   ...m, _conflictResolved: {
@@ -1099,7 +1099,7 @@ export default function IngestPipeline() {
                     ...(name ? { zone: name } : {}),
                   },
                 } : m));
-              }
+              };
 
               return (
                 <div className="mb-4 border border-violet-200 rounded-xl overflow-hidden bg-white">
