@@ -1450,10 +1450,12 @@ export default function IngestPipeline() {
                   const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
                   const coded  = active.filter(m => !!(m._conflictResolved.smart_code ?? m.resolvedData.smart_code));
                   const allCoded = active.length > 0 && coded.length === active.length;
+                  const isDisabled = scAssigning || allCoded || !mcState.entity_code;
+                  console.log('[SC btn]', { active: active.length, coded: coded.length, allCoded, scAssigning, entity: mcState.entity_code, disabled: isDisabled });
                   return (
                     <button
                       onClick={handleAssignSmartCodes}
-                      disabled={scAssigning || allCoded || !mcState.entity_code}
+                      disabled={isDisabled}
                       title={allCoded ? 'All active rows have a Smart Code' : 'Assign per-unit Smart Codes using each row\'s confirmed Config, Zone and Category'}
                       className={`text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 border transition-colors ${
                         allCoded
