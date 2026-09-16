@@ -453,7 +453,7 @@ export default function IngestPipeline() {
       active.map(async m => {
         const config    = m._conflictResolved.config    ?? m.resolvedData.config;
         const category  = String(m._conflictResolved.category  ?? m.resolvedData.category  ?? mcState.category);
-        const zoneCode  = String(m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code || '00').padStart(2, '0');
+        const zoneCode  = String((m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code) || '00').padStart(2, '0');
         const zoneName  = String(m._conflictResolved.zone      ?? m.resolvedData.zone      ?? bulkZone.name ?? '');
         const typeCode  = await resolveTypeCode(config, category || mcState.category);
         const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
