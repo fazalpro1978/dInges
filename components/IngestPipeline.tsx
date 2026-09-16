@@ -166,6 +166,7 @@ export default function IngestPipeline() {
   const [groupZoneSelections, setGroupZoneSelections] = useState<Record<string, { code: string; name: string }>>({});
   const [groupZoneOpen, setGroupZoneOpen] = useState<string | null>(null);
   const [groupZoneSearch, setGroupZoneSearch] = useState<Record<string, string>>({});
+  const [groupZoneRect, setGroupZoneRect] = useState<DOMRect | null>(null);
   const [matchedHistory, setMatchedHistory] = useState<MatchedRecord[][]>([]);
   const pushHistory = useCallback(() =>
     setMatchedHistory(h => [...h.slice(-9), matched]), [matched]);
@@ -1191,15 +1192,16 @@ export default function IngestPipeline() {
                             )}
                           </div>
 
-                          {/* Zone selector — searchable inline picker */}
-                          <div className="flex-1 min-w-0 relative">
+                          {/* Zone selector — searchable picker with fixed dropdown to escape overflow-hidden */}
+                          <div className="flex-1 min-w-0">
                             <input
                               type="text"
                               placeholder="— Select zone —"
                               value={groupZoneOpen === prop
                                 ? (groupZoneSearch[prop] ?? '')
                                 : (sel.code ? `Zone ${sel.code} — ${sel.name}` : '')}
-                              onFocus={() => {
+                              onFocus={e => {
+                                setGroupZoneRect(e.currentTarget.getBoundingClientRect());
                                 setGroupZoneOpen(prop);
                                 setGroupZoneSearch(prev => ({ ...prev, [prop]: '' }));
                               }}
@@ -1207,13 +1209,22 @@ export default function IngestPipeline() {
                               onBlur={() => setTimeout(() => setGroupZoneOpen(o => o === prop ? null : o), 150)}
                               className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-violet-400 transition-colors"
                             />
-                            {groupZoneOpen === prop && (() => {
+                            {groupZoneOpen === prop && groupZoneRect && (() => {
                               const q = (groupZoneSearch[prop] ?? '').toLowerCase();
                               const filtered = zones.filter(z =>
                                 !q || String(z.zone_code).includes(q) || z.district_name.toLowerCase().includes(q)
                               );
                               return (
-                                <div className="absolute left-0 right-0 top-full mt-0.5 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-44 overflow-y-auto">
+                                <div
+                                  style={{
+                                    position: 'fixed',
+                                    top: groupZoneRect.bottom + 4,
+                                    left: groupZoneRect.left,
+                                    width: groupZoneRect.width,
+                                    zIndex: 9999,
+                                  }}
+                                  className="bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto"
+                                >
                                   {filtered.length === 0
                                     ? <p className="px-3 py-2 text-xs text-gray-400 italic">No zones match &ldquo;{groupZoneSearch[prop]}&rdquo;</p>
                                     : filtered.map(z => (
