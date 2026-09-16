@@ -268,11 +268,16 @@ export default function MasterCodePanel({
                 onClick={onOpenOverride}
                 className="w-full text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-semibold animate-pulse"
               >⛔ Review Conflicts &amp; Override</button>
-            ) : (
-              <button
-                onClick={runCheck}
-                className="w-full text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-semibold animate-pulse"
-              >⚠ Check Registry — CONFLICT</button>
+            ) : state.override_confirmed ? null : (
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-amber-700 font-medium">
+                  A previous batch used this prefix. Confirm this is a new upload for the same property to continue.
+                </p>
+                <button
+                  onClick={() => onStateChange({ override_confirmed: true })}
+                  className="w-full text-xs px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-semibold"
+                >Acknowledge &amp; Override</button>
+              </div>
             )
           )}
           {state.check_status === 'clear' && !state.generated_code && (
