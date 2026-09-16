@@ -166,6 +166,9 @@ export default function IngestPipeline() {
   const [groupZoneSelections, setGroupZoneSelections] = useState<Record<string, { code: string; name: string }>>({});
   const [groupZoneOpen, setGroupZoneOpen] = useState<string | null>(null);
   const [groupZoneSearch, setGroupZoneSearch] = useState<Record<string, string>>({});
+  const [matchedHistory, setMatchedHistory] = useState<MatchedRecord[][]>([]);
+  const pushHistory = useCallback(() =>
+    setMatchedHistory(h => [...h.slice(-9), matched]), [matched]);
 
   // Master Code panel
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
@@ -336,6 +339,7 @@ export default function IngestPipeline() {
       setBulkRealtor({ name: '', moci: '' });
       setBulkZone({ code: '', name: '' });
       setGroupZoneSelections({});
+      setMatchedHistory([]);
       setSummary(matchData.summary);
       setStructuredStage('idle');
       setPendingFile(null);
@@ -421,6 +425,7 @@ export default function IngestPipeline() {
       setError('Smart Code generation requires upload authorisation.');
       return;
     }
+    pushHistory();
 
     const { buildMasterCode, getNowSegments } = await import('@/lib/buildMasterCode');
     const { date_seg, time_seg } = mcState.date_seg
@@ -737,7 +742,7 @@ export default function IngestPipeline() {
     setBatchErrorSummary([]); setBatchTotalRows(0);
     setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
     setRecordActions({}); setRejectedInValidation(new Set()); setEditingCell(null);
-    setGroupZoneSelections({});
+    setGroupZoneSelections({}); setMatchedHistory([]);
     setApproveResult(null); setSchemaErrors([]);
     setFileName(''); setFileSize(0); setError(null);
     setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
@@ -983,6 +988,13 @@ export default function IngestPipeline() {
                 <p className="text-xs text-gray-500 mt-0.5">{fileName} · {matched.length} records extracted</p>
               </div>
               <div className="flex items-center gap-2">
+                {matchedHistory.length > 0 && (
+                  <button
+                    onClick={() => setMatchedHistory(h => { const prev = h[h.length - 1]; setMatched(prev); return h.slice(0, -1); })}
+                    className="text-xs px-3 py-1.5 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 font-semibold"
+                    title="Undo last bulk action"
+                  >↩ Undo{matchedHistory.length > 1 ? ` (${matchedHistory.length})` : ''}</button>
+                )}
                 <button
                   onClick={reset}
                   className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
@@ -1027,6 +1039,7 @@ export default function IngestPipeline() {
                 <button
                   disabled={!bulkRealtor.name.trim() || matched.length === excludedIdx.size}
                   onClick={() => {
+                    pushHistory();
                     setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
                       ? m
                       : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }));
@@ -1047,7 +1060,7 @@ export default function IngestPipeline() {
                   />
                   <button
                     disabled={(!bulkZone.code && !bulkZone.name) || matched.length === excludedIdx.size}
-                    onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                    onClick={() => { pushHistory(); setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
                       ? m
                       : {
                           ...m,
@@ -1056,7 +1069,7 @@ export default function IngestPipeline() {
                             ...(bulkZone.code ? { zone_code: Number(bulkZone.code) } : {}),
                             ...(bulkZone.name ? { zone: bulkZone.name } : {}),
                           },
-                        }))}
+                        })); }}
                     className="mt-2 text-xs px-3 py-1.5 rounded bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold"
                   >
                     Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
@@ -1100,6 +1113,7 @@ export default function IngestPipeline() {
 
               const applyToGroup = (indices: number[], code: string, name: string) => {
                 if (!code && !name) return;
+                pushHistory();
                 setMatched(prev => prev.map((m, i) => indices.includes(i) ? {
                   ...m, _conflictResolved: {
                     ...m._conflictResolved,
@@ -1125,6 +1139,7 @@ export default function IngestPipeline() {
                       <button
                         className="text-[10px] px-2.5 py-1 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold transition-colors"
                         onClick={() => {
+                          pushHistory();
                           const chMap = new Map<number, { zone_code?: number; zone?: string }>();
                           entries.forEach(([prop, g]) => {
                             const autoCode = g.zoneCodes.size === 1 ? Array.from(g.zoneCodes)[0] : '';
