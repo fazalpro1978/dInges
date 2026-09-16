@@ -446,8 +446,10 @@ export default function IngestPipeline() {
     // entity_code may be cleared from mcState between stages — recover from master_code
     const firstMc = matched.find(m => m._conflictResolved.master_code || m.resolvedData.master_code);
     const masterCodeRef = String(firstMc?._conflictResolved.master_code ?? firstMc?.resolvedData.master_code ?? '');
-    const entityCode = mcState.entity_code || (masterCodeRef.length >= 4 ? masterCodeRef.slice(1, 4) : '');
-    const agentCode = (effectiveAgentCode || (masterCodeRef.length >= 6 ? masterCodeRef.slice(4, 6) : '00'));
+    // master_code = Cat(1)+Entity(3)+Agent(2)+Zone(2)+Date(4)+Time(4) — recover cleared mcState fields
+    const categoryCode = mcState.category || (masterCodeRef.length >= 1 ? masterCodeRef[0] : 'R');
+    const entityCode   = mcState.entity_code || (masterCodeRef.length >= 4 ? masterCodeRef.slice(1, 4) : '');
+    const agentCode    = effectiveAgentCode || (masterCodeRef.length >= 6 ? masterCodeRef.slice(4, 6) : '00');
     if (!entityCode) {
       setError('No entity code — please complete Match & Review first.');
       return;
@@ -466,12 +468,12 @@ export default function IngestPipeline() {
     // Sequential to surface errors immediately and show accurate progress
     for (const m of active) {
       const config    = m._conflictResolved.config    ?? m.resolvedData.config;
-      const category  = String(m._conflictResolved.category  ?? m.resolvedData.category  ?? mcState.category);
+      const category  = String(m._conflictResolved.category  ?? m.resolvedData.category  ?? categoryCode);
       const zoneCode  = String((m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code) || '00').padStart(2, '0');
       const zoneName  = String(m._conflictResolved.zone      ?? m.resolvedData.zone      ?? bulkZone.name ?? '');
-      const typeCode  = await resolveTypeCode(config, category || mcState.category);
+      const typeCode  = await resolveTypeCode(config, category || categoryCode);
       const { data: assignment, error: rpcErr } = await supabase.rpc('cr_assign_smart_code', {
-        p_category:  category || mcState.category,
+        p_category:  category || categoryCode,
         p_entity:    entityCode,
         p_agent:     agentCode.slice(0, 2).padEnd(2, '0'),
         p_zone_code: zoneCode,
