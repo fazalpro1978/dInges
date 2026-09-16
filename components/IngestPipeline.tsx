@@ -422,19 +422,26 @@ export default function IngestPipeline() {
     if (matched) updateMc({ entity_code: matched.entity_code, check_status: 'idle', existing_matches: [], unit_conflicts: [], generated_code: null });
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
-  // DynamicTypeMapping: resolve 2-char type code via configuration + category.
-  // configuration is not unique — filter by category (R/C) and take the
-  // lowest type_code alphabetically for consistency.
+  // Hardcoded fallback matching the REIMS backfill DEFAULT_TYPE_MAP.
+  // Used when cr_property_type_configs returns no match.
+  const DEFAULT_TYPE_MAP: Record<string, string> = {
+    'Studio':    'ST', '1 BHK': '1B', '2 BHK': '2B', '3 BHK': '3B',
+    '4 BHK':     '4B', '5 BHK': '5B', 'Penthouse': 'PH', 'Villa': 'VL',
+    'Duplex':    'DP', 'Townhouse': 'TH',
+  };
+
+  // resolve 2-char type code: DB first (category-filtered), hardcoded map second, XX last.
   const resolveTypeCode = useCallback(async (config: unknown, category: string): Promise<string> => {
+    const configStr = String(config ?? '').trim();
     const { data } = await supabase
       .from('cr_property_type_configs')
       .select('type_code')
-      .eq('configuration', String(config ?? ''))
+      .eq('configuration', configStr)
       .eq('category', category)
       .order('type_code', { ascending: true })
       .limit(1)
       .maybeSingle();
-    return (data?.type_code as string | null) ?? 'XX';
+    return (data?.type_code as string | null) ?? DEFAULT_TYPE_MAP[configStr] ?? 'XX';
   }, [supabase]);
 
   // Validation-stage smart code assignment: per-row TypeCode resolution + atomic RPC.
