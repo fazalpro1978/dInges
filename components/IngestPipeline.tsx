@@ -474,10 +474,11 @@ export default function IngestPipeline() {
         p_zone_name: zoneName,
       });
       if (rpcErr && !firstError) firstError = rpcErr.message;
-      if (assignment) {
+      const row = Array.isArray(assignment) ? assignment[0] : assignment;
+      if (row?.smart_code) {
         updates.set(m.rowIndex, {
-          smart_code: assignment.smart_code,
-          ...(assignment.action === 'patch' ? { __patch_only: true } : {}),
+          smart_code: row.smart_code as string,
+          ...(row.action === 'patch' ? { __patch_only: true } : {}),
         });
       }
       done++;
