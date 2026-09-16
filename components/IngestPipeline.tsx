@@ -427,7 +427,7 @@ export default function IngestPipeline() {
   const DEFAULT_TYPE_MAP: Record<string, string> = {
     'Studio':    'ST', '1 BHK': '1B', '2 BHK': '2B', '3 BHK': '3B',
     '4 BHK':     '4B', '5 BHK': '5B', 'Penthouse': 'PH', 'Villa': 'VL',
-    'Duplex':    'DP', 'Townhouse': 'TH',
+    'Duplex':    'DP', 'Townhouse': 'TH', 'Office': 'OF',
   };
 
   // resolve 2-char type code: DB first (category-filtered), hardcoded map second, XX last.
