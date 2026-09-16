@@ -431,12 +431,17 @@ export default function IngestPipeline() {
     });
     const pfx = master_code.slice(0, 8);
 
-    // DynamicTypeMapping: resolve 2-char type code from unit config field
+    // DynamicTypeMapping: resolve 2-char type code via configuration + category
+    // configuration is not unique — filter by category (R/C) and take the
+    // standard sub-type (lowest type_code alphabetically for consistency)
     const resolveTypeCode = async (config: unknown): Promise<string> => {
       const { data } = await supabase
         .from('cr_property_type_configs')
         .select('type_code')
-        .eq('config_key', String(config ?? ''))
+        .eq('configuration', String(config ?? ''))
+        .eq('category', mcState.category)
+        .order('type_code', { ascending: true })
+        .limit(1)
         .maybeSingle();
       return (data?.type_code as string | null) ?? 'XX';
     };
