@@ -459,6 +459,10 @@ export default function IngestPipeline() {
       setError('No active rows to assign — all rows may be rejected.');
       return;
     }
+    // Clear any existing smart_codes (including XX fallbacks) before re-assigning
+    setMatched(prev => prev.map(m => ({
+      ...m, _conflictResolved: { ...m._conflictResolved, smart_code: undefined },
+    })));
     setScAssigning(true);
     setScProgress(0);
     let done = 0;
@@ -1455,26 +1459,31 @@ export default function IngestPipeline() {
                   const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
                   const coded  = active.filter(m => !!(m._conflictResolved.smart_code ?? m.resolvedData.smart_code));
                   const allCoded = active.length > 0 && coded.length === active.length;
-                  const isDisabled = scAssigning || allCoded;
+                  const hasXX = coded.some(m => String(m._conflictResolved.smart_code ?? m.resolvedData.smart_code ?? '').includes('XX'));
+                  const fullyDone = allCoded && !hasXX;
                   return (
                     <button
                       onClick={handleAssignSmartCodes}
-                      disabled={isDisabled}
-                      title={allCoded ? 'All active rows have a Smart Code' : 'Assign per-unit Smart Codes using each row\'s confirmed Config, Zone and Category'}
+                      disabled={scAssigning || fullyDone}
+                      title={fullyDone ? 'All active rows have a Smart Code' : allCoded && hasXX ? 'Re-assign to replace fallback XX codes' : 'Assign per-unit Smart Codes using each row\'s confirmed Config, Zone and Category'}
                       className={`text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 border transition-colors ${
-                        allCoded
+                        fullyDone
                           ? 'border-green-300 text-green-700 bg-green-50 cursor-default'
                           : scAssigning
                           ? 'border-violet-300 text-violet-600 bg-violet-50 cursor-wait'
+                          : allCoded && hasXX
+                          ? 'border-amber-400 text-amber-700 hover:bg-amber-50'
                           : 'border-violet-400 text-violet-700 hover:bg-violet-50'
                       }`}
                     >
                       {scAssigning ? (
                         <><svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10" strokeOpacity={0.25}/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>
                         {scProgress} / {active.length}</>
-                      ) : allCoded ? (
+                      ) : fullyDone ? (
                         <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
                         {coded.length} / {active.length} coded</>
+                      ) : allCoded && hasXX ? (
+                        <>↻ Re-assign ({coded.length} XX)</>
                       ) : (
                         <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-4 0v2"/></svg>
                         Assign Smart Codes</>
