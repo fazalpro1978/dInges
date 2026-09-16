@@ -14,6 +14,7 @@ import { buildMasterPrefix } from '@/lib/buildMasterCode';
 import { Badge, actionBadge } from './StructuredImportShared';
 import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
 import supabase from '../lib/supabaseClient';
+import { useAuth } from '@/contexts/AuthContext';
 
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
 
@@ -145,6 +146,7 @@ function ConflictResolver({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function IngestPipeline() {
+  const { user: authUser } = useAuth();
   const [stage, setStage] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -412,14 +414,8 @@ export default function IngestPipeline() {
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
   const handleMcApply = useCallback(async () => {
-    // AccessGate: superuser/administrator role, dinges platform, or explicit flag
-    const { data: profile } = await supabase
-      .from('profiles').select('axiom_upload_authorised, role, platforms').single();
-    const hasAxiomAccess =
-      profile?.axiom_upload_authorised === true ||
-      ['superuser', 'administrator'].includes(profile?.role ?? '') ||
-      (profile?.platforms as string[] | null)?.includes('dinges') === true;
-    if (!hasAxiomAccess) {
+    // AccessGate: trust AuthContext — it already enforced role + platform check at login
+    if (!authUser || !['superuser', 'administrator'].includes(authUser.role)) {
       setError('Smart Code generation requires upload authorisation.');
       return;
     }
