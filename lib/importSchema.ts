@@ -195,6 +195,12 @@ function normalizeFieldAlias(fieldKey: string, str: string): string {
     if (s === 'OFFICE' || s.endsWith('OFFICE')) return 'Office';
     if (s === 'STUDIO') return 'Studio';
   }
+  if (fieldKey === 'kitchen') {
+    if (['CLOSE', 'CLOSED', 'CLOSE KITCHEN', 'CLOSED KITCHEN'].includes(s)) return 'Closed';
+    if (['OPEN', 'OPEN KITCHEN'].includes(s)) return 'Open';
+    if (['YES', 'Y', 'HAS KITCHEN'].includes(s)) return 'Yes';
+    if (['NO', 'N', 'N/A', 'NONE', 'NO KITCHEN'].includes(s)) return '';
+  }
   return str;
 }
 
