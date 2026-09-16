@@ -472,7 +472,7 @@ export default function IngestPipeline() {
     // Sequential to surface errors immediately and show accurate progress
     for (const m of active) {
       const config    = m._conflictResolved.config    ?? m.resolvedData.config;
-      const category  = String(m._conflictResolved.category  ?? m.resolvedData.category  ?? categoryCode);
+      const category  = String(m._conflictResolved.category  || m.resolvedData.category  || categoryCode);
       const zoneCode  = String((m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code) || '00').padStart(2, '0');
       const zoneName  = String(m._conflictResolved.zone      ?? m.resolvedData.zone      ?? bulkZone.name ?? '');
       const typeCode  = await resolveTypeCode(config, category || categoryCode);
