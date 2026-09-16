@@ -164,6 +164,8 @@ export default function IngestPipeline() {
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
   const [zones, setZones] = useState<ZoneEntry[]>([]);
   const [groupZoneSelections, setGroupZoneSelections] = useState<Record<string, { code: string; name: string }>>({});
+  const [groupZoneOpen, setGroupZoneOpen] = useState<string | null>(null);
+  const [groupZoneSearch, setGroupZoneSearch] = useState<Record<string, string>>({});
 
   // Master Code panel
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
@@ -1174,19 +1176,49 @@ export default function IngestPipeline() {
                             )}
                           </div>
 
-                          {/* Zone selector */}
-                          <div className="flex-1 min-w-0">
-                            <select
-                              value={sel.code}
-                              onChange={e => {
-                                const z = zones.find(z => z.zone_code === Number(e.target.value));
-                                setGroupZoneSelections(prev => ({ ...prev, [prop]: { code: e.target.value, name: z?.district_name ?? '' } }));
+                          {/* Zone selector — searchable inline picker */}
+                          <div className="flex-1 min-w-0 relative">
+                            <input
+                              type="text"
+                              placeholder="— Select zone —"
+                              value={groupZoneOpen === prop
+                                ? (groupZoneSearch[prop] ?? '')
+                                : (sel.code ? `Zone ${sel.code} — ${sel.name}` : '')}
+                              onFocus={() => {
+                                setGroupZoneOpen(prop);
+                                setGroupZoneSearch(prev => ({ ...prev, [prop]: '' }));
                               }}
+                              onChange={e => setGroupZoneSearch(prev => ({ ...prev, [prop]: e.target.value }))}
+                              onBlur={() => setTimeout(() => setGroupZoneOpen(o => o === prop ? null : o), 150)}
                               className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-violet-400 transition-colors"
-                            >
-                              <option value="">— Select zone —</option>
-                              {zones.map(z => <option key={z.zone_code} value={String(z.zone_code)}>Zone {z.zone_code} — {z.district_name}</option>)}
-                            </select>
+                            />
+                            {groupZoneOpen === prop && (() => {
+                              const q = (groupZoneSearch[prop] ?? '').toLowerCase();
+                              const filtered = zones.filter(z =>
+                                !q || String(z.zone_code).includes(q) || z.district_name.toLowerCase().includes(q)
+                              );
+                              return (
+                                <div className="absolute left-0 right-0 top-full mt-0.5 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-44 overflow-y-auto">
+                                  {filtered.length === 0
+                                    ? <p className="px-3 py-2 text-xs text-gray-400 italic">No zones match &ldquo;{groupZoneSearch[prop]}&rdquo;</p>
+                                    : filtered.map(z => (
+                                        <button
+                                          key={z.zone_code}
+                                          type="button"
+                                          onMouseDown={e => e.preventDefault()}
+                                          onClick={() => {
+                                            setGroupZoneSelections(prev => ({ ...prev, [prop]: { code: String(z.zone_code), name: z.district_name } }));
+                                            setGroupZoneOpen(null);
+                                          }}
+                                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50 text-gray-800 transition-colors"
+                                        >
+                                          <span className="font-medium">Zone {z.zone_code}</span> — {z.district_name}
+                                        </button>
+                                      ))
+                                  }
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           {/* Action buttons */}
