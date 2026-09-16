@@ -443,44 +443,62 @@ export default function IngestPipeline() {
       setError('Smart Code generation requires upload authorisation.');
       return;
     }
+    if (!mcState.entity_code) {
+      setError('No entity code set — complete Match & Review first.');
+      return;
+    }
     const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
     if (active.length === 0) return;
     setScAssigning(true);
     setScProgress(0);
     let done = 0;
+    let firstError: string | null = null;
     const updates = new Map<number, Partial<MatchedRecord['_conflictResolved']>>();
-    await Promise.all(
-      active.map(async m => {
-        const config    = m._conflictResolved.config    ?? m.resolvedData.config;
-        const category  = String(m._conflictResolved.category  ?? m.resolvedData.category  ?? mcState.category);
-        const zoneCode  = String((m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code) || '00').padStart(2, '0');
-        const zoneName  = String(m._conflictResolved.zone      ?? m.resolvedData.zone      ?? bulkZone.name ?? '');
-        const typeCode  = await resolveTypeCode(config, category || mcState.category);
-        const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
-          p_category:  category || mcState.category,
-          p_entity:    mcState.entity_code,
-          p_agent:     (effectiveAgentCode || '00').slice(0, 2),
-          p_zone_code: zoneCode,
-          p_type_code: typeCode,
-          p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
-          p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
-          p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
-          p_zone_name: zoneName,
+
+    // Sequential to surface errors immediately and show accurate progress
+    for (const m of active) {
+      const config    = m._conflictResolved.config    ?? m.resolvedData.config;
+      const category  = String(m._conflictResolved.category  ?? m.resolvedData.category  ?? mcState.category);
+      const zoneCode  = String((m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code) || '00').padStart(2, '0');
+      const zoneName  = String(m._conflictResolved.zone      ?? m.resolvedData.zone      ?? bulkZone.name ?? '');
+      const typeCode  = await resolveTypeCode(config, category || mcState.category);
+      const { data: assignment, error: rpcErr } = await supabase.rpc('cr_assign_smart_code', {
+        p_category:  category || mcState.category,
+        p_entity:    mcState.entity_code,
+        p_agent:     (effectiveAgentCode || '00').slice(0, 2).padEnd(2, '0'),
+        p_zone_code: zoneCode,
+        p_type_code: typeCode,
+        p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
+        p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
+        p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
+        p_zone_name: zoneName,
+      });
+      if (rpcErr && !firstError) firstError = rpcErr.message;
+      if (assignment) {
+        updates.set(m.rowIndex, {
+          smart_code: assignment.smart_code,
+          ...(assignment.action === 'patch' ? { __patch_only: true } : {}),
         });
-        if (assignment) {
-          updates.set(m.rowIndex, {
-            smart_code: assignment.smart_code,
-            ...(assignment.action === 'patch' ? { __patch_only: true } : {}),
-          });
-        }
-        done++;
-        setScProgress(done);
-      })
-    );
+      }
+      done++;
+      setScProgress(done);
+      // Bail out after first error rather than hammering 72 failing calls
+      if (firstError) break;
+    }
+
+    if (firstError) {
+      setScAssigning(false);
+      setError(`Smart Code RPC failed: ${firstError}. Run in Supabase SQL editor: GRANT EXECUTE ON FUNCTION cr_assign_smart_code TO authenticated;`);
+      return;
+    }
+
     setMatched(prev => prev.map(m => {
       const patch = updates.get(m.rowIndex);
       return patch ? { ...m, _conflictResolved: { ...m._conflictResolved, ...patch } } : m;
     }));
+    if (updates.size === 0) {
+      setError('No smart codes were assigned — check RPC permissions in Supabase.');
+    }
     setScAssigning(false);
   }, [authUser, matched, rejectedInValidation, mcState.category, mcState.entity_code, effectiveAgentCode, bulkZone, resolveTypeCode, supabase]);
 
