@@ -59,7 +59,7 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
 export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office'] as const;
 export const ENUM_FURNISHING    = ['Furnished', 'Semi-Furnished', 'Unfurnished'] as const;
 export const ENUM_STATUS        = ['Available', 'Not Available', 'Reserved', 'Under Preparation'] as const;
-export const ENUM_KITCHEN       = ['Open', 'Closed', 'Yes', 'Pantry'] as const;
+export const ENUM_KITCHEN       = ['Open', 'Closed', 'Yes', 'Pantry', 'No'] as const;
 
 // Duplicated from REIMS' lib/propertySchema.ts (UNIT_CONFIGS_FULL) — AXIOM is a
 // separate deployable app with no access to REIMS' source tree, so this list must
@@ -199,7 +199,7 @@ function normalizeFieldAlias(fieldKey: string, str: string): string {
     if (['CLOSE', 'CLOSED', 'CLOSE KITCHEN', 'CLOSED KITCHEN'].includes(s)) return 'Closed';
     if (['OPEN', 'OPEN KITCHEN'].includes(s)) return 'Open';
     if (['YES', 'Y', 'HAS KITCHEN'].includes(s)) return 'Yes';
-    if (['NO', 'N', 'N/A', 'NONE', 'NO KITCHEN'].includes(s)) return '';
+    if (['NO', 'N', 'N/A', 'NONE', 'NO KITCHEN'].includes(s)) return 'No';
   }
   return str;
 }

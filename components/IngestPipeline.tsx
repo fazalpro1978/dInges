@@ -53,7 +53,7 @@ const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS 
 
 const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
-const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
+const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry', 'No'];
 const VIEW_OPTIONS = [
   'Back View', 'Beach View', 'Canal View', 'City View', 'Clubhouse View',
   'Community View', 'Corner View', 'Countryside View', 'Courtyard View',
