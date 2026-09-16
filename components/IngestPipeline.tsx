@@ -439,17 +439,20 @@ export default function IngestPipeline() {
 
   // Validation-stage smart code assignment: per-row TypeCode resolution + atomic RPC.
   const handleAssignSmartCodes = useCallback(async () => {
-    console.log('[SC] handleAssignSmartCodes called', { entity: mcState.entity_code, role: authUser?.role, matched: matched.length });
     if (!authUser || !['superuser', 'administrator'].includes(authUser.role)) {
       setError('Smart Code generation requires upload authorisation.');
       return;
     }
-    if (!mcState.entity_code) {
-      setError('No entity code set — complete Match & Review first.');
+    // entity_code may be cleared from mcState between stages — recover from master_code
+    const firstMc = matched.find(m => m._conflictResolved.master_code || m.resolvedData.master_code);
+    const masterCodeRef = String(firstMc?._conflictResolved.master_code ?? firstMc?.resolvedData.master_code ?? '');
+    const entityCode = mcState.entity_code || (masterCodeRef.length >= 4 ? masterCodeRef.slice(1, 4) : '');
+    const agentCode = (effectiveAgentCode || (masterCodeRef.length >= 6 ? masterCodeRef.slice(4, 6) : '00'));
+    if (!entityCode) {
+      setError('No entity code — please complete Match & Review first.');
       return;
     }
     const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
-    console.log('[SC] active rows:', active.length);
     if (active.length === 0) {
       setError('No active rows to assign — all rows may be rejected.');
       return;
@@ -469,8 +472,8 @@ export default function IngestPipeline() {
       const typeCode  = await resolveTypeCode(config, category || mcState.category);
       const { data: assignment, error: rpcErr } = await supabase.rpc('cr_assign_smart_code', {
         p_category:  category || mcState.category,
-        p_entity:    mcState.entity_code,
-        p_agent:     (effectiveAgentCode || '00').slice(0, 2).padEnd(2, '0'),
+        p_entity:    entityCode,
+        p_agent:     agentCode.slice(0, 2).padEnd(2, '0'),
         p_zone_code: zoneCode,
         p_type_code: typeCode,
         p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
@@ -1450,8 +1453,7 @@ export default function IngestPipeline() {
                   const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
                   const coded  = active.filter(m => !!(m._conflictResolved.smart_code ?? m.resolvedData.smart_code));
                   const allCoded = active.length > 0 && coded.length === active.length;
-                  const isDisabled = scAssigning || allCoded || !mcState.entity_code;
-                  console.log('[SC btn]', { active: active.length, coded: coded.length, allCoded, scAssigning, entity: mcState.entity_code, disabled: isDisabled });
+                  const isDisabled = scAssigning || allCoded;
                   return (
                     <button
                       onClick={handleAssignSmartCodes}
