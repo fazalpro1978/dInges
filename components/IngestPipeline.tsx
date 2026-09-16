@@ -439,6 +439,7 @@ export default function IngestPipeline() {
 
   // Validation-stage smart code assignment: per-row TypeCode resolution + atomic RPC.
   const handleAssignSmartCodes = useCallback(async () => {
+    console.log('[SC] handleAssignSmartCodes called', { entity: mcState.entity_code, role: authUser?.role, matched: matched.length });
     if (!authUser || !['superuser', 'administrator'].includes(authUser.role)) {
       setError('Smart Code generation requires upload authorisation.');
       return;
@@ -448,7 +449,11 @@ export default function IngestPipeline() {
       return;
     }
     const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
-    if (active.length === 0) return;
+    console.log('[SC] active rows:', active.length);
+    if (active.length === 0) {
+      setError('No active rows to assign — all rows may be rejected.');
+      return;
+    }
     setScAssigning(true);
     setScProgress(0);
     let done = 0;
