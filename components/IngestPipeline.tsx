@@ -474,16 +474,24 @@ export default function IngestPipeline() {
         p_zone_name: zoneName,
       });
       if (rpcErr && !firstError) firstError = rpcErr.message;
-      const row = Array.isArray(assignment) ? assignment[0] : assignment;
-      if (row?.smart_code) {
+      // PostgREST may return JSONB as array, object, or raw string — normalise
+      let parsed: Record<string, unknown> | null = null;
+      if (typeof assignment === 'string') {
+        try { parsed = JSON.parse(assignment as string); } catch { /* ignore */ }
+      } else if (Array.isArray(assignment)) {
+        parsed = (assignment as Record<string, unknown>[])[0] ?? null;
+      } else if (assignment && typeof assignment === 'object') {
+        parsed = assignment as Record<string, unknown>;
+      }
+      if (done === 0) console.log('[SC] first RPC raw:', assignment, 'parsed:', parsed);
+      if (parsed?.smart_code) {
         updates.set(m.rowIndex, {
-          smart_code: row.smart_code as string,
-          ...(row.action === 'patch' ? { __patch_only: true } : {}),
+          smart_code: parsed.smart_code as string,
+          ...(parsed.action === 'patch' ? { __patch_only: true } : {}),
         });
       }
       done++;
       setScProgress(done);
-      // Bail out after first error rather than hammering 72 failing calls
       if (firstError) break;
     }
 
@@ -498,7 +506,7 @@ export default function IngestPipeline() {
       return patch ? { ...m, _conflictResolved: { ...m._conflictResolved, ...patch } } : m;
     }));
     if (updates.size === 0) {
-      setError('No smart codes were assigned — check RPC permissions in Supabase.');
+      setError('No smart codes were assigned — open browser console and look for [SC] first RPC raw: to see the exact RPC response shape.');
     }
     setScAssigning(false);
   }, [authUser, matched, rejectedInValidation, mcState.category, mcState.entity_code, effectiveAgentCode, bulkZone, resolveTypeCode, supabase]);
