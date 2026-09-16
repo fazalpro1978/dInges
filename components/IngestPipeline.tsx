@@ -167,6 +167,8 @@ export default function IngestPipeline() {
   const [groupZoneOpen, setGroupZoneOpen] = useState<string | null>(null);
   const [groupZoneSearch, setGroupZoneSearch] = useState<Record<string, string>>({});
   const [groupZoneRect, setGroupZoneRect] = useState<DOMRect | null>(null);
+  const [scAssigning, setScAssigning] = useState(false);
+  const [scProgress, setScProgress] = useState(0);
   const [matchedHistory, setMatchedHistory] = useState<MatchedRecord[][]>([]);
   const pushHistory = useCallback(() =>
     setMatchedHistory(h => [...h.slice(-9), matched]), [matched]);
@@ -420,6 +422,68 @@ export default function IngestPipeline() {
     if (matched) updateMc({ entity_code: matched.entity_code, check_status: 'idle', existing_matches: [], unit_conflicts: [], generated_code: null });
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
+  // DynamicTypeMapping: resolve 2-char type code via configuration + category.
+  // configuration is not unique — filter by category (R/C) and take the
+  // lowest type_code alphabetically for consistency.
+  const resolveTypeCode = useCallback(async (config: unknown, category: string): Promise<string> => {
+    const { data } = await supabase
+      .from('cr_property_type_configs')
+      .select('type_code')
+      .eq('configuration', String(config ?? ''))
+      .eq('category', category)
+      .order('type_code', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    return (data?.type_code as string | null) ?? 'XX';
+  }, [supabase]);
+
+  // Validation-stage smart code assignment: per-row TypeCode resolution + atomic RPC.
+  const handleAssignSmartCodes = useCallback(async () => {
+    if (!authUser || !['superuser', 'administrator'].includes(authUser.role)) {
+      setError('Smart Code generation requires upload authorisation.');
+      return;
+    }
+    const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
+    if (active.length === 0) return;
+    setScAssigning(true);
+    setScProgress(0);
+    let done = 0;
+    const updates = new Map<number, Partial<MatchedRecord['_conflictResolved']>>();
+    await Promise.all(
+      active.map(async m => {
+        const config    = m._conflictResolved.config    ?? m.resolvedData.config;
+        const category  = String(m._conflictResolved.category  ?? m.resolvedData.category  ?? mcState.category);
+        const zoneCode  = String(m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code || '00').padStart(2, '0');
+        const zoneName  = String(m._conflictResolved.zone      ?? m.resolvedData.zone      ?? bulkZone.name ?? '');
+        const typeCode  = await resolveTypeCode(config, category || mcState.category);
+        const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
+          p_category:  category || mcState.category,
+          p_entity:    mcState.entity_code,
+          p_agent:     (effectiveAgentCode || '00').slice(0, 2),
+          p_zone_code: zoneCode,
+          p_type_code: typeCode,
+          p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
+          p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
+          p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
+          p_zone_name: zoneName,
+        });
+        if (assignment) {
+          updates.set(m.rowIndex, {
+            smart_code: assignment.smart_code,
+            ...(assignment.action === 'patch' ? { __patch_only: true } : {}),
+          });
+        }
+        done++;
+        setScProgress(done);
+      })
+    );
+    setMatched(prev => prev.map(m => {
+      const patch = updates.get(m.rowIndex);
+      return patch ? { ...m, _conflictResolved: { ...m._conflictResolved, ...patch } } : m;
+    }));
+    setScAssigning(false);
+  }, [authUser, matched, rejectedInValidation, mcState.category, mcState.entity_code, effectiveAgentCode, bulkZone, resolveTypeCode, supabase]);
+
   const handleMcApply = useCallback(async () => {
     // AccessGate: trust AuthContext — it already enforced role + platform check at login
     if (!authUser || !['superuser', 'administrator'].includes(authUser.role)) {
@@ -439,52 +503,12 @@ export default function IngestPipeline() {
     });
     const pfx = master_code.slice(0, 8);
 
-    // DynamicTypeMapping: resolve 2-char type code via configuration + category
-    // configuration is not unique — filter by category (R/C) and take the
-    // standard sub-type (lowest type_code alphabetically for consistency)
-    const resolveTypeCode = async (config: unknown): Promise<string> => {
-      const { data } = await supabase
-        .from('cr_property_type_configs')
-        .select('type_code')
-        .eq('configuration', String(config ?? ''))
-        .eq('category', mcState.category)
-        .order('type_code', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      return (data?.type_code as string | null) ?? 'XX';
-    };
-
-    // SequenceGenerator + NaturalKeyDeduplication: assign unique smart_code via atomic RPC
-    const updatedMatched = await Promise.all(
-      matched.map(async (m, i) => {
-        if (excludedIdx.has(i)) return m;
-        const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
-        const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
-          p_category:  mcState.category,
-          p_entity:    mcState.entity_code,
-          p_agent:     (effectiveAgentCode || '00').slice(0, 2),
-          p_zone_code: zc,
-          p_type_code: typeCode,
-          p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
-          p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
-          p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
-          p_zone_name: bulkZone.name,
-        });
-        if (!assignment) return { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
-        if (assignment.action === 'patch') {
-          return {
-            ...m,
-            _conflictResolved: {
-              ...m._conflictResolved,
-              master_code,
-              smart_code: assignment.smart_code,
-              __patch_only: true,
-            },
-          };
-        }
-        return { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: assignment.smart_code } };
-      })
-    );
+    // Apply master_code (batch property stamp) to each active record.
+    // Per-unit smart_code is assigned in Validation stage via handleAssignSmartCodes.
+    const updatedMatched = matched.map((m, i) => {
+      if (excludedIdx.has(i)) return m;
+      return { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
+    });
     setMatched(updatedMatched);
     updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1, locked: true });
 
@@ -1390,6 +1414,36 @@ export default function IngestPipeline() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {(() => {
+                  const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
+                  const coded  = active.filter(m => !!(m._conflictResolved.smart_code ?? m.resolvedData.smart_code));
+                  const allCoded = active.length > 0 && coded.length === active.length;
+                  return (
+                    <button
+                      onClick={handleAssignSmartCodes}
+                      disabled={scAssigning || allCoded || !mcState.entity_code}
+                      title={allCoded ? 'All active rows have a Smart Code' : 'Assign per-unit Smart Codes using each row\'s confirmed Config, Zone and Category'}
+                      className={`text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 border transition-colors ${
+                        allCoded
+                          ? 'border-green-300 text-green-700 bg-green-50 cursor-default'
+                          : scAssigning
+                          ? 'border-violet-300 text-violet-600 bg-violet-50 cursor-wait'
+                          : 'border-violet-400 text-violet-700 hover:bg-violet-50'
+                      }`}
+                    >
+                      {scAssigning ? (
+                        <><svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10" strokeOpacity={0.25}/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>
+                        {scProgress} / {active.length}</>
+                      ) : allCoded ? (
+                        <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
+                        {coded.length} / {active.length} coded</>
+                      ) : (
+                        <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-4 0v2"/></svg>
+                        Assign Smart Codes</>
+                      )}
+                    </button>
+                  );
+                })()}
                 <button
                   onClick={() => {
                     setRejectedInValidation(new Set());
