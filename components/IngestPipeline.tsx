@@ -451,14 +451,26 @@ export default function IngestPipeline() {
     });
     const pfx = master_code.slice(0, 8);
 
-    // DynamicTypeMapping: resolve 2-char type code from unit config field
+    // DynamicTypeMapping: resolve 2-char type code — local map first, DB fallback
+    const TYPE_CODE_MAP: Record<string, string> = {
+      'Studio': 'ST', '1 BHK': '1B', '2 BHK': '2B', '3 BHK': '3B',
+      '4 BHK': '4B', '4+ BHK': '4B', '5 BHK': '5B', '5+ BHK': '5B',
+      '6+ BHK': '6B', 'Penthouse': 'PH', 'Office': 'OF',
+      '4 BHK + Maid': '4M', '4 BHK + Maid (Private)': '4M',
+      '5 BHK + Maid (Private)': '5M', 'Duplex': 'DX', 'Townhouse': 'TH',
+    };
     const resolveTypeCode = async (config: unknown): Promise<string> => {
-      const { data } = await supabase
-        .from('cr_property_type_configs')
-        .select('type_code')
-        .eq('config_key', String(config ?? ''))
-        .maybeSingle();
-      return (data?.type_code as string | null) ?? 'XX';
+      const key = String(config ?? '');
+      if (TYPE_CODE_MAP[key]) return TYPE_CODE_MAP[key];
+      try {
+        const { data, error } = await supabase
+          .from('cr_property_type_configs')
+          .select('type_code')
+          .eq('config_key', key)
+          .maybeSingle();
+        if (!error && data?.type_code) return data.type_code as string;
+      } catch { /* ignore — table may not exist in this env */ }
+      return 'XX';
     };
 
     // SequenceGenerator + NaturalKeyDeduplication: assign unique smart_code via atomic RPC
