@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 
   const url = req.nextUrl;
   const runId    = url.searchParams.get('runId');
-  const limit    = Math.min(parseInt(url.searchParams.get('limit') ?? '100'), 500);
+  const limit    = Math.min(parseInt(url.searchParams.get('limit') ?? '500'), 1000);
   const offset   = parseInt(url.searchParams.get('offset') ?? '0');
 
   // Only exclude records already acknowledged (fully imported by REIMS).
