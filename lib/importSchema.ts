@@ -54,12 +54,17 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
     label: 'Design Type',
     description: 'Layout variant code or unit designation extracted from the config/bedroom column or status field. Examples: "Type B", "Standard", "Medium", "Mock up unit". Stored in Classification → Unit Type in REIMS. Non-blocking — absence does not prevent import.',
   },
+  {
+    key: 'operator_remarks',
+    label: 'Remarks',
+    description: 'Admin / Superuser operational notes for this unit. Exported to REIMS: Units Inventory → View Details → Operational → Operator Remarks. Non-blocking — absence does not prevent import.',
+  },
 ];
 
 export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office'] as const;
 export const ENUM_FURNISHING    = ['Furnished', 'Semi-Furnished', 'Unfurnished'] as const;
 export const ENUM_STATUS        = ['Available', 'Not Available', 'Reserved', 'Under Preparation'] as const;
-export const ENUM_KITCHEN       = ['Open', 'Closed', 'Yes', 'Pantry', 'No'] as const;
+export const ENUM_KITCHEN       = ['Open', 'Closed', 'Yes', 'Pantry'] as const;
 
 // Duplicated from REIMS' lib/propertySchema.ts (UNIT_CONFIGS_FULL) — AXIOM is a
 // separate deployable app with no access to REIMS' source tree, so this list must
@@ -194,12 +199,6 @@ function normalizeFieldAlias(fieldKey: string, str: string): string {
     if (['VIL', 'VILLA'].includes(s) || s === 'V') return 'Villa';
     if (s === 'OFFICE' || s.endsWith('OFFICE')) return 'Office';
     if (s === 'STUDIO') return 'Studio';
-  }
-  if (fieldKey === 'kitchen') {
-    if (['CLOSE', 'CLOSED', 'CLOSE KITCHEN', 'CLOSED KITCHEN'].includes(s)) return 'Closed';
-    if (['OPEN', 'OPEN KITCHEN'].includes(s)) return 'Open';
-    if (['YES', 'Y', 'HAS KITCHEN'].includes(s)) return 'Yes';
-    if (['NO', 'N', 'N/A', 'NONE', 'NO KITCHEN'].includes(s)) return 'No';
   }
   return str;
 }

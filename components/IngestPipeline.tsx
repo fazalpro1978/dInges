@@ -14,7 +14,6 @@ import { buildMasterPrefix } from '@/lib/buildMasterCode';
 import { Badge, actionBadge } from './StructuredImportShared';
 import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
 import supabase from '../lib/supabaseClient';
-import { useAuth } from '@/contexts/AuthContext';
 
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
 
@@ -26,6 +25,17 @@ type RowAction = 'new' | 'update' | 'conflict';
 
 type ConflictField = { existing: unknown; incoming: unknown };
 
+type DeltaStatus = 'ST_NEW' | 'ST_UPDATED' | 'ST_UNCHANGED';
+
+type OrphanedUnit = {
+  id: string;
+  property: string;
+  unit_no: string;
+  status: string;
+  smart_code: string | null;
+  master_code: string | null;
+};
+
 type MatchedRecord = {
   rowIndex: number;
   unitId: string | null;
@@ -34,8 +44,9 @@ type MatchedRecord = {
   rawData: Record<string, unknown>;
   resolvedData: Record<string, unknown>;
   action: RowAction | 'unresolved';
+  delta_status: DeltaStatus;
   conflictFields: Record<string, ConflictField> | null;
-  existingSnapshot: { status: string; rent: number; furnishing: string; smart_code?: string | null } | null;
+  existingSnapshot: { status: string; rent: number; furnishing: string; smart_code?: string | null; master_code?: string | null } | null;
   _conflictResolved: Record<string, unknown>;
 };
 
@@ -48,12 +59,19 @@ function confidenceBadge(matchType: string, confidence: number) {
   return null;
 }
 
+function deltaBadge(status: DeltaStatus | undefined) {
+  if (status === 'ST_NEW')       return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#fef9c3', color: '#92400e' }}>NEW</span>;
+  if (status === 'ST_UPDATED')   return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dcfce7', color: '#166534' }}>UPD</span>;
+  if (status === 'ST_UNCHANGED') return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ background: '#f3f4f6', color: '#6b7280' }}>—</span>;
+  return null;
+}
+
 // Pipeline stages: 0=Upload, 1=Match&Review, 2=Validation, 3=Stage Analysis, 4=REIMS Queue, 5=Done
 const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS Queue', 'Done'];
 
 const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
-const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry', 'No'];
+const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
 const VIEW_OPTIONS = [
   'Back View', 'Beach View', 'Canal View', 'City View', 'Clubhouse View',
   'Community View', 'Corner View', 'Countryside View', 'Courtyard View',
@@ -146,7 +164,6 @@ function ConflictResolver({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function IngestPipeline() {
-  const { user: authUser } = useAuth();
   const [stage, setStage] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -157,21 +174,13 @@ export default function IngestPipeline() {
 
   // Stage 1 → extracted + matched records
   const [matched, setMatched] = useState<MatchedRecord[]>([]);
-  const [summary, setSummary] = useState({ new: 0, update: 0, conflict: 0, total: 0 });
+  const [summary, setSummary] = useState({ new: 0, update: 0, conflict: 0, total: 0, st_new: 0, st_updated: 0, st_unchanged: 0, orphaned: 0 });
+  const [orphaned, setOrphaned] = useState<OrphanedUnit[]>([]);
   const [realtors, setRealtors] = useState<Realtor[]>([]);
   const [excludedIdx, setExcludedIdx] = useState<Set<number>>(new Set());
   const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
   const [zones, setZones] = useState<ZoneEntry[]>([]);
-  const [groupZoneSelections, setGroupZoneSelections] = useState<Record<string, { code: string; name: string }>>({});
-  const [groupZoneOpen, setGroupZoneOpen] = useState<string | null>(null);
-  const [groupZoneSearch, setGroupZoneSearch] = useState<Record<string, string>>({});
-  const [groupZoneRect, setGroupZoneRect] = useState<DOMRect | null>(null);
-  const [scAssigning, setScAssigning] = useState(false);
-  const [scProgress, setScProgress] = useState(0);
-  const [matchedHistory, setMatchedHistory] = useState<MatchedRecord[][]>([]);
-  const pushHistory = useCallback(() =>
-    setMatchedHistory(h => [...h.slice(-9), matched]), [matched]);
 
   // Master Code panel
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
@@ -337,12 +346,11 @@ export default function IngestPipeline() {
 
       const records = (matchData.results as MatchedRecord[]).map(r => ({ ...r, _conflictResolved: {} }));
       setMatched(records);
+      setOrphaned(matchData.orphaned ?? []);
       setExcludedIdx(new Set());
       setRejectedInValidation(new Set());
       setBulkRealtor({ name: '', moci: '' });
       setBulkZone({ code: '', name: '' });
-      setGroupZoneSelections({});
-      setMatchedHistory([]);
       setSummary(matchData.summary);
       setStructuredStage('idle');
       setPendingFile(null);
@@ -422,123 +430,13 @@ export default function IngestPipeline() {
     if (matched) updateMc({ entity_code: matched.entity_code, check_status: 'idle', existing_matches: [], unit_conflicts: [], generated_code: null });
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
-  // Hardcoded fallback matching the REIMS backfill DEFAULT_TYPE_MAP.
-  // Used when cr_property_type_configs returns no match.
-  const DEFAULT_TYPE_MAP: Record<string, string> = {
-    'Studio':    'ST', '1 BHK': '1B', '2 BHK': '2B', '3 BHK': '3B',
-    '4 BHK':     '4B', '5 BHK': '5B', 'Penthouse': 'PH', 'Villa': 'VL',
-    'Duplex':    'DP', 'Townhouse': 'TH', 'Office': 'OF',
-  };
-
-  // resolve 2-char type code: DB first (category-filtered), hardcoded map second, XX last.
-  const resolveTypeCode = useCallback(async (config: unknown, category: string): Promise<string> => {
-    const configStr = String(config ?? '').trim();
-    const { data } = await supabase
-      .from('cr_property_type_configs')
-      .select('type_code')
-      .eq('configuration', configStr)
-      .eq('category', category)
-      .order('type_code', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    return (data?.type_code as string | null) ?? DEFAULT_TYPE_MAP[configStr] ?? 'XX';
-  }, [supabase]);
-
-  // Validation-stage smart code assignment: per-row TypeCode resolution + atomic RPC.
-  const handleAssignSmartCodes = useCallback(async () => {
-    if (!authUser || !['superuser', 'administrator'].includes(authUser.role)) {
-      setError('Smart Code generation requires upload authorisation.');
-      return;
-    }
-    // entity_code may be cleared from mcState between stages — recover from master_code
-    const firstMc = matched.find(m => m._conflictResolved.master_code || m.resolvedData.master_code);
-    const masterCodeRef = String(firstMc?._conflictResolved.master_code ?? firstMc?.resolvedData.master_code ?? '');
-    // master_code = Cat(1)+Entity(3)+Agent(2)+Zone(2)+Date(4)+Time(4) — recover cleared mcState fields
-    const categoryCode = mcState.category || (masterCodeRef.length >= 1 ? masterCodeRef[0] : 'R');
-    const entityCode   = mcState.entity_code || (masterCodeRef.length >= 4 ? masterCodeRef.slice(1, 4) : '');
-    const agentCode    = effectiveAgentCode || (masterCodeRef.length >= 6 ? masterCodeRef.slice(4, 6) : '00');
-    if (!entityCode) {
-      setError('No entity code — please complete Match & Review first.');
-      return;
-    }
-    const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
-    if (active.length === 0) {
-      setError('No active rows to assign — all rows may be rejected.');
-      return;
-    }
-    // Clear any existing smart_codes (including XX fallbacks) before re-assigning
-    setMatched(prev => prev.map(m => ({
-      ...m, _conflictResolved: { ...m._conflictResolved, smart_code: undefined },
-    })));
-    setScAssigning(true);
-    setScProgress(0);
-    let done = 0;
-    let firstError: string | null = null;
-    const updates = new Map<number, Partial<MatchedRecord['_conflictResolved']>>();
-
-    // Sequential to surface errors immediately and show accurate progress
-    for (const m of active) {
-      const config    = m._conflictResolved.config    ?? m.resolvedData.config;
-      const category  = String(m._conflictResolved.category  || m.resolvedData.category  || categoryCode);
-      const zoneCode  = String((m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code) || '00').padStart(2, '0');
-      const zoneName  = String(m._conflictResolved.zone      ?? m.resolvedData.zone      ?? bulkZone.name ?? '');
-      const typeCode  = await resolveTypeCode(config, category || categoryCode);
-      const { data: assignment, error: rpcErr } = await supabase.rpc('cr_assign_smart_code', {
-        p_category:  category || categoryCode,
-        p_entity:    entityCode,
-        p_agent:     agentCode.slice(0, 2).padEnd(2, '0'),
-        p_zone_code: zoneCode,
-        p_type_code: typeCode,
-        p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
-        p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
-        p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
-        p_zone_name: zoneName,
-      });
-      if (rpcErr && !firstError) firstError = rpcErr.message;
-      // PostgREST may return JSONB as array, object, or raw string — normalise
-      let parsed: Record<string, unknown> | null = null;
-      if (typeof assignment === 'string') {
-        try { parsed = JSON.parse(assignment as string); } catch { /* ignore */ }
-      } else if (Array.isArray(assignment)) {
-        parsed = (assignment as Record<string, unknown>[])[0] ?? null;
-      } else if (assignment && typeof assignment === 'object') {
-        parsed = assignment as Record<string, unknown>;
-      }
-      if (done === 0) console.log('[SC] first RPC raw:', assignment, 'parsed:', parsed);
-      if (parsed?.smart_code) {
-        updates.set(m.rowIndex, {
-          smart_code: parsed.smart_code as string,
-          ...(parsed.action === 'patch' ? { __patch_only: true } : {}),
-        });
-      }
-      done++;
-      setScProgress(done);
-      if (firstError) break;
-    }
-
-    if (firstError) {
-      setScAssigning(false);
-      setError(`Smart Code RPC failed: ${firstError}. Run in Supabase SQL editor: GRANT EXECUTE ON FUNCTION cr_assign_smart_code TO authenticated;`);
-      return;
-    }
-
-    setMatched(prev => prev.map(m => {
-      const patch = updates.get(m.rowIndex);
-      return patch ? { ...m, _conflictResolved: { ...m._conflictResolved, ...patch } } : m;
-    }));
-    if (updates.size === 0) {
-      setError('No smart codes were assigned — open browser console and look for [SC] first RPC raw: to see the exact RPC response shape.');
-    }
-    setScAssigning(false);
-  }, [authUser, matched, rejectedInValidation, mcState.category, mcState.entity_code, effectiveAgentCode, bulkZone, resolveTypeCode, supabase]);
-
   const handleMcApply = useCallback(async () => {
-    // AccessGate: trust AuthContext — it already enforced role + platform check at login
-    if (!authUser || !['superuser', 'administrator'].includes(authUser.role)) {
+    // AccessGate: verify axiom_upload_authorised before any smart_code generation
+    const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').single();
+    if (!profile?.axiom_upload_authorised) {
       setError('Smart Code generation requires upload authorisation.');
       return;
     }
-    pushHistory();
 
     const { buildMasterCode, getNowSegments } = await import('@/lib/buildMasterCode');
     const { date_seg, time_seg } = mcState.date_seg
@@ -551,12 +449,47 @@ export default function IngestPipeline() {
     });
     const pfx = master_code.slice(0, 8);
 
-    // Apply master_code (batch property stamp) to each active record.
-    // Per-unit smart_code is assigned in Validation stage via handleAssignSmartCodes.
-    const updatedMatched = matched.map((m, i) => {
-      if (excludedIdx.has(i)) return m;
-      return { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
-    });
+    // DynamicTypeMapping: resolve 2-char type code from unit config field
+    const resolveTypeCode = async (config: unknown): Promise<string> => {
+      const { data } = await supabase
+        .from('cr_property_type_configs')
+        .select('type_code')
+        .eq('config_key', String(config ?? ''))
+        .maybeSingle();
+      return (data?.type_code as string | null) ?? 'XX';
+    };
+
+    // SequenceGenerator + NaturalKeyDeduplication: assign unique smart_code via atomic RPC
+    const updatedMatched = await Promise.all(
+      matched.map(async (m, i) => {
+        if (excludedIdx.has(i)) return m;
+        const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
+        const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
+          p_category:  mcState.category,
+          p_entity:    mcState.entity_code,
+          p_agent:     (effectiveAgentCode || '00').slice(0, 2),
+          p_zone_code: zc,
+          p_type_code: typeCode,
+          p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
+          p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
+          p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
+          p_zone_name: bulkZone.name,
+        });
+        if (!assignment) return { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
+        if (assignment.action === 'patch') {
+          return {
+            ...m,
+            _conflictResolved: {
+              ...m._conflictResolved,
+              master_code,
+              smart_code: assignment.smart_code,
+              __patch_only: true,
+            },
+          };
+        }
+        return { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: assignment.smart_code } };
+      })
+    );
     setMatched(updatedMatched);
     updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1, locked: true });
 
@@ -703,9 +636,10 @@ export default function IngestPipeline() {
         body: JSON.stringify({
           fileName,
           fileSize,
-          results:      finalRecords,
-          totalRecords: batchTotalRows || finalRecords.length,
-          errorSummary: batchErrorSummary,
+          results:       finalRecords,
+          totalRecords:  batchTotalRows || finalRecords.length,
+          errorSummary:  batchErrorSummary,
+          orphanedCount: orphaned.length,
         }),
       });
       const stageData = await stageRes.json();
@@ -813,9 +747,8 @@ export default function IngestPipeline() {
     try { sessionStorage.removeItem(SESSION_KEY); } catch {}
     try { sessionStorage.removeItem(FILE_KEY); } catch {}
     setBatchErrorSummary([]); setBatchTotalRows(0);
-    setStage(0); setMatched([]); setRunId(null); setStagedRecords([]);
+    setStage(0); setMatched([]); setOrphaned([]); setRunId(null); setStagedRecords([]);
     setRecordActions({}); setRejectedInValidation(new Set()); setEditingCell(null);
-    setGroupZoneSelections({}); setMatchedHistory([]);
     setApproveResult(null); setSchemaErrors([]);
     setFileName(''); setFileSize(0); setError(null);
     setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
@@ -1061,13 +994,6 @@ export default function IngestPipeline() {
                 <p className="text-xs text-gray-500 mt-0.5">{fileName} · {matched.length} records extracted</p>
               </div>
               <div className="flex items-center gap-2">
-                {matchedHistory.length > 0 && (
-                  <button
-                    onClick={() => setMatchedHistory(h => { const prev = h[h.length - 1]; setMatched(prev); return h.slice(0, -1); })}
-                    className="text-xs px-3 py-1.5 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 font-semibold"
-                    title="Undo last bulk action"
-                  >↩ Undo{matchedHistory.length > 1 ? ` (${matchedHistory.length})` : ''}</button>
-                )}
                 <button
                   onClick={reset}
                   className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
@@ -1085,6 +1011,49 @@ export default function IngestPipeline() {
             {unresolvedConflicts > 0 && (
               <div className="mb-4 bg-purple-50 border border-purple-200 rounded-lg px-4 py-2 text-xs text-purple-700">
                 {unresolvedConflicts} conflict{unresolvedConflicts > 1 ? 's' : ''} must be resolved before proceeding.
+              </div>
+            )}
+
+            {/* ── Delta classification summary ─────────────────────────── */}
+            <div className="flex items-center gap-3 mb-4 flex-wrap">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Δ Classification</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#fef9c3', color: '#92400e' }}>{summary.st_new} NEW</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#dcfce7', color: '#166534' }}>{summary.st_updated} UPDATED</span>
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded" style={{ background: '#f3f4f6', color: '#6b7280' }}>{summary.st_unchanged} UNCHANGED</span>
+              {orphaned.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#fef2f2', color: '#b91c1c' }}>{orphaned.length} ORPHANED</span>
+              )}
+            </div>
+
+            {/* ── Orphaned records panel ───────────────────────────────── */}
+            {orphaned.length > 0 && (
+              <div className="mb-4 border border-red-200 rounded-xl overflow-hidden">
+                <div className="bg-red-50 px-4 py-2 flex items-center gap-2">
+                  <span className="text-xs font-bold text-red-700">⚠ Orphaned Records ({orphaned.length})</span>
+                  <span className="text-xs text-red-500">In REIMS but absent from this source file — status will be set to <strong>Look UP</strong> on delta apply</span>
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-red-50/60 border-b border-red-100 text-red-600 font-semibold">
+                      <th className="px-3 py-1.5 text-left">Property</th>
+                      <th className="px-3 py-1.5 text-left">Unit No.</th>
+                      <th className="px-3 py-1.5 text-left">Status</th>
+                      <th className="px-3 py-1.5 text-left">Smart Code</th>
+                      <th className="px-3 py-1.5 text-left">Master Code</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-red-50">
+                    {orphaned.map(o => (
+                      <tr key={o.id} className="text-gray-600">
+                        <td className="px-3 py-1.5 font-medium text-gray-800">{o.property}</td>
+                        <td className="px-3 py-1.5 font-mono text-blue-700">{o.unit_no}</td>
+                        <td className="px-3 py-1.5">{o.status}</td>
+                        <td className="px-3 py-1.5 font-mono text-green-700 text-[10px]">{o.smart_code ?? '—'}</td>
+                        <td className="px-3 py-1.5 font-mono text-blue-600 text-[10px]">{o.master_code ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
@@ -1112,7 +1081,6 @@ export default function IngestPipeline() {
                 <button
                   disabled={!bulkRealtor.name.trim() || matched.length === excludedIdx.size}
                   onClick={() => {
-                    pushHistory();
                     setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
                       ? m
                       : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }));
@@ -1133,7 +1101,7 @@ export default function IngestPipeline() {
                   />
                   <button
                     disabled={(!bulkZone.code && !bulkZone.name) || matched.length === excludedIdx.size}
-                    onClick={() => { pushHistory(); setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                    onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
                       ? m
                       : {
                           ...m,
@@ -1142,7 +1110,7 @@ export default function IngestPipeline() {
                             ...(bulkZone.code ? { zone_code: Number(bulkZone.code) } : {}),
                             ...(bulkZone.name ? { zone: bulkZone.name } : {}),
                           },
-                        })); }}
+                        }))}
                     className="mt-2 text-xs px-3 py-1.5 rounded bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold"
                   >
                     Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
@@ -1167,203 +1135,17 @@ export default function IngestPipeline() {
               </div>
             </div>
 
-            {/* ── Multi-Zone Group Assignment ──────────────────────────────────── */}
-            {(() => {
-              type GInfo = { indices: number[]; zoneCodes: Set<string>; zoneNames: Set<string> };
-              const groups = new Map<string, GInfo>();
-              matched.forEach((m, i) => {
-                const prop = String(m._conflictResolved.property ?? m.resolvedData.property ?? '—');
-                if (!groups.has(prop)) groups.set(prop, { indices: [], zoneCodes: new Set(), zoneNames: new Set() });
-                const g = groups.get(prop)!;
-                g.indices.push(i);
-                const zc = String(m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? '');
-                const zn = String(m._conflictResolved.zone ?? m.resolvedData.zone ?? '');
-                if (zc) g.zoneCodes.add(zc);
-                if (zn) g.zoneNames.add(zn);
-              });
-              if (groups.size <= 1) return null;
-              const entries = Array.from(groups.entries());
-
-              const applyToGroup = (indices: number[], code: string, name: string) => {
-                if (!code && !name) return;
-                pushHistory();
-                setMatched(prev => prev.map((m, i) => indices.includes(i) ? {
-                  ...m, _conflictResolved: {
-                    ...m._conflictResolved,
-                    ...(code ? { zone_code: Number(code) } : {}),
-                    ...(name ? { zone: name } : {}),
-                  },
-                } : m));
-              };
-
-              return (
-                <div className="mb-4 border border-violet-200 rounded-xl overflow-hidden bg-white">
-                  {/* Header */}
-                  <div className="bg-violet-50 border-b border-violet-100 px-4 py-2 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-violet-500">Multi-Zone Group Assignment</span>
-                      <span className="text-[10px] text-violet-400">{entries.length} property groups detected</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setExcludedIdx(new Set())}
-                        className="text-[10px] text-violet-400 hover:text-violet-600 underline"
-                      >Show all records</button>
-                      <button
-                        className="text-[10px] px-2.5 py-1 rounded bg-violet-600 hover:bg-violet-700 text-white font-semibold transition-colors"
-                        onClick={() => {
-                          pushHistory();
-                          const chMap = new Map<number, { zone_code?: number; zone?: string }>();
-                          entries.forEach(([prop, g]) => {
-                            const autoCode = g.zoneCodes.size === 1 ? Array.from(g.zoneCodes)[0] : '';
-                            const autoName = g.zoneNames.size === 1 ? Array.from(g.zoneNames)[0] : '';
-                            const sel = groupZoneSelections[prop] ?? (autoCode ? { code: autoCode, name: autoName } : null);
-                            if (sel?.code || sel?.name) {
-                              g.indices.forEach(idx => chMap.set(idx, {
-                                ...(sel.code ? { zone_code: Number(sel.code) } : {}),
-                                ...(sel.name ? { zone: sel.name } : {}),
-                              }));
-                            }
-                          });
-                          if (chMap.size) setMatched(prev => prev.map((m, i) => { const ch = chMap.get(i); return ch ? { ...m, _conflictResolved: { ...m._conflictResolved, ...ch } } : m; }));
-                        }}
-                      >Apply All Groups</button>
-                    </div>
-                  </div>
-
-                  {/* Group rows */}
-                  <div className="divide-y divide-gray-100">
-                    {entries.map(([prop, g]) => {
-                      const autoCode = g.zoneCodes.size === 1 ? Array.from(g.zoneCodes)[0] : '';
-                      const autoName = g.zoneNames.size === 1 ? Array.from(g.zoneNames)[0] : '';
-                      const sel = groupZoneSelections[prop] ?? { code: autoCode, name: autoName };
-                      const isConsistent = g.zoneCodes.size <= 1 && g.zoneNames.size <= 1;
-                      const hasZone = g.zoneNames.size > 0;
-                      const isFullyApplied = !!sel.name && g.indices.every(idx => {
-                        const m = matched[idx];
-                        return String(m._conflictResolved.zone ?? m.resolvedData.zone ?? '') === sel.name;
-                      });
-                      const onlyGroupShown = !matched.some((_, i) => !g.indices.includes(i) && !excludedIdx.has(i));
-
-                      return (
-                        <div key={prop} className={`px-4 py-2.5 flex items-center gap-3 ${isFullyApplied ? 'bg-green-50/40' : 'hover:bg-violet-50/30'} transition-colors`}>
-                          {/* Name + count */}
-                          <div className="w-36 shrink-0">
-                            <div className="font-semibold text-xs text-gray-800 truncate" title={prop}>{prop}</div>
-                            <div className="text-[10px] text-gray-400">{g.indices.length} record{g.indices.length !== 1 ? 's' : ''}</div>
-                          </div>
-
-                          {/* Zone status */}
-                          <div className="w-48 shrink-0 text-[10px]">
-                            {!hasZone ? (
-                              <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">No zone extracted</span>
-                            ) : isConsistent ? (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 truncate inline-block max-w-full" title={autoName}>✓ {autoName}</span>
-                            ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">Mixed ({g.zoneNames.size} zones)</span>
-                            )}
-                          </div>
-
-                          {/* Zone selector — searchable picker with fixed dropdown to escape overflow-hidden */}
-                          <div className="flex-1 min-w-0">
-                            <input
-                              type="text"
-                              placeholder="— Select zone —"
-                              value={groupZoneOpen === prop
-                                ? (groupZoneSearch[prop] ?? '')
-                                : (sel.code ? `Zone ${sel.code} — ${sel.name}` : '')}
-                              onFocus={e => {
-                                setGroupZoneRect(e.currentTarget.getBoundingClientRect());
-                                setGroupZoneOpen(prop);
-                                setGroupZoneSearch(prev => ({ ...prev, [prop]: '' }));
-                              }}
-                              onChange={e => setGroupZoneSearch(prev => ({ ...prev, [prop]: e.target.value }))}
-                              onBlur={() => setTimeout(() => setGroupZoneOpen(o => o === prop ? null : o), 150)}
-                              className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:border-violet-400 transition-colors"
-                            />
-                            {groupZoneOpen === prop && groupZoneRect && (() => {
-                              const q = (groupZoneSearch[prop] ?? '').toLowerCase();
-                              const filtered = zones.filter(z =>
-                                !q || String(z.zone_code).includes(q) || z.district_name.toLowerCase().includes(q)
-                              );
-                              return (
-                                <div
-                                  style={{
-                                    position: 'fixed',
-                                    top: groupZoneRect.bottom + 4,
-                                    left: groupZoneRect.left,
-                                    width: groupZoneRect.width,
-                                    zIndex: 9999,
-                                  }}
-                                  className="bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto"
-                                >
-                                  {filtered.length === 0
-                                    ? <p className="px-3 py-2 text-xs text-gray-400 italic">No zones match &ldquo;{groupZoneSearch[prop]}&rdquo;</p>
-                                    : filtered.map(z => (
-                                        <button
-                                          key={z.zone_code}
-                                          type="button"
-                                          onMouseDown={e => e.preventDefault()}
-                                          onClick={() => {
-                                            setGroupZoneSelections(prev => ({ ...prev, [prop]: { code: String(z.zone_code), name: z.district_name } }));
-                                            setGroupZoneOpen(null);
-                                          }}
-                                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50 text-gray-800 transition-colors"
-                                        >
-                                          <span className="font-medium">Zone {z.zone_code}</span> — {z.district_name}
-                                        </button>
-                                      ))
-                                  }
-                                </div>
-                              );
-                            })()}
-                          </div>
-
-                          {/* Action buttons */}
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              disabled={!sel.code && !sel.name}
-                              onClick={() => applyToGroup(g.indices, sel.code, sel.name)}
-                              className={`text-[10px] px-2.5 py-1 rounded font-semibold transition-colors ${
-                                isFullyApplied
-                                  ? 'bg-green-100 text-green-700 border border-green-200 cursor-default'
-                                  : 'bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-40'
-                              }`}
-                            >
-                              {isFullyApplied ? '✓ Done' : `Apply ${g.indices.length}`}
-                            </button>
-                            <button
-                              title={onlyGroupShown ? 'Showing only this group' : `Filter records list to ${prop} only`}
-                              onClick={() => onlyGroupShown
-                                ? setExcludedIdx(new Set())
-                                : setExcludedIdx(new Set(matched.map((_, i) => i).filter(i => !g.indices.includes(i))))
-                              }
-                              className={`text-[10px] px-2 py-1 rounded border transition-colors ${
-                                onlyGroupShown
-                                  ? 'border-violet-400 bg-violet-100 text-violet-700 font-semibold'
-                                  : 'border-gray-200 text-gray-500 hover:bg-gray-50'
-                              }`}
-                            >
-                              {onlyGroupShown ? '✕ Filter' : 'Filter'}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => {
                 const computedSC = (r._conflictResolved.smart_code as string | null) ?? null;
                 const isConflicting = r._conflictResolved.__patch_only === true;
+                const isUpdated = r.delta_status === 'ST_UPDATED';
                 return (
                 <div key={i} className={`border rounded-lg p-3 ${
-                  isConflicting ? 'border-red-400 bg-red-50/30' :
+                  isConflicting   ? 'border-red-400 bg-red-50/30' :
+                  isUpdated       ? 'border-[#39ff14] bg-[#f0fff0]' :
                   r.matchType === 'fuzzy' ? 'border-amber-300 bg-amber-50/20' : 'border-gray-200'
-                }`}>
+                }`} style={isUpdated ? { boxShadow: '0 0 0 2px #39ff14, 0 0 12px 2px #b9fbb0' } : undefined}>
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -1396,7 +1178,12 @@ export default function IngestPipeline() {
                       </span>
                     ) : null}
                     {r.existingSnapshot && (
-                      <span className="text-xs text-gray-400 hidden sm:inline">
+                      <span
+                        className="text-xs font-bold hidden sm:inline px-2 py-0.5 rounded"
+                        style={isUpdated
+                          ? { background: '#39ff14', color: '#064e03', boxShadow: '0 0 6px 1px #39ff14' }
+                          : { color: '#9ca3af' }}
+                      >
                         was: {r.existingSnapshot.status} · QAR {r.existingSnapshot.rent?.toLocaleString()}
                       </span>
                     )}
@@ -1462,42 +1249,6 @@ export default function IngestPipeline() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {(() => {
-                  const active = matched.filter(m => !rejectedInValidation.has(m.rowIndex));
-                  const coded  = active.filter(m => !!(m._conflictResolved.smart_code ?? m.resolvedData.smart_code));
-                  const allCoded = active.length > 0 && coded.length === active.length;
-                  const hasXX = coded.some(m => String(m._conflictResolved.smart_code ?? m.resolvedData.smart_code ?? '').includes('XX'));
-                  const fullyDone = allCoded && !hasXX;
-                  return (
-                    <button
-                      onClick={handleAssignSmartCodes}
-                      disabled={scAssigning || fullyDone}
-                      title={fullyDone ? 'All active rows have a Smart Code' : allCoded && hasXX ? 'Re-assign to replace fallback XX codes' : 'Assign per-unit Smart Codes using each row\'s confirmed Config, Zone and Category'}
-                      className={`text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 border transition-colors ${
-                        fullyDone
-                          ? 'border-green-300 text-green-700 bg-green-50 cursor-default'
-                          : scAssigning
-                          ? 'border-violet-300 text-violet-600 bg-violet-50 cursor-wait'
-                          : allCoded && hasXX
-                          ? 'border-amber-400 text-amber-700 hover:bg-amber-50'
-                          : 'border-violet-400 text-violet-700 hover:bg-violet-50'
-                      }`}
-                    >
-                      {scAssigning ? (
-                        <><svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10" strokeOpacity={0.25}/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>
-                        {scProgress} / {active.length}</>
-                      ) : fullyDone ? (
-                        <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
-                        {coded.length} / {active.length} coded</>
-                      ) : allCoded && hasXX ? (
-                        <>↻ Re-assign ({coded.length} XX)</>
-                      ) : (
-                        <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-4 0v2"/></svg>
-                        Assign Smart Codes</>
-                      )}
-                    </button>
-                  );
-                })()}
                 <button
                   onClick={() => {
                     setRejectedInValidation(new Set());
@@ -1585,9 +1336,10 @@ export default function IngestPipeline() {
                   <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold">
                     <th className="px-3 py-2 text-left w-8 sticky left-0 z-20 bg-gray-50">#</th>
                     <th className="px-2 py-2 text-left w-10 sticky left-8 z-20 bg-gray-50">Match</th>
-                    <th className="px-2 py-2 text-left min-w-[130px] sticky left-[88px] z-20 bg-gray-50">Property</th>
-                    <th className="px-2 py-2 text-left min-w-[144px] sticky left-[218px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Smart Code</th>
-                    <th className="px-2 py-2 text-left w-16 sticky left-[362px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Unit No.</th>
+                    <th className="px-2 py-2 text-center w-10 sticky left-[72px] z-20 bg-gray-50">Δ</th>
+                    <th className="px-2 py-2 text-left min-w-[130px] sticky left-[112px] z-20 bg-gray-50">Property</th>
+                    <th className="px-2 py-2 text-left min-w-[144px] sticky left-[242px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Smart Code</th>
+                    <th className="px-2 py-2 text-left w-16 sticky left-[386px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Unit No.</th>
                     <th className="px-2 py-2 text-left w-14">Zone #</th>
                     <th className="px-2 py-2 text-left min-w-[100px]">Zone</th>
                     <th className="px-2 py-2 text-left w-20">Type</th>
@@ -1611,19 +1363,21 @@ export default function IngestPipeline() {
                     const td        = (field: string, extra = '') =>
                       `px-2 py-1.5 ${rejected ? 'opacity-40' : 'cursor-pointer hover:bg-blue-50'} ${isConflict(field) ? 'bg-purple-50' : ''} ${extra}`;
 
-                    const bgRow = rejected ? 'bg-red-50' : 'bg-white hover:bg-gray-50';
+                    const isUnchanged = r.delta_status === 'ST_UNCHANGED';
+                    const bgRow = rejected ? 'bg-red-50' : isUnchanged ? 'bg-gray-50' : 'bg-white hover:bg-gray-50';
                     return (
-                      <tr key={r.rowIndex} className={`${rejected ? 'opacity-50' : 'text-gray-900'}`}>
+                      <tr key={r.rowIndex} className={`${rejected || isUnchanged ? 'opacity-50' : 'text-gray-900'}`}>
                         <td className={`px-3 py-1.5 text-gray-400 font-medium sticky left-0 z-10 ${bgRow}`}>{r.rowIndex + 1}</td>
                         <td className={`px-2 py-1.5 sticky left-8 z-10 ${bgRow}`}>{actionBadge(r.action)}</td>
+                        <td className={`px-2 py-1.5 text-center sticky left-[72px] z-10 ${bgRow}`}>{deltaBadge(r.delta_status)}</td>
 
                         {/* Property — sticky, read-only */}
-                        <td className={`px-2 py-1.5 sticky left-[88px] z-10 ${bgRow}`}>
+                        <td className={`px-2 py-1.5 sticky left-[112px] z-10 ${bgRow}`}>
                           <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>
                         </td>
 
                         {/* Smart Code — sticky, read-only; stacks 16-digit master_code over unit smart_code */}
-                        <td className={`px-2 py-1.5 sticky left-[218px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                        <td className={`px-2 py-1.5 sticky left-[242px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
                           {(getVal('master_code') || getVal('smart_code')) ? (
                             <div className="flex flex-col gap-0.5">
                               {getVal('master_code') && (
@@ -1639,7 +1393,7 @@ export default function IngestPipeline() {
                         </td>
 
                         {/* Unit No — sticky, read-only */}
-                        <td className={`px-2 py-1.5 sticky left-[362px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                        <td className={`px-2 py-1.5 sticky left-[386px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
                           <span className={!getVal('unit_no') ? 'text-red-500 font-bold' : 'text-blue-700 font-mono font-medium'}>{getVal('unit_no') || '!'}</span>
                         </td>
 
@@ -1810,6 +1564,26 @@ export default function IngestPipeline() {
                           className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
                         >Apply all</button>
                       </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-blue-700">Remarks:</span>
+                        <input
+                          type="text"
+                          placeholder="Operational note…"
+                          value={bulkFill['operator_remarks'] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, operator_remarks: e.target.value }))}
+                          className="border border-blue-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 w-44"
+                        />
+                        <button
+                          disabled={!bulkFill['operator_remarks']?.trim()}
+                          onClick={() => {
+                            const val = bulkFill['operator_remarks'] ?? '';
+                            setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                              ...m, _conflictResolved: { ...m._conflictResolved, operator_remarks: val },
+                            }));
+                          }}
+                          className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                        >Apply all</button>
+                      </div>
                       {/* Amenities bulk-apply — additive merge, never overwrites */}
                       <div className="flex-1 min-w-[280px]">
                         <p className="text-[11px] font-semibold text-blue-700 mb-1">Bulk-add Amenities to all rows:</p>
@@ -1878,6 +1652,7 @@ export default function IngestPipeline() {
                           <th className="px-2 py-2 text-left min-w-[120px]">Design Type</th>
                           <th className="px-2 py-2 text-left min-w-[160px]">Contact Details</th>
                           <th className="px-2 py-2 text-left min-w-[140px]">View</th>
+                          <th className="px-2 py-2 text-left min-w-[200px]">Remarks</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-blue-50">
@@ -1953,13 +1728,23 @@ export default function IngestPipeline() {
                                 {VIEW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                               </select>
                             </td>
+                            <td className="px-2 py-1.5">
+                              <textarea
+                                rows={2}
+                                className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none placeholder-gray-300 resize-none"
+                                placeholder="Operator remarks…"
+                                defaultValue={getV(r,'operator_remarks')}
+                                onBlur={e => handleCellEdit(r.rowIndex, 'operator_remarks', e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleCellEdit(r.rowIndex, 'operator_remarks', e.currentTarget.value); } }}
+                              />
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                   <div className="bg-blue-50/40 px-4 py-2 border-t border-blue-100 text-[11px] text-blue-400">
-                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. Amenities write to <span className="font-mono">units.amenities[]</span> in REIMS. Design Type writes to <span className="font-mono">units.design_type</span> (Classification → Unit Type). Contact Details exports as Property Focal Point Info.
+                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. Amenities write to <span className="font-mono">units.amenities[]</span> in REIMS. Design Type writes to <span className="font-mono">units.design_type</span> (Classification → Unit Type). Contact Details exports as Property Focal Point Info. Remarks write to <span className="font-mono">units.operator_remarks</span> (View Details → Operational → Operator Remarks).
                   </div>
                 </div>
               );

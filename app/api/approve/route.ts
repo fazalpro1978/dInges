@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
       // Approved — fetch staged record first so we can validate
       const { data: staged, error: fetchErr } = await admin
         .from('staged_records')
-        .select('resolved_data, match_type, row_index, run_id')
+        .select('resolved_data, match_type, row_index, run_id, delta_status')
         .eq('id', a.stagedId)
         .single();
 
@@ -67,7 +67,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Staged record ${a.stagedId} not found` }, { status: 404 });
       }
 
+      const deltaStatus = (staged as Record<string, unknown>).delta_status as string | null ?? null;
       const payload = a.resolvedData ?? (staged.resolved_data as Record<string, unknown>);
+
+      // ST_UNCHANGED: no field changes detected — mark approved for audit, skip vetted write
+      if (deltaStatus === 'ST_UNCHANGED') {
+        await admin
+          .from('staged_records')
+          .update({ status: 'approved', reviewer_notes: 'ST_UNCHANGED — no DB write', reviewed_at: now, reviewed_by: reviewer })
+          .eq('id', a.stagedId);
+        approvedCount++;
+        continue;
+      }
+
       const { valid, errors } = validateCanonical(payload);
 
       if (!valid) {
@@ -107,12 +119,13 @@ export async function POST(req: NextRequest) {
         : staged.match_type;
 
       const { error: vettedErr } = await admin.from('vetted_records').insert({
-        staged_id:   a.stagedId,
-        run_id:      runId,
+        staged_id:    a.stagedId,
+        run_id:       runId,
         payload,
-        source_file: run?.source_file ?? null,
-        match_type:  effectiveMatchType,
-        approved_by: reviewer,
+        source_file:  run?.source_file ?? null,
+        match_type:   effectiveMatchType,
+        delta_status: deltaStatus,
+        approved_by:  reviewer,
       });
 
       if (vettedErr) {

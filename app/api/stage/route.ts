@@ -16,19 +16,21 @@ interface MatchResult {
   rawData: Record<string, unknown>;
   resolvedData: Record<string, unknown>;
   action: string;
+  delta_status?: 'ST_NEW' | 'ST_UPDATED' | 'ST_UNCHANGED';
   conflictFields: Record<string, unknown> | null;
   existingSnapshot: Record<string, unknown> | null;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { fileName, fileSize, results, uploadedBy, totalRecords, errorSummary } = (await req.json()) as {
+    const { fileName, fileSize, results, uploadedBy, totalRecords, errorSummary, orphanedCount } = (await req.json()) as {
       fileName: string;
       fileSize?: number;
       results: MatchResult[];
       uploadedBy?: string;
       totalRecords?: number;
       errorSummary?: { row: number; field: string; value: unknown; error: string }[];
+      orphanedCount?: number;
     };
 
     if (!fileName || !Array.isArray(results) || results.length === 0) {
@@ -41,12 +43,13 @@ export async function POST(req: NextRequest) {
     const { data: run, error: runErr } = await admin
       .from('upload_runs')
       .insert({
-        source_file:   fileName,
-        file_hash:     fileHash,
-        file_size:     fileSize ?? null,
-        status:        'staged',
-        record_count:  results.length,
-        uploaded_by:   uploadedBy ?? 'Administrator',
+        source_file:    fileName,
+        file_hash:      fileHash,
+        file_size:      fileSize ?? null,
+        status:         'staged',
+        record_count:   results.length,
+        uploaded_by:    uploadedBy ?? 'Administrator',
+        orphaned_count: orphanedCount ?? 0,
       })
       .select('id')
       .single();
@@ -64,6 +67,7 @@ export async function POST(req: NextRequest) {
       match_type:       r.action,
       match_confidence: r.matchConfidence,
       conflict_fields:  r.conflictFields ?? null,
+      delta_status:     r.delta_status ?? null,
       status:           'pending',
     }));
 

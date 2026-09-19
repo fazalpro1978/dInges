@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   // This ensures records remain visible in REIMS IngestQueue until Import All is clicked.
   let query = admin
     .from('vetted_records')
-    .select('id, staged_id, run_id, payload, source_file, match_type, approved_at, approved_by')
+    .select('id, staged_id, run_id, payload, source_file, match_type, delta_status, approved_at, approved_by')
     .is('acknowledged_at', null)
     .order('approved_at', { ascending: true })
     .range(offset, offset + limit - 1);

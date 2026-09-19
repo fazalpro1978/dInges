@@ -48,13 +48,14 @@ export async function POST(req: NextRequest) {
     }
 
     const [unitsRes, aliasRes] = await Promise.all([
-      reims.from('units').select('id, unit_code, property, unit_no, status, rent, furnishing, type, config, zone, smart_code'),
+      reims.from('units').select('id, unit_code, property, unit_no, status, rent, furnishing, type, config, zone, smart_code, master_code'),
       reims.from('building_aliases').select('canonical_name, alias').limit(500),
     ]);
 
     const existingUnits = (unitsRes.data ?? []) as {
       id: string; unit_code: string; property: string; unit_no: string;
-      status: string; rent: number; furnishing: string; type: string; config: string; zone: string; smart_code: string | null;
+      status: string; rent: number; furnishing: string; type: string; config: string; zone: string;
+      smart_code: string | null; master_code: string | null;
     }[];
 
     const aliasMap = new Map<string, string>(
@@ -67,6 +68,7 @@ export async function POST(req: NextRequest) {
     const byNaturalKey = new Map(
       existingUnits.map(u => [`${normalise(u.property)}||${normalise(u.unit_no)}`, u]),
     );
+    const matchedUnitIds = new Set<string>();
 
     const resolveBuilding = (raw: unknown): string => {
       const norm = normalise(raw);
@@ -131,6 +133,20 @@ export async function POST(req: NextRequest) {
       const hasConflicts = Object.keys(conflictFields).length > 0;
       const action = !matched ? 'new' : hasConflicts ? 'conflict' : 'update';
 
+      // Delta classification: auto-derive from field comparison, no highlight required
+      let delta_status: 'ST_NEW' | 'ST_UPDATED' | 'ST_UNCHANGED' = 'ST_NEW';
+      if (matched) {
+        matchedUnitIds.add(matched.id);
+        const fieldsToCheck = ['status', 'rent', 'furnishing'] as const;
+        const hasChange = fieldsToCheck.some(field => {
+          const inVal = rec[field];
+          if (inVal == null || inVal === '') return false;
+          const exVal = matched[field as keyof typeof matched];
+          return String(inVal).toLowerCase().trim() !== String(exVal ?? '').toLowerCase().trim();
+        });
+        delta_status = hasChange ? 'ST_UPDATED' : 'ST_UNCHANGED';
+      }
+
       return {
         rowIndex:         idx,
         unitId:           matched?.id ?? null,
@@ -139,19 +155,38 @@ export async function POST(req: NextRequest) {
         rawData:          rec,
         resolvedData,
         action,
+        delta_status,
         conflictFields:   hasConflicts ? conflictFields : null,
-        existingSnapshot: matched ? { status: matched.status, rent: matched.rent, furnishing: matched.furnishing, smart_code: matched.smart_code ?? null } : null,
+        existingSnapshot: matched
+          ? { status: matched.status, rent: matched.rent, furnishing: matched.furnishing, smart_code: matched.smart_code ?? null, master_code: matched.master_code ?? null }
+          : null,
       };
     });
 
+    // Orphaned: REIMS units absent from this source file → flag for manual review
+    const orphaned = existingUnits
+      .filter(u => !matchedUnitIds.has(u.id))
+      .map(u => ({
+        id:          u.id,
+        property:    u.property,
+        unit_no:     u.unit_no,
+        status:      u.status,
+        smart_code:  u.smart_code ?? null,
+        master_code: u.master_code ?? null,
+      }));
+
     const summary = {
-      total:    results.length,
-      new:      results.filter(r => r.action === 'new').length,
-      update:   results.filter(r => r.action === 'update').length,
-      conflict: results.filter(r => r.action === 'conflict').length,
+      total:        results.length,
+      new:          results.filter(r => r.action === 'new').length,
+      update:       results.filter(r => r.action === 'update').length,
+      conflict:     results.filter(r => r.action === 'conflict').length,
+      st_new:       results.filter(r => r.delta_status === 'ST_NEW').length,
+      st_updated:   results.filter(r => r.delta_status === 'ST_UPDATED').length,
+      st_unchanged: results.filter(r => r.delta_status === 'ST_UNCHANGED').length,
+      orphaned:     orphaned.length,
     };
 
-    return NextResponse.json({ results, summary });
+    return NextResponse.json({ results, summary, orphaned });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Match failed' }, { status: 500 });
   }
