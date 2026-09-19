@@ -19,7 +19,8 @@ export async function GET(req: NextRequest) {
 
   const url = req.nextUrl;
   const runId    = url.searchParams.get('runId');
-  const limit    = Math.min(parseInt(url.searchParams.get('limit') ?? '500'), 1000);
+  const limitParam = url.searchParams.get('limit');
+  const limit    = limitParam ? Math.min(parseInt(limitParam), 1000) : null;
   const offset   = parseInt(url.searchParams.get('offset') ?? '0');
 
   // Only exclude records already acknowledged (fully imported by REIMS).
@@ -29,8 +30,9 @@ export async function GET(req: NextRequest) {
     .from('vetted_records')
     .select('id, staged_id, run_id, payload, source_file, match_type, delta_status, approved_at, approved_by')
     .is('acknowledged_at', null)
-    .order('approved_at', { ascending: true })
-    .range(offset, offset + limit - 1);
+    .order('approved_at', { ascending: true });
+
+  if (limit !== null) query = query.range(offset, offset + limit - 1);
 
   if (runId) query = query.eq('run_id', runId);
 
