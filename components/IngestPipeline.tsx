@@ -431,11 +431,13 @@ export default function IngestPipeline() {
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
   const handleMcApply = useCallback(async () => {
-    // AccessGate: verify axiom_upload_authorised before any smart_code generation
-    const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').single();
-    if (!profile?.axiom_upload_authorised) {
-      setError('Smart Code generation requires upload authorisation.');
-      return;
+    // AccessGate: superusers/admins are always authorised; others check profile flag
+    if (!['superuser', 'administrator'].includes(userRole)) {
+      const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').maybeSingle();
+      if (!profile?.axiom_upload_authorised) {
+        setError('Smart Code generation requires upload authorisation.');
+        return;
+      }
     }
 
     const { buildMasterCode, getNowSegments } = await import('@/lib/buildMasterCode');
@@ -463,6 +465,12 @@ export default function IngestPipeline() {
     const updatedMatched = await Promise.all(
       matched.map(async (m, i) => {
         if (excludedIdx.has(i)) return m;
+
+        // ST_UPDATED: preserve existing REIMS smart_code — only the MC timestamp refreshes at apply
+        if (m.delta_status === 'ST_UPDATED' && m.existingSnapshot?.smart_code) {
+          return { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: m.existingSnapshot.smart_code } };
+        }
+
         const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
         const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
           p_category:  mcState.category,
@@ -1378,18 +1386,20 @@ export default function IngestPipeline() {
 
                         {/* Smart Code — sticky, read-only; stacks 16-digit master_code over unit smart_code */}
                         <td className={`px-2 py-1.5 sticky left-[242px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
-                          {(getVal('master_code') || getVal('smart_code')) ? (
-                            <div className="flex flex-col gap-0.5">
-                              {getVal('master_code') && (
-                                <span className="font-mono text-[10px] font-bold text-blue-700 tracking-widest leading-tight">{getVal('master_code')}</span>
-                              )}
-                              {getVal('smart_code') && (
-                                <span className="font-mono text-[10px] font-bold text-green-700 tracking-wider bg-green-50 px-1 py-px rounded leading-tight">{getVal('smart_code')}</span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-300 text-xs">—</span>
-                          )}
+                          {(() => {
+                            const mc  = getVal('master_code');
+                            const sc  = getVal('smart_code') || (r.delta_status === 'ST_UPDATED' ? (r.existingSnapshot?.smart_code ?? '') : '');
+                            const isNew = r.delta_status === 'ST_NEW';
+                            return (mc || sc) ? (
+                              <div className="flex flex-col gap-0.5">
+                                {mc && <span className="font-mono text-[10px] font-bold text-blue-700 tracking-widest leading-tight">{mc}</span>}
+                                {sc  && <span className="font-mono text-[10px] font-bold text-green-700 tracking-wider bg-green-50 px-1 py-px rounded leading-tight">{sc}</span>}
+                                {!sc && isNew && <span className="text-[9px] text-gray-400 italic leading-tight">↺ gen on apply</span>}
+                              </div>
+                            ) : (
+                              <span className="text-gray-300 text-xs">—</span>
+                            );
+                          })()}
                         </td>
 
                         {/* Unit No — sticky, read-only */}
