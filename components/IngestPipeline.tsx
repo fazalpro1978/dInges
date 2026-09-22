@@ -1,0 +1,2235 @@
+'use client';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import Link from 'next/link';
+import * as XLSX from 'xlsx';
+import TopBar from './TopBar';
+import { useNav } from './AppShell';
+import StructuredMapper, { type MappedPayload } from './StructuredMapper';
+import StructuredValidator from './StructuredValidator';
+import RealtorField, { type Realtor } from './RealtorField';
+import ZoneField, { type ZoneEntry } from './ZoneField';
+import MasterCodePanel, { type MCState, type EntityCode, type AgentEntry } from './MasterCodePanel';
+import OverrideGovernanceModal, { type OverrideResult } from './OverrideGovernanceModal';
+import { buildMasterPrefix } from '@/lib/buildMasterCode';
+import { Badge, actionBadge } from './StructuredImportShared';
+import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
+import supabase from '../lib/supabaseClient';
+
+type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
+
+type RecordDecision = 'import' | 'skip' | 'replace' | 'backfill';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type RowAction = 'new' | 'update' | 'conflict';
+
+type ConflictField = { existing: unknown; incoming: unknown };
+
+type DeltaStatus = 'ST_NEW' | 'ST_UPDATED' | 'ST_UNCHANGED';
+
+type OrphanedUnit = {
+  id: string;
+  property: string;
+  unit_no: string;
+  status: string;
+  smart_code: string | null;
+  master_code: string | null;
+};
+
+type MatchedRecord = {
+  rowIndex: number;
+  unitId: string | null;
+  matchType: string;
+  matchConfidence: number;
+  rawData: Record<string, unknown>;
+  resolvedData: Record<string, unknown>;
+  action: RowAction | 'unresolved';
+  delta_status: DeltaStatus;
+  conflictFields: Record<string, ConflictField> | null;
+  existingSnapshot: { status: string; rent: number; furnishing: string; smart_code?: string | null; master_code?: string | null } | null;
+  _conflictResolved: Record<string, unknown>;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function confidenceBadge(matchType: string, confidence: number) {
+  if (matchType === 'exact_code') return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dbeafe', color: '#1d4ed8' }}>EXACT</span>;
+  if (matchType === 'natural_key') return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dcfce7', color: '#15803d' }}>KEY 95%</span>;
+  if (matchType === 'fuzzy') return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#fef3c7', color: '#b45309' }}>FUZZY {Math.round(confidence * 100)}%</span>;
+  return null;
+}
+
+function deltaBadge(status: DeltaStatus | undefined) {
+  if (status === 'ST_NEW')       return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#fef9c3', color: '#92400e' }}>NEW</span>;
+  if (status === 'ST_UPDATED')   return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dcfce7', color: '#166534' }}>UPD</span>;
+  if (status === 'ST_UNCHANGED') return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ background: '#f3f4f6', color: '#6b7280' }}>—</span>;
+  return null;
+}
+
+// Pipeline stages: 0=Upload, 1=Match&Review, 2=Validation, 3=Stage Analysis, 4=REIMS Queue, 5=Done
+const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS Queue', 'Done'];
+
+const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
+const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
+const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
+const VIEW_OPTIONS = [
+  'Back View', 'Beach View', 'Canal View', 'City View', 'Clubhouse View',
+  'Community View', 'Corner View', 'Countryside View', 'Courtyard View',
+  'Desert View', 'Downtown View', 'Front View', 'Full View', 'Garden View',
+  'Golf Course View', 'Greenery View', 'Internal View', 'Lake View', 'Lagoon View',
+  'Landmark View', 'Main Road View', 'Marina View', 'Mountain View', 'Nature View',
+  'Neighbourhood View', 'Ocean View', 'Open View', 'Panoramic View', 'Park View',
+  'Partial View', 'Playground View', 'Pool View', 'Porto Arabia View', 'River View',
+  'Sea View', 'Side View', 'Skyline View', 'Sports View', 'Street View',
+  'Sunrise View', 'Sunset View', 'Swimming Pool View', 'Unobstructed View',
+  'Waterfront View',
+];
+
+const AMENITIES_LIST = [
+  'Balcony', 'Barbecue Area', 'Built-in Wardrobes', 'Central A/C', 'Covered Parking',
+  'Private Gym', 'Private Jacuzzi', 'Kitchen Appliances', 'Maids Room', 'Pets Allowed',
+  'Private Garden', 'Private Pool', 'Shared Pool', 'Study', 'View of Water',
+  'Security', 'Concierge', 'Shared Spa', 'Shared Gym', 'Maid Service',
+  'Walk-in Closet', "View of Landmark", "Children's Play Area", 'Lobby in Building',
+  "Children's Pool", 'WiFi', 'Office',
+] as const;
+
+// All fields shown in the Validation table — used to drive the dynamic bulk-fill toolbar.
+// Add any new field here and it will automatically appear in the toolbar when blank.
+type FieldDef = { field: string; label: string; type: 'text' | 'number' | 'select'; options?: string[]; step?: string };
+const VALIDATION_FIELDS: FieldDef[] = [
+  { field: 'property',   label: 'Property',   type: 'text' },
+  { field: 'unit_no',    label: 'Unit No.',    type: 'text' },
+  { field: 'zone_code',  label: 'Zone #',      type: 'number' },
+  { field: 'zone',       label: 'Zone',        type: 'text' },
+  { field: 'type',       label: 'Type',        type: 'select', options: TYPE_OPTIONS },
+  { field: 'config',     label: 'Config',      type: 'text' },
+  { field: 'bathrooms',  label: 'Bath',        type: 'number', step: '0.5' },
+  { field: 'parking',   label: 'Parking',     type: 'select', options: ['Yes', 'No'] },
+  { field: 'kitchen',   label: 'Kitchen',     type: 'select', options: KITCHEN_OPTIONS },
+  { field: 'furnishing', label: 'Furnishing',  type: 'select', options: FURNISHING_OPTIONS },
+  { field: 'status',     label: 'Status',      type: 'text' },
+  { field: 'rent',       label: 'Rent (QAR)',  type: 'number' },
+];
+
+// ─── ConflictResolver ─────────────────────────────────────────────────────────
+
+function ConflictResolver({
+  record,
+  onChange,
+}: {
+  record: MatchedRecord;
+  onChange: (updated: MatchedRecord) => void;
+}) {
+  if (!record.conflictFields) return null;
+
+  const resolved = record._conflictResolved ?? {};
+
+  const choose = (field: string, value: unknown) => {
+    const next = { ...resolved, [field]: value };
+    onChange({ ...record, _conflictResolved: next });
+  };
+
+  const fields = Object.entries(record.conflictFields);
+
+  return (
+    <div className="mt-2 border border-purple-300 rounded-lg p-3 bg-purple-50">
+      <p className="text-xs font-semibold text-purple-700 mb-2">Resolve Conflicts</p>
+      {fields.map(([field, { existing, incoming }]) => {
+        const chosen = resolved[field];
+        return (
+          <div key={field} className="mb-2">
+            <p className="text-xs font-medium text-gray-700 capitalize mb-1">{field.replace(/_/g, ' ')}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => choose(field, existing)}
+                className={`flex-1 text-xs px-2 py-1 rounded border ${chosen === existing ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+              >
+                Keep: {String(existing)}
+              </button>
+              <button
+                onClick={() => choose(field, incoming)}
+                className={`flex-1 text-xs px-2 py-1 rounded border ${chosen === incoming ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+              >
+                Use: {String(incoming)}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export default function IngestPipeline() {
+  const [stage, setStage] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [fileSize, setFileSize] = useState(0);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Stage 1 → extracted + matched records
+  const [matched, setMatched] = useState<MatchedRecord[]>([]);
+  const [summary, setSummary] = useState({ new: 0, update: 0, conflict: 0, total: 0, st_new: 0, st_updated: 0, st_unchanged: 0, orphaned: 0 });
+  const [orphaned, setOrphaned] = useState<OrphanedUnit[]>([]);
+  const [realtors, setRealtors] = useState<Realtor[]>([]);
+  const [excludedIdx, setExcludedIdx] = useState<Set<number>>(new Set());
+  const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
+  const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
+  const [zones, setZones] = useState<ZoneEntry[]>([]);
+  // Multi-zone group assignment: property name → { code, name }
+  const [propZones, setPropZones] = useState<Record<string, { code: string; name: string }>>({});
+
+  // Master Code panel
+  const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
+  const [agents, setAgents] = useState<AgentEntry[]>([]);
+  const [userRole, setUserRole] = useState<string>('');
+  const [agentCode, setAgentCode] = useState('');   // pre-selected from profile; overrideable by dropdown
+  const [, setAgentName] = useState('');
+  const [selectedAgentCode, setSelectedAgentCode] = useState('');
+  const effectiveAgentCode = selectedAgentCode || agentCode;
+  const [mcState, setMcState] = useState<MCState>({
+    category: 'R', entity_code: '', check_status: 'idle',
+    existing_matches: [], unit_conflicts: [], override_confirmed: false,
+    override_selected_units: [], override_reason: '',
+    generated_code: null, date_seg: '', time_seg: '', seq_num: 100, locked: false,
+  });
+  const updateMc = (next: Partial<MCState>) => setMcState(prev => ({ ...prev, ...next }));
+  const [overrideModalOpen, setOverrideModalOpen] = useState(false);
+
+  // Stage 2 → Validation: per-row reject + inline cell editing + dynamic bulk fill
+  const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
+  const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
+  const [bulkFill, setBulkFill] = useState<Record<string, string>>({});
+
+  // Stage 3 → staged run + Staged Analysis decisions
+  const [runId, setRunId] = useState<string | null>(null);
+  const [stagedRecords, setStagedRecords] = useState<StagedRecord[]>([]);
+  const [recordActions, setRecordActions] = useState<Record<number, RecordDecision>>({});
+
+  // Stage 4 → REIMS Queue (manual confirmation — no auto-polling)
+  const [approveResult, setApproveResult] = useState<{ approved: number; exported: number } | null>(null);
+  const [forceCompleting, setForceCompleting] = useState(false);
+  const [confirmForceClose, setConfirmForceClose] = useState(false);
+  const [schemaErrors, setSchemaErrors] = useState<Array<{ stagedId: string; rowIndex?: number; errors: { field: string; label: string; rule: string; value?: unknown }[] }>>([]);
+
+  // Pipeline termination
+  const [terminateConfirm, setTerminateConfirm] = useState(false);
+  const [isTerminating, setIsTerminating] = useState(false);
+  const [openAmenitiesRow, setOpenAmenitiesRow] = useState<number | null>(null);
+  // Tracks whether any amenities bulk-add has been applied so the revert button
+  // knows there is something to undo.
+  const [amenitiesBulkDirty, setAmenitiesBulkDirty] = useState(false);
+  // Snapshot of resolvedData.amenities per rowIndex captured on stage-2 entry.
+  // Used as the revert target — isolates the original uploaded values from any
+  // bulk-add or inline chip edits performed during Validation.
+  const amenitiesBaseline = useRef<Map<number, string[]> | null>(null);
+
+  // Restore pipeline session if user navigated away mid-flow
+  const SESSION_KEY = 'axiom_pipeline_session';
+  const FILE_KEY    = 'axiom_pending_file';
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = sessionStorage.getItem(SESSION_KEY);
+        if (saved) {
+          const s = JSON.parse(saved);
+          if (s.savedStage === 4 && s.savedRunId) {
+            setRunId(s.savedRunId);
+            setApproveResult({ approved: s.savedApproved ?? 0, exported: 0 });
+            setStage(4);
+          } else if (s.savedStage >= 1 && s.savedStage <= 3 && s.savedMatched?.length) {
+            setFileName(s.savedFileName ?? '');
+            setFileSize(s.savedFileSize ?? 0);
+            setMatched(s.savedMatched);
+            setSummary(s.savedSummary ?? { new: 0, update: 0, conflict: 0, total: 0 });
+            setExcludedIdx(new Set(s.savedExcludedIdx ?? []));
+            setRejectedInValidation(new Set(s.savedRejectedInValidation ?? []));
+            setBulkRealtor(s.savedBulkRealtor ?? { name: '', moci: '' });
+            setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
+            setRecordActions(s.savedRecordActions ?? {});
+            // Restore propZones; if missing, seed from matched records
+            if (s.savedPropZones && Object.keys(s.savedPropZones).length > 0) {
+              setPropZones(s.savedPropZones);
+            } else {
+              const seed: Record<string, { code: string; name: string }> = {};
+              for (const r of (s.savedMatched ?? [])) {
+                const prop = String(r.resolvedData?.property ?? '');
+                if (!prop || seed[prop]) continue;
+                seed[prop] = {
+                  code: String(r.resolvedData?.zone_code ?? ''),
+                  name: String(r.resolvedData?.zone ?? ''),
+                };
+              }
+              setPropZones(seed);
+            }
+            if (s.savedRunId) setRunId(s.savedRunId);
+            setStage(s.savedStage);
+            fetch('/api/realtors').then(r => r.json()).then(d => setRealtors(d.realtors ?? [])).catch(() => {});
+            fetch('/api/zones').then(r => r.json()).then(d => setZones(d.zones ?? [])).catch(() => {});
+            supabase.auth.getSession().then(({ data }) => {
+              const token = data.session?.access_token ?? '';
+              const h = { Authorization: `Bearer ${token}` };
+              fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { const ac = d.agent_code ?? ''; setAgentCode(ac); setSelectedAgentCode(ac); setUserRole(d.role ?? ''); }).catch(() => {});
+              fetch('/api/master-code/entity-codes', { headers: h }).then(r => r.json()).then(d => setEntityCodes(d.entityCodes ?? [])).catch(() => {});
+              fetch('/api/master-code/agents', { headers: h }).then(r => r.json()).then(d => setAgents(d.agents ?? [])).catch(() => {});
+            });
+          }
+          return;
+        }
+        // Restore mapping sub-stage (stage 0 + structuredStage='mapping')
+        const raw = sessionStorage.getItem(FILE_KEY);
+        if (raw) {
+          const { dataUrl, name, size } = JSON.parse(raw);
+          const res  = await fetch(dataUrl);
+          const blob = await res.blob();
+          const file = new File([blob], name, { type: blob.type });
+          setFileName(name);
+          setFileSize(size ?? blob.size);
+          setPendingFile(file);
+          setStructuredStage('mapping');
+        }
+      } catch {}
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist stages 1-3 so navigation away doesn't reset the pipeline
+  useEffect(() => {
+    if (stage < 1 || stage > 3) return;
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        savedStage: stage,
+        savedFileName: fileName,
+        savedFileSize: fileSize,
+        savedMatched: matched,
+        savedSummary: summary,
+        savedExcludedIdx: Array.from(excludedIdx),
+        savedRejectedInValidation: Array.from(rejectedInValidation),
+        savedBulkRealtor: bulkRealtor,
+        savedBulkZone: bulkZone,
+        savedPropZones: propZones,
+        savedRecordActions: recordActions,
+        savedRunId: runId,
+      }));
+    } catch {}
+  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, propZones, excludedIdx, fileName, fileSize, summary, runId]);
+
+  // Amenities baseline — snapshot resolvedData.amenities on stage-2 entry so
+  // bulk edits can be reverted. Reset when leaving stage 2.
+  useEffect(() => {
+    if (stage === 2 && matched.length > 0 && amenitiesBaseline.current === null) {
+      const map = new Map<number, string[]>();
+      for (const m of matched) {
+        const base = Array.isArray(m.resolvedData.amenities)
+          ? (m.resolvedData.amenities as string[])
+          : [];
+        map.set(m.rowIndex, [...base]);
+      }
+      amenitiesBaseline.current = map;
+      setAmenitiesBulkDirty(false);
+    }
+    if (stage !== 2) {
+      amenitiesBaseline.current = null;
+      setAmenitiesBulkDirty(false);
+    }
+  }, [stage, matched]);
+
+  // Stage 0, structured (CSV/XLSX) sub-flow
+  const [structuredStage, setStructuredStage] = useState<'idle' | 'mapping' | 'validating'>('idle');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [mappedPayload, setMappedPayload] = useState<MappedPayload | null>(null);
+
+  // Batch audit log
+  const [batchErrorSummary, setBatchErrorSummary] = useState<{ row: number; field: string; value: unknown; error: string }[]>([]);
+  const [batchTotalRows, setBatchTotalRows] = useState(0);
+
+  // ── Stage 0: Upload & Extract ─────────────────────────────────────────────
+
+  const runMatch = useCallback(async (units: Record<string, unknown>[]) => {
+    setIsProcessing(true);
+    setError(null);
+    try {
+      const matchRes = await fetch('/api/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records: units }),
+      });
+      const matchData = await matchRes.json();
+      if (!matchRes.ok) throw new Error(matchData.error ?? 'Match failed');
+
+      const records = (matchData.results as MatchedRecord[]).map(r => ({ ...r, _conflictResolved: {} }));
+      setMatched(records);
+      setOrphaned(matchData.orphaned ?? []);
+      setExcludedIdx(new Set());
+      setRejectedInValidation(new Set());
+      setBulkRealtor({ name: '', moci: '' });
+      setBulkZone({ code: '', name: '' });
+      // Seed per-property zone assignments from extracted data
+      const seedZones: Record<string, { code: string; name: string }> = {};
+      for (const r of records) {
+        const prop = String(r.resolvedData.property ?? '');
+        if (!prop) continue;
+        if (!seedZones[prop]) {
+          seedZones[prop] = {
+            code: String(r.resolvedData.zone_code ?? ''),
+            name: String(r.resolvedData.zone ?? ''),
+          };
+        }
+      }
+      setPropZones(seedZones);
+      setSummary(matchData.summary);
+      setStructuredStage('idle');
+      setPendingFile(null);
+      setMappedPayload(null);
+      try { sessionStorage.removeItem(FILE_KEY); } catch {}
+      setStage(1);
+
+      fetch('/api/realtors')
+        .then(r => r.json())
+        .then(d => setRealtors(d.realtors ?? []))
+        .catch(() => {});
+      fetch('/api/zones')
+        .then(r => r.json())
+        .then(d => setZones(d.zones ?? []))
+        .catch(() => {});
+      supabase.auth.getSession().then(({ data }) => {
+        const token = data.session?.access_token ?? '';
+        const h = { Authorization: `Bearer ${token}` };
+        fetch('/api/auth/me', { headers: h }).then(r => r.json()).then(d => { setAgentCode(d.agent_code ?? ''); setAgentName(d.full_name ?? ''); setUserRole(d.role ?? ''); }).catch(() => {});
+        fetch('/api/master-code/entity-codes', { headers: h }).then(r => r.json()).then(d => setEntityCodes(d.entityCodes ?? [])).catch(() => {});
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Match failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, []);
+
+  // ── Inline cell editing for Validation table ──────────────────────────────
+
+  const handleCellEdit = useCallback((rowIndex: number, field: string, value: string | string[]) => {
+    const coerced: unknown = Array.isArray(value)
+      ? value
+      : (field === 'zone_code' || field === 'bathrooms')
+        ? (value === '' ? undefined : Number(value))
+        : value;
+    // zone_code → zone name auto-populate (not the reverse: zone code is authority-assigned)
+    const extra: Record<string, unknown> = {};
+    if (field === 'zone_code' && value) {
+      const match = zones.find(z => z.zone_code === Number(value));
+      if (match) extra.zone = match.district_name;
+    }
+    setMatched(prev => prev.map(m =>
+      m.rowIndex === rowIndex
+        ? { ...m, _conflictResolved: { ...m._conflictResolved, [field]: coerced, ...extra } }
+        : m,
+    ));
+    setEditingCell(null);
+  }, [zones]);
+
+  // Auto-open override modal when check detects unit-level conflicts
+  useEffect(() => {
+    if (mcState.check_status === 'existing' && mcState.unit_conflicts.length > 0 && !mcState.override_confirmed) {
+      setOverrideModalOpen(true);
+    }
+  }, [mcState.check_status, mcState.unit_conflicts, mcState.override_confirmed]);
+
+  // ── Master Code Phase 2 register ─────────────────────────────────────────
+  const STOPWORDS = new Set(['real','estate','property','group','holding','company','qsc','qatar','al','el','the','and','of','development','properties','international','investments','investment']);
+
+  const autoPopulateEntity = useCallback((realtorName: string) => {
+    if (!realtorName.trim() || mcState.locked) return;
+    const rName = realtorName.toLowerCase().trim();
+    let matched = entityCodes.find(e => {
+      const cn = e.company_name.toLowerCase();
+      return cn.includes(rName) || rName.includes(cn);
+    });
+    if (!matched) {
+      const rWords = rName.split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
+      let best = 0;
+      entityCodes.forEach(e => {
+        const score = rWords.filter(w => e.company_name.toLowerCase().includes(w)).length;
+        if (score > best) { best = score; matched = e; }
+      });
+      if (best === 0) matched = undefined;
+    }
+    if (matched) updateMc({ entity_code: matched.entity_code, check_status: 'idle', existing_matches: [], unit_conflicts: [], generated_code: null });
+  }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
+
+  const handleMcApply = useCallback(async () => {
+    // AccessGate: verify axiom_upload_authorised before any smart_code generation
+    const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').single();
+    if (!profile?.axiom_upload_authorised) {
+      setError('Smart Code generation requires upload authorisation.');
+      return;
+    }
+
+    const { buildMasterCode, getNowSegments } = await import('@/lib/buildMasterCode');
+    const { date_seg, time_seg } = mcState.date_seg
+      ? { date_seg: mcState.date_seg, time_seg: mcState.time_seg }
+      : getNowSegments();
+    const zc = (bulkZone.code || '00').padStart(2, '0');
+    const master_code = buildMasterCode({
+      category: mcState.category, entity_code: mcState.entity_code,
+      agent_code: effectiveAgentCode, zone_code: zc, date_seg, time_seg,
+    });
+    const pfx = master_code.slice(0, 8);
+
+    // DynamicTypeMapping: resolve 2-char type code from unit config field
+    const resolveTypeCode = async (config: unknown): Promise<string> => {
+      const { data } = await supabase
+        .from('cr_property_type_configs')
+        .select('type_code')
+        .eq('config_key', String(config ?? ''))
+        .maybeSingle();
+      return (data?.type_code as string | null) ?? 'XX';
+    };
+
+    // SequenceGenerator + NaturalKeyDeduplication: assign unique smart_code via atomic RPC
+    const updatedMatched = await Promise.all(
+      matched.map(async (m, i) => {
+        if (excludedIdx.has(i)) return m;
+        const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
+        const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
+          p_category:  mcState.category,
+          p_entity:    mcState.entity_code,
+          p_agent:     (effectiveAgentCode || '00').slice(0, 2),
+          p_zone_code: zc,
+          p_type_code: typeCode,
+          p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
+          p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
+          p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
+          p_zone_name: bulkZone.name,
+        });
+        if (!assignment) return { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
+        if (assignment.action === 'patch') {
+          return {
+            ...m,
+            _conflictResolved: {
+              ...m._conflictResolved,
+              master_code,
+              smart_code: assignment.smart_code,
+              __patch_only: true,
+            },
+          };
+        }
+        return { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: assignment.smart_code } };
+      })
+    );
+    setMatched(updatedMatched);
+    updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1, locked: true });
+
+    // Phase 2 governance write — non-blocking; 409 = already registered, both are fine
+    const token = await supabase.auth.getSession().then(r => r.data.session?.access_token ?? '');
+    const propertyRef = matched[0]?.resolvedData?.property as string | undefined;
+
+    // Audit log for override units
+    if (mcState.override_selected_units.length > 0) {
+      fetch('/api/master-code/log-override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          prefix: pfx,
+          smart_codes: mcState.override_selected_units,
+          reason: mcState.override_reason,
+          property_ref: propertyRef ?? null,
+        }),
+      }).catch(err => console.error('[MC Override Log] error', err));
+    }
+
+    fetch('/api/master-code/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        master_code, category: mcState.category,
+        entity_code: mcState.entity_code || null, agent_code: effectiveAgentCode || null,
+        zone_code: zc, date_seg, time_seg, seq_num: mcState.seq_num,
+        property_ref: propertyRef ?? null,
+        batch_id: null,
+      }),
+    }).then(async r => {
+      if (!r.ok && r.status !== 409) {
+        const body = await r.json().catch(() => ({}));
+        console.error('[MC Register] failed', r.status, body);
+      }
+    }).catch(err => console.error('[MC Register] network error', err));
+  }, [mcState, effectiveAgentCode, bulkZone.code, bulkZone.name, matched, excludedIdx]);
+
+  // ── Poll run status when at REIMS Queue stage ─────────────────────────────
+
+
+  const forceComplete = useCallback(async () => {
+    if (!runId) return;
+    setForceCompleting(true);
+    try {
+      const res = await fetch(`/api/runs/${runId}/force-complete`, { method: 'POST', cache: 'no-store' });
+      if (res.ok) {
+        try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+        setApproveResult(prev => ({ approved: prev?.approved ?? 0, exported: approveResult?.approved ?? 0 }));
+        setStage(5);
+      }
+    } catch {}
+    setForceCompleting(false);
+  }, [runId, approveResult]);
+
+  const handleFile = useCallback(async (file: File) => {
+    const ext = file.name.toLowerCase().split('.').pop() ?? '';
+    if (ext === 'csv') {
+      setError(null);
+      setFileName(file.name);
+      setFileSize(file.size);
+      setPendingFile(file);
+      setStructuredStage('mapping');
+      // Persist file so navigation-away doesn't lose the mapping screen
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          sessionStorage.setItem(FILE_KEY, JSON.stringify({ dataUrl: e.target?.result, name: file.name, size: file.size }));
+        } catch {}
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    setError(null);
+    setIsProcessing(true);
+    setFileName(file.name);
+    setFileSize(file.size);
+
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/extract', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Extraction failed');
+
+      const { units } = data as { units: Record<string, unknown>[] };
+      await runMatch(units);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error');
+      setIsProcessing(false);
+    }
+  }, [runMatch]);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }, [handleFile]);
+
+  const unresolvedConflicts = matched.filter(r => {
+    if (r.action !== 'conflict' || !r.conflictFields) return false;
+    const fields = Object.keys(r.conflictFields);
+    return fields.some(f => r._conflictResolved[f] === undefined);
+  }).length;
+
+  // Records that passed Validation (not rejected) — used in stages 3+
+  const activeMatched = matched.filter(r => !rejectedInValidation.has(r.rowIndex));
+
+  const stageSummary = activeMatched.reduce(
+    (acc, r) => {
+      const decision = recordActions[r.rowIndex] ?? 'import';
+      if (decision === 'skip') acc.skip++;
+      else if (decision === 'replace') acc.replace++;
+      else if (decision === 'backfill') acc.backfill++;
+      else if (r.action === 'new') acc.insert++;
+      else {
+        const sc = r.existingSnapshot?.smart_code;
+        const incomingSc = (r._conflictResolved.smart_code ?? r.resolvedData.smart_code ?? '') as string;
+        if (sc && sc !== incomingSc) acc.duplicate++;
+        else acc.update++;
+      }
+      return acc;
+    },
+    { insert: 0, update: 0, replace: 0, skip: 0, backfill: 0, duplicate: 0 },
+  );
+
+  // ── Stage 2 → Validation → Stage 3: write staged_records ─────────────────
+
+  const handleStage = async () => {
+    setIsProcessing(true);
+    setError(null);
+    try {
+      const finalRecords = activeMatched.map(r => ({
+        ...r,
+        resolvedData: { ...r.resolvedData, ...r._conflictResolved },
+      }));
+
+      const stageRes = await fetch('/api/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName,
+          fileSize,
+          results:       finalRecords,
+          totalRecords:  batchTotalRows || finalRecords.length,
+          errorSummary:  batchErrorSummary,
+          orphanedCount: orphaned.length,
+        }),
+      });
+      const stageData = await stageRes.json();
+      if (!stageRes.ok) throw new Error(stageData.error ?? 'Stage failed');
+
+      setRunId(stageData.runId);
+
+      const sRes = await fetch(`/api/runs/${stageData.runId}/staged`);
+      const sData = await sRes.json();
+      setStagedRecords(sData.records ?? []);
+
+      const actions: Record<number, RecordDecision> = {};
+      activeMatched.forEach(r => {
+        const sc = r.existingSnapshot?.smart_code;
+        const incomingSc = (r._conflictResolved.smart_code ?? r.resolvedData.smart_code ?? '') as string;
+        if (!r.existingSnapshot) {
+          actions[r.rowIndex] = 'import';
+        } else if (!sc) {
+          actions[r.rowIndex] = 'backfill'; // existing unit, no smart_code yet
+        } else if (sc !== incomingSc) {
+          actions[r.rowIndex] = 'skip';     // smart_code conflict — default to skip
+        } else {
+          actions[r.rowIndex] = 'import';
+        }
+      });
+      setRecordActions(actions);
+
+      setStage(3); // Stage Analysis
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Stage failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // ── Stage 3 → Stage 4: approve non-skipped, REIMS Queue polling ───────────
+
+  const handleProceedToReims = async () => {
+    setIsProcessing(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Session expired — please sign in again');
+
+      const approvals = activeMatched
+        .map(r => {
+          const stagedRec = stagedRecords.find(sr => sr.row_index === r.rowIndex);
+          if (!stagedRec) return null;
+          const decision = recordActions[r.rowIndex] ?? 'import';
+          if (decision === 'skip') {
+            return { stagedId: stagedRec.id, decision: 'rejected' as const };
+          }
+          const finalData = { ...r.resolvedData, ...r._conflictResolved };
+          let resolvedData: Record<string, unknown>;
+          if (decision === 'backfill') {
+            resolvedData = {
+              ...finalData,
+              __patch_only:   true,
+              __patch_fields: ['smart_code', 'master_code'],
+            };
+          } else if (decision === 'replace') {
+            resolvedData = { ...finalData, __force_delete: true };
+          } else {
+            resolvedData = finalData;
+          }
+          // Tag single-unit or bulk overrides for the REIMS worker
+          const sc = String(finalData.smart_code ?? '');
+          if (sc && mcState.override_selected_units.includes(sc)) {
+            resolvedData = { ...resolvedData, __override_duplicate: true };
+          }
+          return {
+            stagedId: stagedRec.id,
+            decision: 'approved' as const,
+            resolvedData,
+          };
+        })
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+
+      if (approvals.length === 0) throw new Error('No records selected to send to REIMS');
+
+      const approveRes = await fetch('/api/approve', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ runId, approvals }),
+      });
+      const approveData = await approveRes.json();
+      if (!approveRes.ok) throw new Error(approveData.error ?? 'Approve failed');
+
+      const approved = approveData.approved ?? 0;
+      setApproveResult({ approved, exported: 0 });
+      if (approveData.schemaErrors?.length) setSchemaErrors(approveData.schemaErrors);
+      try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ savedRunId: runId, savedStage: 4, savedApproved: approved })); } catch {}
+      setStage(4); // REIMS Queue
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Approve failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const reset = () => {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+    try { sessionStorage.removeItem(FILE_KEY); } catch {}
+    setBatchErrorSummary([]); setBatchTotalRows(0);
+    setStage(0); setMatched([]); setOrphaned([]); setRunId(null); setStagedRecords([]);
+    setRecordActions({}); setRejectedInValidation(new Set()); setEditingCell(null);
+    setApproveResult(null); setSchemaErrors([]);
+    setFileName(''); setFileSize(0); setError(null);
+    setStructuredStage('idle'); setPendingFile(null); setMappedPayload(null);
+  };
+
+  // ── Validation audit export — XLSX in Schema Template layout ─────────────────
+  const generateValidationExport = useCallback((acceptedRows: MatchedRecord[]) => {
+    const allFieldDefs = [...MASTER_FIELDS, ...BATCH_FIELDS, ...EXTENDED_FIELDS];
+
+    // Header row — labels, with PRIMARY KEY marker for property/unit_no
+    const headers = allFieldDefs.map(f => {
+      const isPK      = 'primaryKey' in f && (f as { primaryKey?: boolean }).primaryKey;
+      const isReq     = 'required'   in f && (f as { required?: boolean }).required;
+      const suffix    = isPK ? ' [PRIMARY KEY] *' : isReq ? ' *' : '';
+      return f.label + suffix;
+    });
+
+    // Data rows
+    const dataRows = acceptedRows.map(r => {
+      const resolved = { ...r.resolvedData, ...r._conflictResolved } as Record<string, unknown>;
+      return allFieldDefs.map(f => {
+        const val = resolved[f.key];
+        if (val === null || val === undefined) return '';
+        if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+        return String(val);
+      });
+    });
+
+    // Build worksheet
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+    ws['!cols'] = allFieldDefs.map(f => ({ wch: Math.max(f.label.length + 6, 20) }));
+
+    // Style note row below data
+    const noteRow = allFieldDefs.map((_, i) =>
+      i === 0 ? `Axiom Validation Export — ${acceptedRows.length} accepted record(s) — ${new Date().toLocaleString('en-GB')}` : ''
+    );
+    XLSX.utils.sheet_add_aoa(ws, [noteRow], { origin: -1 });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Accepted Records');
+
+    // Instructions tab
+    const instrRows = [
+      ['Axiom — Validation Audit Export'],
+      [''],
+      ['This file contains the accepted records from the AXIOM Validation stage.'],
+      ['It mirrors the Schema Template layout so it can be cross-checked against the source file.'],
+      [''],
+      ['Column key:'],
+      ['  [PRIMARY KEY] * — Property Name and Unit No. Entity matching keys. Missing = row rejected.'],
+      ['  * — Required field. Must be populated before import.'],
+      ['  No marker — Optional / extended normalisation field. Absence does not block import.'],
+      [''],
+      ['Extended fields (Contact Details, View) are populated via AI extraction or manual entry'],
+      ['in the AXIOM Validation stage, not from the Schema Template mapping step.'],
+    ];
+    const wsInstr = XLSX.utils.aoa_to_sheet(instrRows);
+    wsInstr['!cols'] = [{ wch: 90 }];
+    XLSX.utils.book_append_sheet(wb, wsInstr, 'Notes');
+
+    // Trigger download
+    const ts   = new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '');
+    const name = `axiom-validation-export-${ts}.xlsx`;
+    XLSX.writeFile(wb, name);
+  }, []);
+
+  const handleTerminate = async () => {
+    setIsTerminating(true);
+    try {
+      if (runId) {
+        const { data: { session } } = await supabase.auth.getSession();
+        await fetch(`/api/v1/axiom/pipeline/${runId}/terminate`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify({ stage }),
+        });
+      }
+      reset();
+    } catch {
+      reset();
+    } finally {
+      setIsTerminating(false);
+      setTerminateConfirm(false);
+    }
+  };
+
+  // ─── Render ────────────────────────────────────────────────────────────────
+
+  const { openNav } = useNav();
+
+  return (
+    <div className="min-h-screen" style={{ background: '#1b1e23' }}>
+      <TopBar
+        onMenuClick={openNav}
+        title="Axiom Pipeline"
+        subtitle="Upload · Match · Validate · Export"
+        right={
+          <div className="flex items-center gap-3">
+            <Link href="/batch-logs" className="text-xs font-medium hidden sm:block" style={{ color: '#3daee9' }}>
+              Batch History
+            </Link>
+            {(stage > 0 || structuredStage !== 'idle') && (
+              <button onClick={reset} className="text-xs font-medium" style={{ color: '#7c8694' }}
+                onMouseOver={e => ((e.currentTarget as HTMLElement).style.color = '#eff0f1')}
+                onMouseOut={e => ((e.currentTarget as HTMLElement).style.color = '#7c8694')}
+              >
+                Start Over
+              </button>
+            )}
+          </div>
+        }
+      />
+
+      {/* Stage indicator — Plasma styled */}
+      <div className="px-6 py-3" style={{ background: '#1e2228', borderBottom: '1px solid #2e3440' }}>
+        <div className="flex items-center gap-0 max-w-4xl">
+          {STAGE_LABELS.map((label, i) => {
+            const done   = i < stage;
+            const active = i === stage;
+            return (
+              <React.Fragment key={i}>
+                <div className="flex items-center gap-1.5" style={{ color: done || active ? '#3daee9' : '#4e5a6a' }}>
+                  <span
+                    className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center"
+                    style={{
+                      background: done ? '#3daee9' : active ? 'rgba(61,174,233,0.15)' : '#252b33',
+                      color:      done ? '#1b1e23' : active ? '#3daee9' : '#4e5a6a',
+                      border:     active ? '2px solid #3daee9' : '2px solid transparent',
+                    }}
+                  >
+                    {done ? '✓' : i + 1}
+                  </span>
+                  <span className="text-xs font-medium hidden sm:inline">{label}</span>
+                </div>
+                {i < STAGE_LABELS.length - 1 && (
+                  <div className="flex-1 h-0.5 mx-2" style={{ background: done ? '#3daee9' : '#2e3440' }} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+
+      <main className="max-w-[1700px] mx-auto px-4 py-8">
+        {error && (
+          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+            {error}
+          </div>
+        )}
+
+        {/* ── Stage 0: Upload ───────────────────────────────────────────── */}
+        {stage === 0 && structuredStage === 'mapping' && pendingFile && (
+          <StructuredMapper
+            fileName={fileName}
+            file={pendingFile}
+            onMapped={payload => { setMappedPayload(payload); setStructuredStage('validating'); }}
+            initialMapping={mappedPayload?.mapping}
+            initialBatch={mappedPayload?.batch}
+          />
+        )}
+
+        {stage === 0 && structuredStage === 'validating' && mappedPayload && (
+          <StructuredValidator
+            payload={mappedPayload}
+            onValidated={(records, errorSummary, totalRows) => {
+              setBatchErrorSummary(errorSummary);
+              setBatchTotalRows(totalRows);
+              runMatch(records);
+            }}
+            onBack={() => setStructuredStage('mapping')}
+          />
+        )}
+
+        {stage === 0 && structuredStage === 'idle' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-8">
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Upload Property Data File</h2>
+            <p className="text-sm text-gray-500 mb-6">Supports XLSX, XLS, CSV, PDF, PNG, JPG, WEBP</p>
+
+            <div
+              onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={onDrop}
+              onClick={() => fileRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'}`}
+            >
+              {isProcessing ? (
+                <div>
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-sm text-gray-600">Extracting & matching records…</p>
+                </div>
+              ) : (
+                <div>
+                  <div className="text-4xl mb-3">📂</div>
+                  <p className="text-sm font-medium text-gray-700">Drop file here or click to browse</p>
+                  <p className="text-xs text-gray-400 mt-1">CSV → manual column mapping · XLSX / PDF / Image → Claude AI extraction</p>
+                </div>
+              )}
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp"
+              className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+            />
+
+            {/* Template download */}
+            <div className="mt-5 flex items-center justify-between rounded-lg px-4 py-3" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+              <div className="flex items-center gap-3">
+                <span className="text-xl">📋</span>
+                <div>
+                  <p className="text-sm font-semibold text-blue-900">Axiom Import Template</p>
+                  <p className="text-xs text-blue-600 mt-0.5">Pre-formatted XLSX with all required columns, sample data, and allowed-value hints</p>
+                </div>
+              </div>
+              <a
+                href="/api/units-template"
+                download="axiom-units-import-template.xlsx"
+                onClick={e => e.stopPropagation()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors"
+                style={{ background: '#0ea5e9', color: '#fff' }}
+                onMouseOver={e => (e.currentTarget.style.background = '#0284c7')}
+                onMouseOut={e => (e.currentTarget.style.background = '#0ea5e9')}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                  <path d="M12 3v12M8 11l4 4 4-4" /><path d="M20 21H4" />
+                </svg>
+                Download Template
+              </a>
+            </div>
+          </div>
+        )}
+
+        {/* ── Stage 1: Match & Review ───────────────────────────────────── */}
+        {stage === 1 && (<>
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Match & Review</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{fileName} · {matched.length} records extracted</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={reset}
+                  className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
+                >← Back to Upload</button>
+                <button
+                  onClick={() => setTerminateConfirm(true)}
+                  className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
+                >⊘ Terminate</button>
+                <Badge label={`${summary.new} New`} color="#22c55e" />
+                <Badge label={`${summary.update} Update`} color="#3b82f6" />
+                {summary.conflict > 0 && <Badge label={`${summary.conflict} Conflict`} color="#a855f7" />}
+              </div>
+            </div>
+
+            {unresolvedConflicts > 0 && (
+              <div className="mb-4 bg-purple-50 border border-purple-200 rounded-lg px-4 py-2 text-xs text-purple-700">
+                {unresolvedConflicts} conflict{unresolvedConflicts > 1 ? 's' : ''} must be resolved before proceeding.
+              </div>
+            )}
+
+            {/* ── Delta classification summary ─────────────────────────── */}
+            <div className="flex items-center gap-3 mb-4 flex-wrap">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Δ Classification</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#fef9c3', color: '#92400e' }}>{summary.st_new} NEW</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#dcfce7', color: '#166534' }}>{summary.st_updated} UPDATED</span>
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded" style={{ background: '#f3f4f6', color: '#6b7280' }}>{summary.st_unchanged} UNCHANGED</span>
+              {orphaned.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: '#fef2f2', color: '#b91c1c' }}>{orphaned.length} ORPHANED</span>
+              )}
+            </div>
+
+            {/* ── Orphaned records panel ───────────────────────────────── */}
+            {orphaned.length > 0 && (
+              <div className="mb-4 border border-red-200 rounded-xl overflow-hidden">
+                <div className="bg-red-50 px-4 py-2 flex items-center gap-2">
+                  <span className="text-xs font-bold text-red-700">⚠ Orphaned Records ({orphaned.length})</span>
+                  <span className="text-xs text-red-500">In REIMS but absent from this source file — status will be set to <strong>Look UP</strong> on delta apply</span>
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-red-50/60 border-b border-red-100 text-red-600 font-semibold">
+                      <th className="px-3 py-1.5 text-left">Property</th>
+                      <th className="px-3 py-1.5 text-left">Unit No.</th>
+                      <th className="px-3 py-1.5 text-left">Status</th>
+                      <th className="px-3 py-1.5 text-left">Smart Code</th>
+                      <th className="px-3 py-1.5 text-left">Master Code</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-red-50">
+                    {orphaned.map(o => (
+                      <tr key={o.id} className="text-gray-600">
+                        <td className="px-3 py-1.5 font-medium text-gray-800">{o.property}</td>
+                        <td className="px-3 py-1.5 font-mono text-blue-700">{o.unit_no}</td>
+                        <td className="px-3 py-1.5">{o.status}</td>
+                        <td className="px-3 py-1.5 font-mono text-green-700 text-[10px]">{o.smart_code ?? '—'}</td>
+                        <td className="px-3 py-1.5 font-mono text-blue-600 text-[10px]">{o.master_code ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* ── Multi-Zone Group Assignment ─────────────────────────── */}
+            {(() => {
+              const propGroups: Record<string, number[]> = {};
+              matched.forEach((r, i) => {
+                const prop = String(r.resolvedData.property ?? r._conflictResolved.property ?? '');
+                if (!prop) return;
+                if (!propGroups[prop]) propGroups[prop] = [];
+                propGroups[prop].push(i);
+              });
+              const propNames = Object.keys(propGroups);
+              if (propNames.length < 2) return null;
+              const allDone = propNames.every(p => propZones[p]?.code || propZones[p]?.name);
+              return (
+                <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/40 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2 border-b border-purple-200 bg-purple-100/60">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
+                      Multi-Zone Group Assignment &nbsp;·&nbsp; {propNames.length} property groups detected
+                    </span>
+                    <button
+                      disabled={!allDone}
+                      onClick={() => {
+                        setMatched(prev => prev.map((m, i) => {
+                          if (excludedIdx.has(i)) return m;
+                          const prop = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
+                          const gz = propZones[prop];
+                          if (!gz) return m;
+                          return {
+                            ...m,
+                            _conflictResolved: {
+                              ...m._conflictResolved,
+                              ...(gz.code ? { zone_code: Number(gz.code) } : {}),
+                              ...(gz.name ? { zone: gz.name } : {}),
+                            },
+                          };
+                        }));
+                      }}
+                      className="text-xs px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold"
+                    >
+                      Apply All Groups
+                    </button>
+                  </div>
+                  <div className="divide-y divide-purple-100">
+                    {propNames.map(prop => {
+                      const gz = propZones[prop] ?? { code: '', name: '' };
+                      const extractedZone = String(matched[propGroups[prop][0]]?.resolvedData.zone ?? '');
+                      const isDone = !!(gz.code || gz.name);
+                      return (
+                        <div key={prop} className="flex items-center gap-3 px-4 py-2">
+                          <div className="w-48 shrink-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">{prop}</p>
+                            <p className="text-[10px] text-gray-400">{propGroups[prop].length} record{propGroups[prop].length !== 1 ? 's' : ''}</p>
+                          </div>
+                          {extractedZone && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 shrink-0">
+                              ✓ {extractedZone}
+                            </span>
+                          )}
+                          <div className="flex-1">
+                            <ZoneField
+                              code={gz.code}
+                              name={gz.name}
+                              zones={zones}
+                              onChange={next => setPropZones(prev => ({ ...prev, [prop]: next }))}
+                              onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+                            />
+                          </div>
+                          <span className={`text-[10px] font-semibold shrink-0 ${isDone ? 'text-green-600' : 'text-gray-400'}`}>
+                            {isDone ? '✓ Done' : '— pending'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── 3-column bulk panel ─────────────────────────────────── */}
+            <div className="grid grid-cols-3 border border-gray-200 rounded-xl overflow-hidden mb-4">
+
+              {/* Col A: Record Fields */}
+              <div className="p-4 bg-blue-50 border-r border-gray-200">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-blue-400 mb-2">Record Fields</p>
+                <label className="flex items-center gap-2 text-xs font-semibold text-blue-800 mb-2">
+                  <input
+                    type="checkbox"
+                    checked={excludedIdx.size === 0}
+                    onChange={e => setExcludedIdx(e.target.checked ? new Set() : new Set(matched.map((_, i) => i)))}
+                  />
+                  Select all — {matched.length - excludedIdx.size} of {matched.length} records
+                </label>
+                <RealtorField
+                  name={bulkRealtor.name}
+                  moci={bulkRealtor.moci}
+                  realtors={realtors}
+                  onChange={r => { setBulkRealtor(r); autoPopulateEntity(r.name); }}
+                  onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
+                />
+                <button
+                  disabled={!bulkRealtor.name.trim() || matched.length === excludedIdx.size}
+                  onClick={() => {
+                    setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                      ? m
+                      : { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: bulkRealtor.name, realtor_moci: bulkRealtor.moci } }));
+                    autoPopulateEntity(bulkRealtor.name);
+                  }}
+                  className="mt-2 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold"
+                >
+                  Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
+                </button>
+
+                <div className="mt-3">
+                  <ZoneField
+                    code={bulkZone.code}
+                    name={bulkZone.name}
+                    zones={zones}
+                    onChange={next => setBulkZone(next)}
+                    onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+                  />
+                  <button
+                    disabled={(!bulkZone.code && !bulkZone.name) || matched.length === excludedIdx.size}
+                    onClick={() => setMatched(prev => prev.map((m, i) => excludedIdx.has(i)
+                      ? m
+                      : {
+                          ...m,
+                          _conflictResolved: {
+                            ...m._conflictResolved,
+                            ...(bulkZone.code ? { zone_code: Number(bulkZone.code) } : {}),
+                            ...(bulkZone.name ? { zone: bulkZone.name } : {}),
+                          },
+                        }))}
+                    className="mt-2 text-xs px-3 py-1.5 rounded bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white font-semibold"
+                  >
+                    Apply to {matched.length - excludedIdx.size} record{matched.length - excludedIdx.size === 1 ? '' : 's'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Col B + C: Master Code Panel */}
+              <div className="col-span-2">
+                <MasterCodePanel
+                  state={mcState}
+                  agentCode={effectiveAgentCode}
+                  zoneCode={bulkZone.code}
+                  entityCodes={entityCodes}
+                  agents={agents}
+                  recordCount={matched.length - excludedIdx.size}
+                  onStateChange={updateMc}
+                  onAgentChange={setSelectedAgentCode}
+                  onApply={handleMcApply}
+                  onOpenOverride={() => setOverrideModalOpen(true)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+              {matched.map((r, i) => {
+                const computedSC = (r._conflictResolved.smart_code as string | null) ?? null;
+                const isConflicting = r._conflictResolved.__patch_only === true;
+                const isUpdated = r.delta_status === 'ST_UPDATED';
+                return (
+                <div key={i} className={`border rounded-lg p-3 ${
+                  isConflicting   ? 'border-red-400 bg-red-50/30' :
+                  isUpdated       ? 'border-[#39ff14] bg-[#f0fff0]' :
+                  r.matchType === 'fuzzy' ? 'border-amber-300 bg-amber-50/20' : 'border-gray-200'
+                }`} style={isUpdated ? { boxShadow: '0 0 0 2px #39ff14, 0 0 12px 2px #b9fbb0' } : undefined}>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={!excludedIdx.has(i)}
+                      onChange={e => setExcludedIdx(prev => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.delete(i); else next.add(i);
+                        return next;
+                      })}
+                    />
+                    <span className="text-xs text-gray-400 w-6">#{r.rowIndex + 1}</span>
+                    {actionBadge(r.action)}
+                    {confidenceBadge(r.matchType, r.matchConfidence)}
+                    <span className="font-medium text-sm truncate flex-1">{String(r.resolvedData.property ?? r.resolvedData.unit_code ?? '—')}</span>
+                    {r.resolvedData.unit_no ? (
+                      <span className="inline-flex items-center gap-1 shrink-0 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+                        <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide">Unit</span>
+                        <span className="text-xs font-bold text-blue-700 font-mono">{String(r.resolvedData.unit_no)}</span>
+                      </span>
+                    ) : null}
+                    {isConflicting && computedSC && (
+                      <span className="inline-flex items-center gap-1 shrink-0 bg-amber-100 border border-amber-400 rounded px-2 py-0.5">
+                        <span className="text-[9px] font-bold text-amber-600 uppercase">PATCH</span>
+                        <span className="font-mono text-xs font-bold text-amber-700">{computedSC}</span>
+                      </span>
+                    )}
+                    {!isConflicting && computedSC ? (
+                      <span className="inline-flex items-center shrink-0 bg-green-50 border border-green-200 rounded px-2 py-0.5">
+                        <span className="font-mono text-xs font-bold text-green-700 tracking-wider">{computedSC}</span>
+                      </span>
+                    ) : null}
+                    {r.existingSnapshot && (
+                      <span
+                        className="text-xs font-bold hidden sm:inline px-2 py-0.5 rounded"
+                        style={isUpdated
+                          ? { background: '#39ff14', color: '#064e03', boxShadow: '0 0 6px 1px #39ff14' }
+                          : { color: '#9ca3af' }}
+                      >
+                        was: {r.existingSnapshot.status} · QAR {r.existingSnapshot.rent?.toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  {r.action === 'conflict' && (
+                    <ConflictResolver
+                      record={r}
+                      onChange={updated => setMatched(prev => prev.map((m, mi) => mi === i ? updated : m))}
+                    />
+                  )}
+                  <RealtorField
+                    name={String(r._conflictResolved.realtor_name ?? r.resolvedData.realtor_name ?? '')}
+                    moci={String(r._conflictResolved.realtor_moci ?? r.resolvedData.realtor_moci ?? '')}
+                    realtors={realtors}
+                    onChange={next => setMatched(prev => prev.map((m, mi) => mi === i
+                      ? { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: next.name, realtor_moci: next.moci } }
+                      : m))}
+                    onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
+                  />
+                  <ZoneField
+                    code={String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '')}
+                    name={String(r._conflictResolved.zone ?? r.resolvedData.zone ?? '')}
+                    zones={zones}
+                    onChange={next => setMatched(prev => prev.map((m, mi) => mi === i ? {
+                      ...m, _conflictResolved: {
+                        ...m._conflictResolved,
+                        zone_code: next.code ? Number(next.code) : undefined,
+                        zone: next.name,
+                      },
+                    } : m))}
+                    onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+                  />
+                </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              {!mcState.generated_code && (
+                <p className="text-xs text-amber-600">Apply Master Code to records before proceeding</p>
+              )}
+              <button
+                disabled={unresolvedConflicts > 0 || !mcState.generated_code}
+                onClick={() => setStage(2)}
+                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
+              >
+                Review {matched.length} Records →
+              </button>
+            </div>
+          </div>
+
+        </>)}
+
+        {/* ── Stage 2: Validation ───────────────────────────────────────── */}
+        {stage === 2 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Validation</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Click any cell to correct it · toggle ✓ / ✕ to accept or reject a row ·{' '}
+                  <span className="font-semibold text-blue-700">{matched.length - rejectedInValidation.size} / {matched.length}</span> accepted
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setRejectedInValidation(new Set());
+                    generateValidationExport(matched);
+                  }}
+                  className="text-xs px-3 py-1.5 border border-green-300 text-green-700 rounded-lg hover:bg-green-50 font-semibold"
+                >Accept All</button>
+                <button
+                  onClick={() => setRejectedInValidation(new Set(matched.map(r => r.rowIndex)))}
+                  className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
+                >Reject All</button>
+                <button
+                  onClick={() => {
+                    const accepted = matched.filter(r => !rejectedInValidation.has(r.rowIndex));
+                    generateValidationExport(accepted);
+                  }}
+                  title="Download audit export of currently accepted records"
+                  className="text-xs px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold flex items-center gap-1"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Export
+                </button>
+              </div>
+            </div>
+
+            {/* Dynamic bulk-fill toolbar — shows only fields with at least one ? in this upload */}
+            {(() => {
+              const getVal = (m: MatchedRecord, field: string) =>
+                String(m._conflictResolved[field] ?? m.resolvedData[field] ?? '').trim();
+              const missingFields = VALIDATION_FIELDS.filter(f =>
+                matched.some(m => !rejectedInValidation.has(m.rowIndex) && !getVal(m, f.field))
+              );
+              if (missingFields.length === 0) return null;
+              return (
+                <div className="mb-3 flex flex-wrap gap-x-4 gap-y-2 items-center bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span className="text-xs font-semibold text-amber-700">Bulk fill missing fields:</span>
+                  {missingFields.map(f => (
+                    <div key={f.field} className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-600 font-medium">{f.label}</span>
+                      {f.type === 'select' ? (
+                        <select
+                          value={bulkFill[f.field] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, [f.field]: e.target.value }))}
+                          className="border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-amber-400"
+                        >
+                          <option value="">—</option>
+                          {f.options!.map(o => <option key={o}>{o}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          type={f.type}
+                          step={f.step}
+                          list={f.field === 'zone' ? 'zone-names-list' : undefined}
+                          value={bulkFill[f.field] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, [f.field]: e.target.value }))}
+                          placeholder="—"
+                          className="w-24 border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-amber-400"
+                        />
+                      )}
+                      <button
+                        disabled={!bulkFill[f.field]}
+                        onClick={() => {
+                          const val = bulkFill[f.field] ?? '';
+                          const isNumeric = f.field === 'zone_code' || f.field === 'bathrooms' || f.field === 'rent';
+                          const coerced: unknown = isNumeric ? Number(val) : val;
+                          // zone_code bulk-fill: also auto-fill zone name from registry
+                          const zoneExtra = (f.field === 'zone_code')
+                            ? (() => { const z = zones.find(z => z.zone_code === Number(val)); return z ? { zone: z.district_name } : {}; })()
+                            : {};
+                          setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                            ...m, _conflictResolved: { ...m._conflictResolved, [f.field]: coerced, ...zoneExtra },
+                          }));
+                        }}
+                        className="text-xs px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded disabled:opacity-40"
+                      >Apply all</button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full text-xs min-w-[1200px]">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold">
+                    <th className="px-3 py-2 text-left w-8 sticky left-0 z-20 bg-gray-50">#</th>
+                    <th className="px-2 py-2 text-left w-10 sticky left-8 z-20 bg-gray-50">Match</th>
+                    <th className="px-2 py-2 text-center w-10 sticky left-[72px] z-20 bg-gray-50">Δ</th>
+                    <th className="px-2 py-2 text-left min-w-[130px] sticky left-[112px] z-20 bg-gray-50">Property</th>
+                    <th className="px-2 py-2 text-left min-w-[144px] sticky left-[242px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Smart Code</th>
+                    <th className="px-2 py-2 text-left w-16 sticky left-[386px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Unit No.</th>
+                    <th className="px-2 py-2 text-left w-14">Zone #</th>
+                    <th className="px-2 py-2 text-left min-w-[100px]">Zone</th>
+                    <th className="px-2 py-2 text-left w-20">Type</th>
+                    <th className="px-2 py-2 text-left w-16">Config</th>
+                    <th className="px-2 py-2 text-left w-12">Bath</th>
+                    <th className="px-2 py-2 text-left w-16">Parking</th>
+                    <th className="px-2 py-2 text-left w-20">Kitchen</th>
+                    <th className="px-2 py-2 text-left w-24">Furnishing</th>
+                    <th className="px-2 py-2 text-left min-w-[120px]">Status</th>
+                    <th className="px-2 py-2 text-right w-20">Rent (QAR)</th>
+                    <th className="px-2 py-2 text-center w-16">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {matched.map(r => {
+                    const rejected  = rejectedInValidation.has(r.rowIndex);
+                    const getVal    = (field: string) => String(r._conflictResolved[field] ?? r.resolvedData[field] ?? '');
+                    const isConflict = (field: string) => !!(r.conflictFields && field in r.conflictFields);
+                    const isEdit    = (field: string) => editingCell?.rowIndex === r.rowIndex && editingCell?.field === field;
+                    const startEdit = (field: string) => { if (!rejected) setEditingCell({ rowIndex: r.rowIndex, field }); };
+                    const td        = (field: string, extra = '') =>
+                      `px-2 py-1.5 ${rejected ? 'opacity-40' : 'cursor-pointer hover:bg-blue-50'} ${isConflict(field) ? 'bg-purple-50' : ''} ${extra}`;
+
+                    const isUnchanged = r.delta_status === 'ST_UNCHANGED';
+                    const bgRow = rejected ? 'bg-red-50' : isUnchanged ? 'bg-gray-50' : 'bg-white hover:bg-gray-50';
+                    return (
+                      <tr key={r.rowIndex} className={`${rejected || isUnchanged ? 'opacity-50' : 'text-gray-900'}`}>
+                        <td className={`px-3 py-1.5 text-gray-400 font-medium sticky left-0 z-10 ${bgRow}`}>{r.rowIndex + 1}</td>
+                        <td className={`px-2 py-1.5 sticky left-8 z-10 ${bgRow}`}>{actionBadge(r.action)}</td>
+                        <td className={`px-2 py-1.5 text-center sticky left-[72px] z-10 ${bgRow}`}>{deltaBadge(r.delta_status)}</td>
+
+                        {/* Property — sticky, read-only */}
+                        <td className={`px-2 py-1.5 sticky left-[112px] z-10 ${bgRow}`}>
+                          <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>
+                        </td>
+
+                        {/* Smart Code — sticky, read-only; stacks 16-digit master_code over unit smart_code */}
+                        <td className={`px-2 py-1.5 sticky left-[242px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                          {(getVal('master_code') || getVal('smart_code')) ? (
+                            <div className="flex flex-col gap-0.5">
+                              {getVal('master_code') && (
+                                <span className="font-mono text-[10px] font-bold text-blue-700 tracking-widest leading-tight">{getVal('master_code')}</span>
+                              )}
+                              {getVal('smart_code') && (
+                                <span className="font-mono text-[10px] font-bold text-green-700 tracking-wider bg-green-50 px-1 py-px rounded leading-tight">{getVal('smart_code')}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 text-xs">—</span>
+                          )}
+                        </td>
+
+                        {/* Unit No — sticky, read-only */}
+                        <td className={`px-2 py-1.5 sticky left-[386px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                          <span className={!getVal('unit_no') ? 'text-red-500 font-bold' : 'text-blue-700 font-mono font-medium'}>{getVal('unit_no') || '!'}</span>
+                        </td>
+
+                        {/* Zone # */}
+                        <td className={td('zone_code')} onClick={() => startEdit('zone_code')}>
+                          {isEdit('zone_code')
+                            ? <input autoFocus type="number" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('zone_code')} onBlur={e => handleCellEdit(r.rowIndex, 'zone_code', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'zone_code', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('zone_code') ? 'text-amber-500 font-bold' : 'text-teal-700 font-semibold'}>{getVal('zone_code') || '?'}</span>}
+                        </td>
+
+                        {/* Zone */}
+                        <td className={td('zone')} onClick={() => startEdit('zone')}>
+                          {isEdit('zone')
+                            ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('zone')} onBlur={e => handleCellEdit(r.rowIndex, 'zone', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'zone', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('zone') ? 'text-amber-500 font-bold' : 'text-teal-800'}>{getVal('zone') || '?'}</span>}
+                        </td>
+
+                        {/* Type (select) */}
+                        <td className={td('type')} onClick={() => startEdit('type')}>
+                          {isEdit('type')
+                            ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('type')} onChange={e => handleCellEdit(r.rowIndex, 'type', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'type', e.target.value)}><option value="">—</option>{TYPE_OPTIONS.map(o => <option key={o}>{o}</option>)}</select>
+                            : <span className={!getVal('type') ? 'text-amber-500 font-bold' : 'text-violet-700 font-medium'}>{getVal('type') || '?'}</span>}
+                        </td>
+
+                        {/* Config */}
+                        <td className={td('config')} onClick={() => startEdit('config')}>
+                          {isEdit('config')
+                            ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('config')} onBlur={e => handleCellEdit(r.rowIndex, 'config', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'config', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('config') ? 'text-amber-500 font-bold' : 'text-indigo-600 font-semibold'}>{getVal('config') || '?'}</span>}
+                        </td>
+
+                        {/* Bath */}
+                        <td className={td('bathrooms')} onClick={() => startEdit('bathrooms')}>
+                          {isEdit('bathrooms')
+                            ? <input autoFocus type="number" step="0.5" min="0" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('bathrooms')} onBlur={e => handleCellEdit(r.rowIndex, 'bathrooms', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'bathrooms', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('bathrooms') ? 'text-amber-500 font-bold' : 'text-gray-800 font-medium'}>{getVal('bathrooms') || '?'}</span>}
+                        </td>
+
+                        {/* Parking (select) */}
+                        <td className={td('parking')} onClick={() => startEdit('parking')}>
+                          {isEdit('parking')
+                            ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('parking')} onChange={e => handleCellEdit(r.rowIndex, 'parking', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'parking', e.target.value)}><option value="">—</option>{['Yes','No'].map(o => <option key={o}>{o}</option>)}</select>
+                            : <span className={!getVal('parking') ? 'text-amber-500 font-bold' : getVal('parking') === 'Yes' ? 'text-green-700 font-medium' : 'text-gray-500'}>{getVal('parking') || '?'}</span>}
+                        </td>
+
+                        {/* Kitchen (select) */}
+                        <td className={td('kitchen')} onClick={() => startEdit('kitchen')}>
+                          {isEdit('kitchen')
+                            ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('kitchen')} onChange={e => handleCellEdit(r.rowIndex, 'kitchen', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'kitchen', e.target.value)}><option value="">—</option>{KITCHEN_OPTIONS.map(o => <option key={o}>{o}</option>)}</select>
+                            : <span className={!getVal('kitchen') ? 'text-amber-500 font-bold' : 'text-gray-700'}>{getVal('kitchen') || '?'}</span>}
+                        </td>
+
+                        {/* Furnishing (select) */}
+                        <td className={td('furnishing')} onClick={() => startEdit('furnishing')}>
+                          {isEdit('furnishing')
+                            ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('furnishing')} onChange={e => handleCellEdit(r.rowIndex, 'furnishing', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'furnishing', e.target.value)}><option value="">—</option>{FURNISHING_OPTIONS.map(o => <option key={o}>{o}</option>)}</select>
+                            : <span className={!getVal('furnishing') ? 'text-amber-500 font-bold' : getVal('furnishing') === 'Furnished' ? 'text-green-700 font-medium' : getVal('furnishing') === 'Semi-furnished' ? 'text-amber-600 font-medium' : 'text-gray-600'}>{getVal('furnishing') || '?'}</span>}
+                        </td>
+
+                        {/* Status */}
+                        <td className={td('status')} onClick={() => startEdit('status')}>
+                          {isEdit('status')
+                            ? <input autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('status')} onBlur={e => handleCellEdit(r.rowIndex, 'status', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'status', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('status') ? 'text-red-500 font-bold' : getVal('status') === 'Available' ? 'text-green-700 font-semibold' : 'text-gray-700 font-medium'}>{getVal('status') || '!'}</span>}
+                        </td>
+
+                        {/* Rent */}
+                        <td className={td('rent', 'text-right')} onClick={() => startEdit('rent')}>
+                          {isEdit('rent')
+                            ? <input autoFocus type="number" className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs text-right" defaultValue={getVal('rent')} onBlur={e => handleCellEdit(r.rowIndex, 'rent', e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'rent', e.currentTarget.value); if (e.key === 'Escape') setEditingCell(null); }} />
+                            : <span className={!getVal('rent') ? 'text-red-500 font-bold' : 'text-emerald-700 font-semibold'}>{getVal('rent') ? Number(getVal('rent')).toLocaleString() : '!'}</span>}
+                        </td>
+
+                        {/* Accept / Reject — two explicit buttons */}
+                        <td className="px-2 py-1.5 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              title="Accept"
+                              onClick={() => setRejectedInValidation(prev => { const next = new Set(prev); next.delete(r.rowIndex); return next; })}
+                              className={`w-7 h-7 rounded-full text-sm font-bold transition-colors ${!rejected ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-600'}`}
+                            >✓</button>
+                            <button
+                              title="Reject"
+                              onClick={() => setRejectedInValidation(prev => { const next = new Set(prev); next.add(r.rowIndex); return next; })}
+                              className={`w-7 h-7 rounded-full text-sm font-bold transition-colors ${rejected ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-500'}`}
+                            >✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Legend */}
+            <div className="mt-3 flex items-center gap-4 text-xs text-gray-400">
+              <span><span className="text-red-400 font-semibold">!</span> = required field missing</span>
+              <span><span className="text-amber-500 font-semibold">?</span> = value not set / inferred</span>
+              <span><span className="bg-purple-100 text-purple-700 px-1 rounded">purple</span> = conflict field</span>
+            </div>
+
+            {/* ── Extended Fields Panel — REIMS Export ──────────────────────── */}
+            {(() => {
+              const accepted = matched.filter(r => !rejectedInValidation.has(r.rowIndex));
+              const getV = (r: typeof matched[0], f: string) => String(r._conflictResolved[f] ?? r.resolvedData[f] ?? '');
+              const getArr = (r: typeof matched[0], f: string): string[] => {
+                const v = r._conflictResolved[f] ?? r.resolvedData[f];
+                if (Array.isArray(v)) return v as string[];
+                if (typeof v === 'string' && v) return v.split(/[,|;]/).map((s: string) => s.trim()).filter(Boolean);
+                return [];
+              };
+              const hasAnyExtended = accepted.some(r =>
+                getV(r,'floor') || getV(r,'area_sqft') || getV(r,'contact_details') || getV(r,'view') || getV(r,'design_type') || getArr(r,'amenities').length > 0
+              );
+              return (
+                <div className="mt-6 border border-blue-100 rounded-xl overflow-hidden">
+                  <div className="bg-blue-50 px-4 py-2.5 border-b border-blue-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <span className="text-xs font-bold text-blue-800 uppercase tracking-wider">Extended Fields — REIMS Export</span>
+                        <span className="ml-2 text-[11px] text-blue-500">Non-mandatory fields slated for Unit Details on import</span>
+                      </div>
+                      {!hasAnyExtended && (
+                        <span className="text-[11px] text-blue-400 italic">No extended field data extracted from this document</span>
+                      )}
+                    </div>
+                    {/* Bulk-apply toolbar */}
+                    <div className="flex flex-wrap gap-x-5 gap-y-2 items-start">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-blue-700">Contact Details:</span>
+                        <input
+                          type="text"
+                          placeholder="Name Phone"
+                          value={bulkFill['contact_details'] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, contact_details: e.target.value }))}
+                          className="border border-blue-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 w-36"
+                        />
+                        <button
+                          disabled={!bulkFill['contact_details']?.trim()}
+                          onClick={() => {
+                            const val = bulkFill['contact_details'] ?? '';
+                            setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                              ...m, _conflictResolved: { ...m._conflictResolved, contact_details: val },
+                            }));
+                          }}
+                          className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                        >Apply all</button>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-blue-700">View:</span>
+                        <select
+                          value={bulkFill['view'] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, view: e.target.value }))}
+                          className="border border-blue-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400"
+                        >
+                          <option value="">— Select —</option>
+                          {VIEW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                        <button
+                          disabled={!bulkFill['view']}
+                          onClick={() => {
+                            const val = bulkFill['view'] ?? '';
+                            setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                              ...m, _conflictResolved: { ...m._conflictResolved, view: val },
+                            }));
+                          }}
+                          className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                        >Apply all</button>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-semibold text-blue-700">Remarks:</span>
+                        <input
+                          type="text"
+                          placeholder="Operational note…"
+                          value={bulkFill['operator_remarks'] ?? ''}
+                          onChange={e => setBulkFill(prev => ({ ...prev, operator_remarks: e.target.value }))}
+                          className="border border-blue-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 w-44"
+                        />
+                        <button
+                          disabled={!bulkFill['operator_remarks']?.trim()}
+                          onClick={() => {
+                            const val = bulkFill['operator_remarks'] ?? '';
+                            setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
+                              ...m, _conflictResolved: { ...m._conflictResolved, operator_remarks: val },
+                            }));
+                          }}
+                          className="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                        >Apply all</button>
+                      </div>
+                      {/* Amenities bulk-apply — additive merge, never overwrites */}
+                      <div className="flex-1 min-w-[280px]">
+                        <p className="text-[11px] font-semibold text-blue-700 mb-1">Bulk-add Amenities to all rows:</p>
+                        <div className="flex flex-wrap gap-1 mb-1.5">
+                          {AMENITIES_LIST.map(a => {
+                            const bulkAmenities = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
+                            const sel = bulkAmenities.includes(a);
+                            return (
+                              <button key={a} type="button"
+                                onClick={() => {
+                                  const cur: string[] = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
+                                  setBulkFill(prev => ({ ...prev, _amenities_bulk: (sel ? cur.filter(x => x !== a) : [...cur, a]) as unknown as string }));
+                                }}
+                                className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${sel ? 'bg-blue-600 border-blue-600 text-white' : 'border-blue-200 text-blue-600 hover:border-blue-400 bg-white'}`}
+                              >{a}</button>
+                            );
+                          })}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            disabled={!((bulkFill['_amenities_bulk'] as unknown as string[] | undefined)?.length)}
+                            onClick={() => {
+                              const toAdd: string[] = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
+                              setMatched(prev => prev.map(m => {
+                                if (rejectedInValidation.has(m.rowIndex)) return m;
+                                const cur: string[] = Array.isArray(m._conflictResolved['amenities'])
+                                  ? m._conflictResolved['amenities'] as string[]
+                                  : Array.isArray(m.resolvedData['amenities'])
+                                    ? m.resolvedData['amenities'] as string[]
+                                    : [];
+                                return { ...m, _conflictResolved: { ...m._conflictResolved, amenities: Array.from(new Set([...cur, ...toAdd])) } };
+                              }));
+                              setAmenitiesBulkDirty(true);
+                            }}
+                            className="text-[11px] px-2.5 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
+                          >Add to all accepted rows</button>
+                          <button
+                            disabled={!amenitiesBulkDirty}
+                            title="Revert all rows to the amenities extracted from the uploaded file"
+                            onClick={() => {
+                              const baseline = amenitiesBaseline.current;
+                              if (!baseline) return;
+                              setMatched(prev => prev.map(m => {
+                                const base = baseline.get(m.rowIndex) ?? [];
+                                return { ...m, _conflictResolved: { ...m._conflictResolved, amenities: [...base] } };
+                              }));
+                              setBulkFill(prev => ({ ...prev, _amenities_bulk: [] as unknown as string }));
+                              setAmenitiesBulkDirty(false);
+                            }}
+                            className="text-[11px] px-2.5 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded disabled:opacity-40"
+                          >↩ Revert to uploaded values</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs min-w-[900px]">
+                      <thead>
+                        <tr className="bg-blue-50/60 border-b border-blue-100 text-blue-600 font-semibold">
+                          <th className="px-3 py-2 text-left w-8 sticky left-0 bg-blue-50/60">#</th>
+                          <th className="px-2 py-2 text-left min-w-[130px] sticky left-8 bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Property</th>
+                          <th className="px-2 py-2 text-left w-20 sticky left-[178px] bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Unit No.</th>
+                          <th className="px-2 py-2 text-left w-16">Floor</th>
+                          <th className="px-2 py-2 text-left w-24">Size (sqm)</th>
+                          <th className="px-2 py-2 text-left min-w-[220px]">Amenities</th>
+                          <th className="px-2 py-2 text-left min-w-[120px]">Design Type</th>
+                          <th className="px-2 py-2 text-left min-w-[160px]">Contact Details</th>
+                          <th className="px-2 py-2 text-left min-w-[140px]">View</th>
+                          <th className="px-2 py-2 text-left min-w-[200px]">Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-blue-50">
+                        {accepted.map((r, i) => (
+                          <tr key={r.rowIndex} className="hover:bg-blue-50/40 text-gray-700">
+                            <td className="px-3 py-1.5 text-gray-400 sticky left-0 bg-white">{i + 1}</td>
+                            <td className="px-2 py-1.5 font-semibold text-gray-900 sticky left-8 bg-white shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'property') || <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5 font-mono text-blue-700 sticky left-[178px] bg-white shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'unit_no') || <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5">{getV(r,'floor') ? <span className="text-gray-800 font-medium">{getV(r,'floor')}</span> : <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5">{getV(r,'area_sqft') ? <span className="text-gray-800 font-medium">{getV(r,'area_sqft')} sqm</span> : <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5 align-top">
+                              <div className="flex flex-wrap gap-1">
+                                {getArr(r,'amenities').map(a => (
+                                  <span key={a} className="inline-flex items-center gap-0.5 text-[9px] bg-teal-50 border border-teal-200 text-teal-700 rounded-full px-1.5 py-0.5 leading-none">
+                                    {a}
+                                    <button type="button" onClick={() => {
+                                      const next = getArr(r,'amenities').filter(x => x !== a);
+                                      handleCellEdit(r.rowIndex, 'amenities', next);
+                                    }} className="ml-0.5 text-teal-400 hover:text-red-500 leading-none">×</button>
+                                  </span>
+                                ))}
+                                <button type="button"
+                                  onClick={() => setOpenAmenitiesRow(openAmenitiesRow === r.rowIndex ? null : r.rowIndex)}
+                                  className="text-[9px] border border-dashed border-blue-300 text-blue-500 rounded-full px-1.5 py-0.5 hover:bg-blue-50 leading-none"
+                                >+ Add</button>
+                              </div>
+                              {openAmenitiesRow === r.rowIndex && (
+                                <div className="mt-1.5 p-2 bg-white border border-blue-200 rounded-lg shadow-md">
+                                  <div className="flex flex-wrap gap-1">
+                                    {AMENITIES_LIST.map(a => {
+                                      const sel = getArr(r,'amenities').includes(a);
+                                      return (
+                                        <button key={a} type="button"
+                                          onClick={() => {
+                                            const cur = getArr(r,'amenities');
+                                            handleCellEdit(r.rowIndex, 'amenities', sel ? cur.filter(x => x !== a) : [...cur, a]);
+                                          }}
+                                          className={`text-[9px] px-1.5 py-0.5 rounded-full border transition-colors ${sel ? 'bg-teal-600 border-teal-600 text-white' : 'border-gray-300 text-gray-600 hover:border-teal-400'}`}
+                                        >{a}</button>
+                                      );
+                                    })}
+                                  </div>
+                                  <button type="button" onClick={() => setOpenAmenitiesRow(null)}
+                                    className="mt-1.5 text-[10px] text-blue-500 hover:underline">Done</button>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none placeholder-gray-300"
+                                placeholder="e.g. Type B"
+                                defaultValue={getV(r,'design_type')}
+                                onBlur={e => handleCellEdit(r.rowIndex, 'design_type', e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'design_type', e.currentTarget.value); }}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none placeholder-gray-300"
+                                placeholder="Name Phone"
+                                defaultValue={getV(r,'contact_details')}
+                                onBlur={e => handleCellEdit(r.rowIndex, 'contact_details', e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleCellEdit(r.rowIndex, 'contact_details', e.currentTarget.value); }}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <select
+                                className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none"
+                                value={getV(r,'view')}
+                                onChange={e => handleCellEdit(r.rowIndex, 'view', e.target.value)}
+                              >
+                                <option value="">— Select —</option>
+                                {VIEW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <textarea
+                                rows={2}
+                                className="w-full bg-white border border-blue-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:border-blue-400 focus:outline-none placeholder-gray-300 resize-none"
+                                placeholder="Operator remarks…"
+                                defaultValue={getV(r,'operator_remarks')}
+                                onBlur={e => handleCellEdit(r.rowIndex, 'operator_remarks', e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleCellEdit(r.rowIndex, 'operator_remarks', e.currentTarget.value); } }}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="bg-blue-50/40 px-4 py-2 border-t border-blue-100 text-[11px] text-blue-400">
+                    Showing {accepted.length} accepted record{accepted.length !== 1 ? 's' : ''}. Rejected records excluded. Amenities write to <span className="font-mono">units.amenities[]</span> in REIMS. Design Type writes to <span className="font-mono">units.design_type</span> (Classification → Unit Type). Contact Details exports as Property Focal Point Info. Remarks write to <span className="font-mono">units.operator_remarks</span> (View Details → Operational → Operator Remarks).
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="mt-6 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setStage(1)}
+                  className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
+                >← Back to Match & Review</button>
+                <button
+                  onClick={() => setTerminateConfirm(true)}
+                  className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
+                >⊘ Terminate</button>
+              </div>
+              <button
+                disabled={rejectedInValidation.size === matched.length || isProcessing}
+                onClick={handleStage}
+                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
+              >
+                {isProcessing ? 'Staging…' : `Confirm & Stage ${matched.length - rejectedInValidation.size} Records →`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Stage 3: Stage Analysis ───────────────────────────────────── */}
+        {stage === 3 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Stage Analysis</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Run <span className="font-mono">{runId}</span> · review the REIMS impact of each record before sending
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge label={`${stageSummary.insert} Insert`} color="#22c55e" />
+                <Badge label={`${stageSummary.update} Update`} color="#3b82f6" />
+                {stageSummary.backfill > 0 && <Badge label={`${stageSummary.backfill} Backfill`} color="#0891b2" />}
+                {stageSummary.duplicate > 0 && <Badge label={`${stageSummary.duplicate} Duplicate`} color="#d97706" />}
+                {stageSummary.replace > 0 && <Badge label={`${stageSummary.replace} Replace`} color="#f97316" />}
+                {stageSummary.skip > 0 && <Badge label={`${stageSummary.skip} Skip`} color="#9ca3af" />}
+              </div>
+            </div>
+
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+              {activeMatched.map((r, i) => {
+                const finalData = { ...r.resolvedData, ...r._conflictResolved } as Record<string, unknown>;
+                const decision = recordActions[r.rowIndex] ?? 'import';
+                const hasExisting = r.existingSnapshot !== null;
+                const existingSc = r.existingSnapshot?.smart_code ?? null;
+                const incomingSc = String(finalData.smart_code ?? '');
+                const isBackfill  = hasExisting && !existingSc;
+                const isDuplicate = hasExisting && !!existingSc && existingSc !== incomingSc;
+                const isAdmin = ['superuser', 'administrator'].includes(userRole);
+                const diffFields: { field: string; from: unknown; to: unknown }[] = [];
+                if (r.existingSnapshot) {
+                  (['status', 'rent', 'furnishing'] as const).forEach(f => {
+                    const before = r.existingSnapshot![f];
+                    const after = finalData[f];
+                    if (after !== undefined && String(before) !== String(after)) {
+                      diffFields.push({ field: f, from: before, to: after });
+                    }
+                  });
+                }
+                const cardBorder = isDuplicate ? 'border-amber-300 bg-amber-50/30'
+                  : isBackfill ? 'border-cyan-200 bg-cyan-50/20'
+                  : decision === 'skip' ? 'border-gray-200 bg-gray-50 opacity-60'
+                  : 'border-gray-200';
+                return (
+                  <div key={i} className={`border rounded-lg p-3 ${cardBorder}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400 w-6">#{r.rowIndex + 1}</span>
+                      {actionBadge(r.action)}
+                      {isBackfill && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#cffafe', color: '#0e7490' }}>BACKFILL</span>
+                      )}
+                      {isDuplicate && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>⚠ DUPLICATE</span>
+                      )}
+                      <span className="font-medium text-sm truncate flex-1">{String(finalData.property ?? finalData.unit_code ?? '—')}</span>
+                      {/* Dual-stack: 16-digit master_code over unit smart_code — mirrors Validation column */}
+                      <div className="flex flex-col gap-0.5 items-end shrink-0">
+                        {finalData.master_code
+                          ? <span className="font-mono text-[10px] font-bold text-blue-700 tracking-widest leading-tight">{String(finalData.master_code)}</span>
+                          : null}
+                        {finalData.smart_code
+                          ? <span className="font-mono text-[10px] font-bold text-green-700 tracking-wider bg-green-50 px-1 py-px rounded leading-tight">{String(finalData.smart_code)}</span>
+                          : <span className="text-xs text-gray-400">{String(finalData.unit_no ?? '')}</span>}
+                      </div>
+                      <select
+                        value={decision}
+                        disabled={isDuplicate && !isAdmin}
+                        onChange={e => setRecordActions(prev => ({ ...prev, [r.rowIndex]: e.target.value as RecordDecision }))}
+                        className={`text-xs border rounded px-2 py-1 bg-white font-medium ${isDuplicate && !isAdmin ? 'border-amber-300 cursor-not-allowed opacity-60' : 'border-gray-300'}`}
+                      >
+                        {isBackfill ? (
+                          <>
+                            <option value="backfill">Patch smart_code only</option>
+                            <option value="skip">Skip</option>
+                          </>
+                        ) : isDuplicate ? (
+                          <>
+                            <option value="skip">Skip</option>
+                            {isAdmin && <option value="backfill">Override: Patch smart_code</option>}
+                            {isAdmin && <option value="replace">Override: Delete &amp; Re-insert</option>}
+                          </>
+                        ) : (
+                          <>
+                            <option value="import">{r.action === 'new' ? 'Insert' : 'Update'}</option>
+                            <option value="skip">Skip</option>
+                            {hasExisting && <option value="replace">Delete &amp; Re-insert</option>}
+                          </>
+                        )}
+                      </select>
+                      {isDuplicate && !isAdmin && (
+                        <span className="text-[10px] text-amber-700 font-semibold">🔒 Admin only</span>
+                      )}
+                    </div>
+                    {/* Secondary info row: Type · Config · Furnishing · Status · Rent */}
+                    {decision !== 'skip' && (
+                      <div className="mt-1.5 ml-8 flex items-center gap-2 flex-wrap">
+                        {[
+                          finalData.type       ? { label: String(finalData.type),       color: 'text-violet-600' }  : null,
+                          finalData.config     ? { label: String(finalData.config),     color: 'text-indigo-600' }  : null,
+                          finalData.furnishing ? { label: String(finalData.furnishing), color: finalData.furnishing === 'Furnished' ? 'text-green-600' : finalData.furnishing === 'Semi-furnished' ? 'text-amber-600' : 'text-gray-500' } : null,
+                          finalData.status     ? { label: String(finalData.status),     color: finalData.status === 'Available' ? 'text-green-600 font-semibold' : 'text-gray-500' } : null,
+                          finalData.rent       ? { label: `QAR ${Number(finalData.rent).toLocaleString()}`, color: 'text-emerald-700 font-semibold' } : null,
+                        ].filter(Boolean).map((item, idx, arr) => (
+                          <span key={idx} className={`text-[11px] ${item!.color}`}>
+                            {item!.label}{idx < arr.length - 1 ? <span className="text-gray-300 ml-2">·</span> : null}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {diffFields.length > 0 && decision !== 'skip' && (
+                      <div className="mt-2 ml-8 flex flex-wrap gap-2">
+                        {diffFields.map(d => (
+                          <span key={d.field} className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-0.5">
+                            <span className="capitalize">{d.field}</span>: {String(d.from)} → {String(d.to)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {isDuplicate && (
+                      <div className="mt-2 ml-8 flex flex-wrap gap-2 items-center">
+                        <span className="text-[11px] text-amber-700">Existing smart_code:</span>
+                        <span className="font-mono text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-px rounded">{existingSc}</span>
+                        <span className="text-[11px] text-gray-400">→ incoming:</span>
+                        <span className="font-mono text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-px rounded">{incomingSc || '—'}</span>
+                      </div>
+                    )}
+                    {decision === 'replace' && (
+                      <p className="mt-2 ml-8 text-xs text-orange-600">Existing REIMS unit will be deleted and re-inserted fresh.</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setStage(2)}
+                  className="text-xs px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold"
+                >← Back to Validation</button>
+                <button
+                  onClick={() => setTerminateConfirm(true)}
+                  className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
+                >⊘ Terminate</button>
+              </div>
+              <button
+                disabled={isProcessing}
+                onClick={handleProceedToReims}
+                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
+              >
+                {isProcessing ? 'Sending…' : `Send ${activeMatched.length - stageSummary.skip} Records to REIMS →`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Stage 4: REIMS Queue (manual confirmation) ────────────────── */}
+        {stage === 4 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-10 text-center max-w-2xl mx-auto">
+
+            {/* Schema errors — records blocked from REIMS */}
+            {schemaErrors.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-6 text-left">
+                <p className="text-xs font-bold text-red-700 uppercase tracking-widest mb-2">
+                  {schemaErrors.length} Record{schemaErrors.length > 1 ? 's' : ''} Blocked — Schema Errors
+                </p>
+                <ul className="text-xs text-red-700 space-y-1.5 list-none">
+                  {schemaErrors.map(({ stagedId, rowIndex, errors }) => (
+                    <li key={stagedId} className="flex flex-col gap-0.5">
+                      <span className="font-semibold">Row {rowIndex != null ? rowIndex + 1 : '?'}</span>
+                      <span>{errors.map(e => e.rule === 'required' ? `${e.label} missing` : `${e.label}: invalid value "${e.value}"`).join(' · ')}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-red-500 mt-3">These records were NOT sent to REIMS. Open <a href="/exceptions" className="underline font-semibold">Exception Queue</a> to review.</p>
+              </div>
+            )}
+
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Queued for REIMS Export</h2>
+            <p className="text-sm text-gray-500 mb-1">
+              Run <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">{runId}</span>
+            </p>
+            <p className="text-sm text-gray-500 mb-8">
+              <span className="font-semibold text-blue-600">{approveResult?.approved ?? activeMatched.length}</span> records are in the vetted queue, ready for REIMS
+            </p>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-left mb-6">
+              <p className="text-xs font-bold uppercase tracking-widest mb-2 text-blue-700">Next Step — REIMS IngestQueue</p>
+              <ol className="text-xs space-y-1.5 list-decimal list-inside text-blue-700">
+                <li>Open <span className="font-semibold">REOS</span> and click <span className="font-mono bg-blue-100 px-1 rounded">Axiom Queue</span> in the sidebar</li>
+                <li>Preview the records and click <span className="font-semibold">Import All →</span></li>
+                <li>Please confirm all records have been imported</li>
+              </ol>
+            </div>
+
+            {/* Admin / Superuser actions */}
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-[11px] text-gray-400 uppercase tracking-widest">Administrator · Superuser</p>
+              {!confirmForceClose ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setConfirmForceClose(true)}
+                    className="px-4 py-2 border border-gray-300 hover:bg-gray-50 text-gray-600 text-sm font-semibold rounded-lg transition-colors"
+                  >
+                    Force Close
+                  </button>
+                  <button
+                    onClick={reset}
+                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors"
+                  >
+                    Start Over
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-left max-w-sm">
+                  <p className="text-sm font-bold text-red-700 mb-1">⚠ Records will NOT be imported</p>
+                  <p className="text-xs text-red-600 mb-3">
+                    Force Close marks this run as done in Axiom without importing the{' '}
+                    <span className="font-semibold">{approveResult?.approved ?? activeMatched.length} records</span>{' '}
+                    into REIMS Units Inventory. Use only if REIMS has already imported these records via a different path.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmForceClose(false)}
+                      className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={forceComplete}
+                      disabled={forceCompleting}
+                      className="px-4 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors"
+                    >
+                      {forceCompleting ? 'Closing…' : 'Yes, Force Close Without Importing'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Stage 5: Done ─────────────────────────────────────────────── */}
+        {stage === 5 && approveResult && (
+          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center max-w-xl mx-auto">
+            <div className="text-5xl mb-4">✅</div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Imported to REIMS</h2>
+            <p className="text-sm text-gray-500 mb-6">
+              Run <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{runId}</span> · acknowledged by REIMS
+            </p>
+
+            <div className="flex justify-center gap-8 mb-8">
+              <div className="text-center">
+                <p className="text-3xl font-bold text-blue-600">{approveResult.approved}</p>
+                <p className="text-xs text-gray-500 mt-1">Staged</p>
+              </div>
+              <div className="text-center">
+                <p className="text-3xl font-bold text-green-600">{approveResult.exported || approveResult.approved}</p>
+                <p className="text-xs text-gray-500 mt-1">Imported to REIMS</p>
+              </div>
+            </div>
+
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700 mb-6">
+              Records are now live in the REIMS Units Inventory.
+            </div>
+
+            <button
+              onClick={reset}
+              className="px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Upload Another File
+            </button>
+          </div>
+        )}
+      </main>
+
+      {/* ── Pipeline Termination Confirmation Modal ────────────────────────── */}
+      {terminateConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.55)' }}
+          onClick={e => { if (e.target === e.currentTarget) setTerminateConfirm(false); }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
+              <span className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center text-lg flex-shrink-0">⊘</span>
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Terminate Pipeline?</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Stage {stage} — {['Upload', 'Match & Review', 'Validation', 'Stage Analysis'][stage] ?? 'Unknown'}
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-4">
+              <p className="text-sm text-gray-700 leading-relaxed">
+                This will <span className="font-semibold text-red-600">permanently roll back</span> all staged records for
+                this run, cancel the upload, and reset the pipeline to the upload screen.
+              </p>
+              {runId && (
+                <div className="mt-3 bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500">
+                  Run <span className="font-mono text-gray-700">{runId}</span> will be marked <span className="font-semibold text-red-600">CANCELLED</span> in the audit log.
+                </div>
+              )}
+              {!runId && (
+                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+                  No records have been staged to the database yet — this will only clear your current session.
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setTerminateConfirm(false)}
+                disabled={isTerminating}
+                className="px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTerminate}
+                disabled={isTerminating}
+                className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isTerminating && (
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                {isTerminating ? 'Terminating…' : 'Yes, Terminate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Override governance modal — rendered at root level to escape any parent stacking context */}
+      {overrideModalOpen && (
+        <OverrideGovernanceModal
+          prefix={buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: bulkZone.code }) ?? ''}
+          unitConflicts={mcState.unit_conflicts}
+          propertyRef={mcState.existing_matches[0]?.property_ref}
+          onCancel={() => setOverrideModalOpen(false)}
+          onConfirm={(result: OverrideResult) => {
+            updateMc({
+              override_confirmed:      true,
+              override_selected_units: result.selectedUnits,
+              override_reason:         result.reason,
+            });
+            setOverrideModalOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}

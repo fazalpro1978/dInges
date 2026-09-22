@@ -61,8 +61,8 @@ Normalisation rules:
     - "(Medium)" (e.g. "4 BR (Medium)") → design_type = "Medium"
     - "(Large BY)" already handled by suffix rule (C) above; set design_type = "Large"
     - After all suffix and design type codes are stripped, config = "N BHK" only
-- furnishing: Furnished | Semi-Furnished | Unfurnished
-  * FF / FULLY FURNISHED / LUXURY FULLY FURNISHED / FULLY-FURNISHED → Furnished
+- furnishing: Fully Furnished | Semi-Furnished | Unfurnished
+  * FF / FURNISHED / FULLY FURNISHED / LUXURY FULLY FURNISHED / FULLY-FURNISHED → Fully Furnished
   * SF / SEMI-FURNISHED / SEMI FURNISHED → Semi-Furnished
   * UF / UNFURNISHED / UN-FURNISHED → Unfurnished
 - status: normalise to one of these exact values:
@@ -146,7 +146,7 @@ Detected when the sheet has repeating blocks of: section-header row → column-h
 - SI / S.No column: per-section row counter — ignore entirely; do NOT use as unit_no
 - Unit column → unit_no
 - Type column encodes Config + Furnishing together in this pattern:
-  * "{N}BHK FF" → config = "N BHK", furnishing = "Furnished"
+  * "{N}BHK FF" → config = "N BHK", furnishing = "Fully Furnished"
   * "{N}BHK UF" → config = "N BHK", furnishing = "Unfurnished"
   * Normalise config: "2BHK" → "2 BHK" (insert space before BHK)
 - Colour legend rows (e.g. "BOOKED = UNDER PROCESS. CONFIRM WITH US BEFORE CLOSING THE DEAL"): SKIP as data; append text to notes field of ALL records extracted from this file as: "Notice: {legend text}"
@@ -163,7 +163,7 @@ Column rules specific to Pattern G:
 - Location column: display text = zone name (→ zone field). If a [LINK:url] annotation is present on the cell, that URL → location_map_url.
 - Type column: "Flat" → type = "Apartment"; "Villa" → "Villa"; "Office" → "Office"; "Studio" → "Studio"
 - Description column: parse multiple sub-fields from one cell (separator is " - " or newline):
-  * Furnishing prefix in parentheses: "(Fully Furnished)" → Furnished; "(Semi Furnished)" → Semi-Furnished; "(Unfurnished)" → Unfurnished
+  * Furnishing prefix in parentheses: "(Fully Furnished)" → Fully Furnished; "(Semi Furnished)" → Semi-Furnished; "(Unfurnished)" → Unfurnished
   * Bedroom count: "N Bedroom" → config = "N BHK"; "Studio" → config = "Studio"
   * Bathroom count: "N Bathroom" or "N.N Bathroom" → bathrooms (numeric, e.g. 1.5)
   * Parking: "Without Parking" → parking = 0; "One Dedicated Parking" → parking = 1; "Two Dedicated Parking" → parking = 2
