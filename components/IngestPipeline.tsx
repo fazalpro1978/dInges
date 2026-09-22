@@ -69,7 +69,7 @@ function deltaBadge(status: DeltaStatus | undefined) {
 // Pipeline stages: 0=Upload, 1=Match&Review, 2=Validation, 3=Stage Analysis, 4=REIMS Queue, 5=Done
 const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS Queue', 'Done'];
 
-const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
+const FURNISHING_OPTIONS = ['Fully Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
 const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
 const VIEW_OPTIONS = [
