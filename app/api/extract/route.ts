@@ -66,7 +66,7 @@ Normalisation rules:
   * SF / SEMI-FURNISHED / SEMI FURNISHED → Semi-Furnished
   * UF / UNFURNISHED / UN-FURNISHED → Unfurnished
 - status: normalise to one of these exact values:
-  * "Available" — READY FOR VIEWING, Vacant, vacant, AVAILABLE
+  * "Available" — READY FOR VIEWING, READY TO MOVE, Vacant, vacant, AVAILABLE, "AVAILABLE FROM {MONTH} {DAY}" (month-name + day format with no year)
   * "Not Available" — CONTRACT, LEASED, Leased, CONTRACTED
   * "Reserved" — BOOKED, RESERVED
   * "Under Preparation" — UNDER MAINTENANCE, UNDER PREPARATION, UNDER RENOVATION, Upcoming, UPCOMING
@@ -81,6 +81,7 @@ Normalisation rules:
     - "Upcoming - Semi furnished" → status = "Under Preparation"; furnishing = "Semi-Furnished"
 - listing_type: Rent | Sale
 - rent: numbers only, no currency — strip "QAR", "QR", commas, ".00", "/ month", contract term text in parentheses (e.g. "QR 6,000 / month (1 year contract)" → 6000; "QAR 6,500.00" → 6500)
+  * OFFER TERMS IN RENT CELL: When rent contains "+ N Month(s) Free" (e.g. "7000 + 1 Month Free", "10000 + 2 Months free"), extract numeric rent from the part BEFORE "+" only. Append to notes: "Month Free: N month(s)". Do NOT include offer text in the rent value.
 - dates: YYYY-MM-DD format (for contract dates etc.; status dates use dd/mm/yy as above)
 - realtor_name: The COMPANY or BROKERAGE name that owns/manages the listing. Look for a dedicated "Company", "Agent", "Broker", "Real Estate" column or the document issuer name (e.g. "Al Emadi Enterprises" from the document header/logo/title). NEVER put a person's first name or watchman/caretaker name here (e.g. "Hussein", "Mohamed", "Azeez" are watchman names — not realtors). If no company name is identifiable, omit realtor_name entirely.
 - amenities: string[] — an array of amenity tags present for the unit. Allowed values (use these exact strings only, omit any not applicable):
@@ -117,6 +118,76 @@ Normalisation rules:
 - Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, Viewing Time column. Do NOT output standalone boolean maid_room or wifi fields — absorb them into amenities[] instead.
 - If a field is not present in the source, omit it entirely (do not include null values)
 - For multi-column layouts (units side by side), extract each unit as a separate record
+
+REMARKS COLUMN RULES (applies whenever source has a "Remarks" column — parse ALL keywords in a single pass):
+- Amenities from Remarks keywords (case-insensitive):
+  * "GYM" → add "Shared Gym" to amenities
+  * "SWIMMING POOL" / "SHARED POOL" → add "Shared Pool" to amenities
+  * "STEAM & SAUNA" / "STEAM & SUANA" / "STEAM ROOM" → add "Shared Spa" to amenities
+  * "DEDICATED PARKING" / "COVERED PARKING" → parking = 1 (if not already set from another field)
+  * "24*7 SECURITY" / "24/7 SECURITY" / standalone "SECURITY" → add "Security" to amenities
+- Kahramaa from Remarks:
+  * "INCLUDING KAHRAMAA" → notes append "Kahramaa: Included (amount TBC)"
+  * "EXCLUDING KAHRAMAA" → notes append "Kahramaa: Excluded"
+  * "INCLUDING ALL BILLS" → notes append "W&E: Included; Kahramaa: Included"
+- Security Deposit from Remarks:
+  * "SECURITY DEPOSIT 1 MONTH RENTAL AMOUNT" → deposit_amount = rent × 1
+  * "SECURITY DEPOSIT 2 MONTH RENTAL AMOUNT" → deposit_amount = rent × 2
+- Any remaining Remarks text (after extracting the above) → append verbatim to notes
+
+PATTERN H — Multi-section property block sheet (e.g. "DREAM PROPERTY - AVAILABILITY LIST"):
+Detected when the sheet has repeating blocks of: section-header row → column-header row → data rows.
+- Section header row: a row whose first non-empty cell matches "{NAME} - {ZONE}" or "{NAME} {ZONE}" (no standard column headers on that row). Extract:
+  * property = part before " - " separator (e.g. "DVILLA", "CITIVILLA")
+  * zone name = part after " - " separator (e.g. "MANSOURA", "MUNTAZAH")
+  * Special case "B-42 MANSOURA" (hyphen is part of the name, no " - " separator): property = "B-42", zone = "MANSOURA"
+  * Apply property + zone to ALL data rows below until the next section header row
+- Column header rows (where first cell = "SI" or "S.No" and second cell = "Unit"): SKIP entirely — not data rows
+- SI / S.No column: per-section row counter — ignore entirely; do NOT use as unit_no
+- Unit column → unit_no
+- Type column encodes Config + Furnishing together in this pattern:
+  * "{N}BHK FF" → config = "N BHK", furnishing = "Furnished"
+  * "{N}BHK UF" → config = "N BHK", furnishing = "Unfurnished"
+  * Normalise config: "2BHK" → "2 BHK" (insert space before BHK)
+- Colour legend rows (e.g. "BOOKED = UNDER PROCESS. CONFIRM WITH US BEFORE CLOSING THE DEAL"): SKIP as data; append text to notes field of ALL records extracted from this file as: "Notice: {legend text}"
+- Commercial sections (header contains SHOP / SHOPS / COMMERCIAL): SKIP all rows in that block
+- Labour accommodation sections (header contains LABOUR ACCOMMODATION / LABOUR CAMP / ROOM #): SKIP all rows in that block
+
+PATTERN G — Full-Financials Structured Table (Qatar property management leasing sheets):
+Triggered when the source has columns: Property | Location | Type | Description | Monthly Rent | Security Deposit | Kahramaa Deposit | Contract Processing Charge | Utilities | Amenities | PHOTOS | Contact Person | Kahrama Limit | Commission | Start Date | Booking Validity
+
+Column rules specific to Pattern G:
+- Property column contains "Flat # {num} ({property_code})" compound format:
+  * unit_no = the flat/unit number only (e.g. "109" from "Flat # 109 (CAP120 DJ)")
+  * property = the code in parentheses, e.g. "CAP120 DJ". If a section header row above the data group names the property differently, use that instead. This split rule applies ONLY to this compound format.
+- Location column: display text = zone name (→ zone field). If a [LINK:url] annotation is present on the cell, that URL → location_map_url.
+- Type column: "Flat" → type = "Apartment"; "Villa" → "Villa"; "Office" → "Office"; "Studio" → "Studio"
+- Description column: parse multiple sub-fields from one cell (separator is " - " or newline):
+  * Furnishing prefix in parentheses: "(Fully Furnished)" → Furnished; "(Semi Furnished)" → Semi-Furnished; "(Unfurnished)" → Unfurnished
+  * Bedroom count: "N Bedroom" → config = "N BHK"; "Studio" → config = "Studio"
+  * Bathroom count: "N Bathroom" or "N.N Bathroom" → bathrooms (numeric, e.g. 1.5)
+  * Parking: "Without Parking" → parking = 0; "One Dedicated Parking" → parking = 1; "Two Dedicated Parking" → parking = 2
+  * "Hall - Kitchen" or "Open Kitchen" or "Closed Kitchen" → kitchen field (YES / OPEN / CLOSE); treat "Hall - Kitchen" as CLOSE (enclosed)
+  * Strip the separator " - " between elements; it is not meaningful data.
+- Monthly Rent → rent (numeric)
+- Security Deposit → deposit_amount (numeric; strip "QAR", "QR", commas)
+- Kahramaa Deposit → extract amount into notes as "Kahramaa Deposit: {raw value}"
+- Contract Processing Charge → agency_fee (numeric amount; strip "QR", "QAR", "(Cash)" etc.)
+- Utilities column:
+  * Contains "Water & Electricity" AND "Including" → notes append "W&E: Included"
+  * Contains "Water & Electricity" AND "Excluding" → notes append "W&E: Excluded"
+  * Contains "Electricity, Gas & Marafeq" → notes append "W&E: Marafeq (confirm W&E status)"
+  * "Free Internet" or "WiFi" keyword → add "WiFi" to amenities
+  * Other utility text → append verbatim to notes as "Utilities: {text}"
+- Amenities column: free-text list → map keywords to allowed amenities[] values (Swimming pool/Pool → "Shared Pool"; Gym → "Shared Gym"; Steam → omit or "Shared Spa"; Rooftop → note only)
+- PHOTOS column: cell display text "PHOTOS" is ignored. If a [LINK:url] annotation is present → notes append "Media: {url}"
+- Contact Person column: may be formatted as "Name - Phone" or "Label - Phone" (e.g. "Security - 50032543") → contact_details = "{Name} {Phone}" (treat the label before " - " as the name)
+- Kahrama Limit column: append to notes as "Kahrama Limit: {raw value}"
+- Commission column: calculate agency_fee override only if agency_fee not already set: "1 Week" → round(rent × 12 / 52); "2 Week" → round(rent × 12 / 26); "1 Month" → rent. Append commission period to notes as "Commission: {raw value}".
+- Start Date column: "Immediately" → omit contract_start_date (available now); actual date → contract_start_date in YYYY-MM-DD
+- Booking Validity column: period stated (e.g. "2 Days", "7 Days") → notes append "Booking Validity: {value}"; blank or "N/A" → omit
+- Repeated header rows between data groups (same header text as row 3) must be discarded — treat them as section separators, not data.
+- section sub-header rows like "CURRENTLY AVAILABLE PROPERTIES (01,02 & 03 BHKS)" or "Available 01 Bedroom Apartments..." are context only — discard as data rows.
 
 Return raw JSON array only. No markdown, no explanation.`;
 
@@ -187,10 +258,29 @@ export async function POST(req: NextRequest) {
       const wb   = xlsx.read(buf, { type: 'buffer', cellDates: true });
       const rows: string[] = [];
       wb.SheetNames.forEach(name => {
-        const ws   = wb.Sheets[name];
-        const data = xlsx.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' });
+        const ws = wb.Sheets[name];
+        // Collect hyperlinks keyed by cell reference (e.g. "B4")
+        const links: Record<string, string> = {};
+        Object.entries(ws).forEach(([ref, cell]) => {
+          if (!ref.startsWith('!') && (cell as any).l?.Target) {
+            links[ref] = (cell as any).l.Target as string;
+          }
+        });
+        const range = xlsx.utils.decode_range(ws['!ref'] ?? 'A1');
+        const data: string[][] = [];
+        for (let r = range.s.r; r <= range.e.r; r++) {
+          const row: string[] = [];
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            const ref  = xlsx.utils.encode_cell({ r, c });
+            const cell = ws[ref];
+            const val  = cell ? xlsx.utils.format_cell(cell) : '';
+            const url  = links[ref];
+            row.push(url ? `${val} [LINK:${url}]` : val);
+          }
+          data.push(row);
+        }
         rows.push(`=== Sheet: ${name} ===`);
-        rows.push(data.map(r => (r as unknown[]).join('\t')).join('\n'));
+        rows.push(data.map(r => r.join('\t')).join('\n'));
       });
 
       const msg = await client.messages.create({
