@@ -12,7 +12,7 @@ unit_code, property, unit_no, zone, zone_code, type, config, furnishing, kitchen
 status, rent, service_charges, deposit_amount, agency_fee, listing_type,
 bedrooms, bathrooms, parking, floor, area_sqft, amenities, design_type,
 realtor_name, realtor_moci, moci_contract_status, moci_contract_number, legal_duration,
-contract_start_date, contract_end_date, location_map_url, notes,
+contract_start_date, contract_end_date, location_map_url, media_url, notes,
 contact_details, view
 
 Normalisation rules:
@@ -116,6 +116,12 @@ Normalisation rules:
   * Rowhouse in config → also set design_type = "Rowhouse" in addition to the amenity
   * Do NOT put view codes (e.g. "SV/F", "Sea View / F") into design_type — those belong in the view field
 - Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, Viewing Time column. Do NOT output standalone boolean maid_room or wifi fields — absorb them into amenities[] instead.
+- media_url: URL pointing to the unit's photo gallery, media storage, or Google Drive folder.
+  * Look for any column named: PHOTOS, Photo, Photos, Media, Gallery, Images, "Photo Link", "Media URL", "Photos Link", "Media Storage URL"
+  * When the cell has a [LINK:url] annotation, use that URL as media_url (it is the hyperlink embedded in the cell)
+  * When the cell VALUE itself is a plain URL (starts with http:// or https://), use it as media_url
+  * "PHOTOS" display text alone (no link) → omit media_url for that record
+  * Do NOT put this URL into notes — use the media_url field directly
 - If a field is not present in the source, omit it entirely (do not include null values)
 - For multi-column layouts (units side by side), extract each unit as a separate record
 
@@ -180,7 +186,7 @@ Column rules specific to Pattern G:
   * "Free Internet" or "WiFi" keyword → add "WiFi" to amenities
   * Other utility text → append verbatim to notes as "Utilities: {text}"
 - Amenities column: free-text list → map keywords to allowed amenities[] values (Swimming pool/Pool → "Shared Pool"; Gym → "Shared Gym"; Steam → omit or "Shared Spa"; Rooftop → note only)
-- PHOTOS column: cell display text "PHOTOS" is ignored. If a [LINK:url] annotation is present → notes append "Media: {url}"
+- PHOTOS column: cell display text "PHOTOS" is ignored. If a [LINK:url] annotation is present → media_url = that URL (do NOT put it in notes)
 - Contact Person column: may be formatted as "Name - Phone" or "Label - Phone" (e.g. "Security - 50032543") → contact_details = "{Name} {Phone}" (treat the label before " - " as the name)
 - Kahrama Limit column: append to notes as "Kahrama Limit: {raw value}"
 - Commission column: calculate agency_fee override only if agency_fee not already set: "1 Week" → round(rent × 12 / 52); "2 Week" → round(rent × 12 / 26); "1 Month" → rent. Append commission period to notes as "Commission: {raw value}".

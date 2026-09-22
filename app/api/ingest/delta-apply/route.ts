@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
         }
 
         const updateFields: Record<string, unknown> = {};
-        const patchable = ['status', 'rent', 'furnishing', 'service_charges', 'deposit_amount', 'agency_fee', 'listing_type', 'operator_remarks'];
+        const patchable = ['status', 'rent', 'furnishing', 'service_charges', 'deposit_amount', 'agency_fee', 'listing_type', 'operator_remarks', 'media_url', 'location_map_url'];
         for (const f of patchable) {
           if (payload[f] != null && payload[f] !== '') updateFields[f] = payload[f];
         }
