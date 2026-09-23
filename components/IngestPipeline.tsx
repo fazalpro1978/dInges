@@ -181,6 +181,8 @@ export default function IngestPipeline() {
   const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
   const [zones, setZones] = useState<ZoneEntry[]>([]);
+  // Multi-zone group assignment: property name → { code, name }
+  const [propZones, setPropZones] = useState<Record<string, { code: string; name: string }>>({});
 
   // Master Code panel
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
@@ -251,6 +253,21 @@ export default function IngestPipeline() {
             setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
             setRecordActions(s.savedRecordActions ?? {});
             if (s.savedRunId) setRunId(s.savedRunId);
+            // Restore propZones; if missing, seed from matched records
+            if (s.savedPropZones && Object.keys(s.savedPropZones).length > 0) {
+              setPropZones(s.savedPropZones);
+            } else {
+              const seed: Record<string, { code: string; name: string }> = {};
+              for (const r of (s.savedMatched ?? [])) {
+                const prop = String(r.resolvedData?.property ?? '');
+                if (!prop || seed[prop]) continue;
+                seed[prop] = {
+                  code: String(r.resolvedData?.zone_code ?? ''),
+                  name: String(r.resolvedData?.zone ?? ''),
+                };
+              }
+              setPropZones(seed);
+            }
             setStage(s.savedStage);
             fetch('/api/realtors').then(r => r.json()).then(d => setRealtors(d.realtors ?? [])).catch(() => {});
             fetch('/api/zones').then(r => r.json()).then(d => setZones(d.zones ?? [])).catch(() => {});
@@ -295,11 +312,12 @@ export default function IngestPipeline() {
         savedRejectedInValidation: Array.from(rejectedInValidation),
         savedBulkRealtor: bulkRealtor,
         savedBulkZone: bulkZone,
+        savedPropZones: propZones,
         savedRecordActions: recordActions,
         savedRunId: runId,
       }));
     } catch {}
-  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, excludedIdx, fileName, fileSize, summary, runId]);
+  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, propZones, excludedIdx, fileName, fileSize, summary, runId]);
 
   // Amenities baseline — snapshot resolvedData.amenities on stage-2 entry so
   // bulk edits can be reverted. Reset when leaving stage 2.
@@ -351,6 +369,19 @@ export default function IngestPipeline() {
       setRejectedInValidation(new Set());
       setBulkRealtor({ name: '', moci: '' });
       setBulkZone({ code: '', name: '' });
+      // Seed per-property zone assignments from extracted data
+      const seedZones: Record<string, { code: string; name: string }> = {};
+      for (const r of records) {
+        const prop = String(r.resolvedData.property ?? '');
+        if (!prop) continue;
+        if (!seedZones[prop]) {
+          seedZones[prop] = {
+            code: String(r.resolvedData.zone_code ?? ''),
+            name: String(r.resolvedData.zone ?? ''),
+          };
+        }
+      }
+      setPropZones(seedZones);
       setSummary(matchData.summary);
       setStructuredStage('idle');
       setPendingFile(null);
@@ -1076,6 +1107,83 @@ export default function IngestPipeline() {
                 </table>
               </div>
             )}
+
+            {/* ── Multi-Zone Group Assignment ─────────────────────────── */}
+            {(() => {
+              const propGroups: Record<string, number[]> = {};
+              matched.forEach((r, i) => {
+                const prop = String(r.resolvedData.property ?? r._conflictResolved.property ?? '');
+                if (!prop) return;
+                if (!propGroups[prop]) propGroups[prop] = [];
+                propGroups[prop].push(i);
+              });
+              const propNames = Object.keys(propGroups);
+              if (propNames.length < 2) return null;
+              const allDone = propNames.every(p => propZones[p]?.code || propZones[p]?.name);
+              return (
+                <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/40 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2 border-b border-purple-200 bg-purple-100/60">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
+                      Multi-Zone Group Assignment &nbsp;·&nbsp; {propNames.length} property groups detected
+                    </span>
+                    <button
+                      disabled={!allDone}
+                      onClick={() => {
+                        setMatched(prev => prev.map((m, i) => {
+                          if (excludedIdx.has(i)) return m;
+                          const prop = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
+                          const gz = propZones[prop];
+                          if (!gz) return m;
+                          return {
+                            ...m,
+                            _conflictResolved: {
+                              ...m._conflictResolved,
+                              ...(gz.code ? { zone_code: Number(gz.code) } : {}),
+                              ...(gz.name ? { zone: gz.name } : {}),
+                            },
+                          };
+                        }));
+                      }}
+                      className="text-xs px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold"
+                    >
+                      Apply All Groups
+                    </button>
+                  </div>
+                  <div className="divide-y divide-purple-100">
+                    {propNames.map(prop => {
+                      const gz = propZones[prop] ?? { code: '', name: '' };
+                      const extractedZone = String(matched[propGroups[prop][0]]?.resolvedData.zone ?? '');
+                      const isDone = !!(gz.code || gz.name);
+                      return (
+                        <div key={prop} className="flex items-center gap-3 px-4 py-2">
+                          <div className="w-48 shrink-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">{prop}</p>
+                            <p className="text-[10px] text-gray-400">{propGroups[prop].length} record{propGroups[prop].length !== 1 ? 's' : ''}</p>
+                          </div>
+                          {extractedZone && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 shrink-0">
+                              ✓ {extractedZone}
+                            </span>
+                          )}
+                          <div className="flex-1">
+                            <ZoneField
+                              code={gz.code}
+                              name={gz.name}
+                              zones={zones}
+                              onChange={next => setPropZones(prev => ({ ...prev, [prop]: next }))}
+                              onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+                            />
+                          </div>
+                          <span className={`text-[10px] font-semibold shrink-0 ${isDone ? 'text-green-600' : 'text-gray-400'}`}>
+                            {isDone ? '✓ Done' : '— pending'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── 3-column bulk panel ─────────────────────────────────── */}
             <div className="grid grid-cols-3 border border-gray-200 rounded-xl overflow-hidden mb-4">
