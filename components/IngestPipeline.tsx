@@ -1108,83 +1108,6 @@ export default function IngestPipeline() {
               </div>
             )}
 
-            {/* ── Multi-Zone Group Assignment ─────────────────────────── */}
-            {(() => {
-              const propGroups: Record<string, number[]> = {};
-              matched.forEach((r, i) => {
-                const prop = String(r.resolvedData.property ?? r._conflictResolved.property ?? '');
-                if (!prop) return;
-                if (!propGroups[prop]) propGroups[prop] = [];
-                propGroups[prop].push(i);
-              });
-              const propNames = Object.keys(propGroups);
-              if (propNames.length < 2) return null;
-              const allDone = propNames.every(p => propZones[p]?.code || propZones[p]?.name);
-              return (
-                <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/40 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-2 border-b border-purple-200 bg-purple-100/60">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
-                      Multi-Zone Group Assignment &nbsp;·&nbsp; {propNames.length} property groups detected
-                    </span>
-                    <button
-                      disabled={!allDone}
-                      onClick={() => {
-                        setMatched(prev => prev.map((m, i) => {
-                          if (excludedIdx.has(i)) return m;
-                          const prop = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
-                          const gz = propZones[prop];
-                          if (!gz) return m;
-                          return {
-                            ...m,
-                            _conflictResolved: {
-                              ...m._conflictResolved,
-                              ...(gz.code ? { zone_code: Number(gz.code) } : {}),
-                              ...(gz.name ? { zone: gz.name } : {}),
-                            },
-                          };
-                        }));
-                      }}
-                      className="text-xs px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold"
-                    >
-                      Apply All Groups
-                    </button>
-                  </div>
-                  <div className="divide-y divide-purple-100">
-                    {propNames.map(prop => {
-                      const gz = propZones[prop] ?? { code: '', name: '' };
-                      const extractedZone = String(matched[propGroups[prop][0]]?.resolvedData.zone ?? '');
-                      const isDone = !!(gz.code || gz.name);
-                      return (
-                        <div key={prop} className="flex items-center gap-3 px-4 py-2">
-                          <div className="w-48 shrink-0">
-                            <p className="text-xs font-semibold text-gray-800 truncate">{prop}</p>
-                            <p className="text-[10px] text-gray-400">{propGroups[prop].length} record{propGroups[prop].length !== 1 ? 's' : ''}</p>
-                          </div>
-                          {extractedZone && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 shrink-0">
-                              ✓ {extractedZone}
-                            </span>
-                          )}
-                          <div className="flex-1">
-                            <ZoneField
-                              code={gz.code}
-                              name={gz.name}
-                              zones={zones}
-                              onChange={next => setPropZones(prev => ({ ...prev, [prop]: next }))}
-                              onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
-                            />
-                          </div>
-                          <span className={`text-[10px] font-semibold shrink-0 ${isDone ? 'text-green-600' : 'text-gray-400'}`}>
-                            {isDone ? '✓ Done' : '— pending'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
             {/* ── 3-column bulk panel ─────────────────────────────────── */}
             <div className="grid grid-cols-3 border border-gray-200 rounded-xl overflow-hidden mb-4">
 
@@ -1263,6 +1186,83 @@ export default function IngestPipeline() {
               </div>
             </div>
 
+            {/* ── Multi-Zone Group Assignment ─────────────────────────── */}
+            {(() => {
+              const propGroups: Record<string, number[]> = {};
+              matched.forEach((r, i) => {
+                const prop = String(r.resolvedData.property ?? r._conflictResolved.property ?? '');
+                if (!prop) return;
+                if (!propGroups[prop]) propGroups[prop] = [];
+                propGroups[prop].push(i);
+              });
+              const propNames = Object.keys(propGroups);
+              if (propNames.length < 2) return null;
+              const allDone = propNames.every(p => propZones[p]?.code || propZones[p]?.name);
+              return (
+                <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/40 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2 border-b border-purple-200 bg-purple-100/60">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
+                      Multi-Zone Group Assignment &nbsp;·&nbsp; {propNames.length} property groups detected
+                    </span>
+                    <button
+                      disabled={!allDone}
+                      onClick={() => {
+                        setMatched(prev => prev.map((m, i) => {
+                          if (excludedIdx.has(i)) return m;
+                          const prop = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
+                          const gz = propZones[prop];
+                          if (!gz) return m;
+                          return {
+                            ...m,
+                            _conflictResolved: {
+                              ...m._conflictResolved,
+                              ...(gz.code ? { zone_code: Number(gz.code) } : {}),
+                              ...(gz.name ? { zone: gz.name } : {}),
+                            },
+                          };
+                        }));
+                      }}
+                      className="text-xs px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold"
+                    >
+                      Apply All Groups
+                    </button>
+                  </div>
+                  <div className="divide-y divide-purple-100">
+                    {propNames.map(prop => {
+                      const gz = propZones[prop] ?? { code: '', name: '' };
+                      const extractedZone = String(matched[propGroups[prop][0]]?.resolvedData.zone ?? '');
+                      const isDone = !!(gz.code || gz.name);
+                      return (
+                        <div key={prop} className="flex items-center gap-3 px-4 py-2">
+                          <div className="w-48 shrink-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">{prop}</p>
+                            <p className="text-[10px] text-gray-400">{propGroups[prop].length} record{propGroups[prop].length !== 1 ? 's' : ''}</p>
+                          </div>
+                          {extractedZone && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 shrink-0">
+                              ✓ {extractedZone}
+                            </span>
+                          )}
+                          <div className="flex-1">
+                            <ZoneField
+                              code={gz.code}
+                              name={gz.name}
+                              zones={zones}
+                              onChange={next => setPropZones(prev => ({ ...prev, [prop]: next }))}
+                              onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+                            />
+                          </div>
+                          <span className={`text-[10px] font-semibold shrink-0 ${isDone ? 'text-green-600' : 'text-gray-400'}`}>
+                            {isDone ? '✓ Done' : '— pending'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => {
                 const computedSC = (r._conflictResolved.smart_code as string | null) ?? null;
@@ -1322,28 +1322,6 @@ export default function IngestPipeline() {
                       onChange={updated => setMatched(prev => prev.map((m, mi) => mi === i ? updated : m))}
                     />
                   )}
-                  <RealtorField
-                    name={String(r._conflictResolved.realtor_name ?? r.resolvedData.realtor_name ?? '')}
-                    moci={String(r._conflictResolved.realtor_moci ?? r.resolvedData.realtor_moci ?? '')}
-                    realtors={realtors}
-                    onChange={next => setMatched(prev => prev.map((m, mi) => mi === i
-                      ? { ...m, _conflictResolved: { ...m._conflictResolved, realtor_name: next.name, realtor_moci: next.moci } }
-                      : m))}
-                    onRealtorAdded={added => setRealtors(prev => [...prev, added].sort((a, b) => a.name.localeCompare(b.name)))}
-                  />
-                  <ZoneField
-                    code={String(r._conflictResolved.zone_code ?? r.resolvedData.zone_code ?? '')}
-                    name={String(r._conflictResolved.zone ?? r.resolvedData.zone ?? '')}
-                    zones={zones}
-                    onChange={next => setMatched(prev => prev.map((m, mi) => mi === i ? {
-                      ...m, _conflictResolved: {
-                        ...m._conflictResolved,
-                        zone_code: next.code ? Number(next.code) : undefined,
-                        zone: next.name,
-                      },
-                    } : m))}
-                    onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
-                  />
                 </div>
                 );
               })}
