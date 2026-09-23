@@ -1,199 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as xlsx from 'xlsx';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { writeFileSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import Anthropic from '@anthropic-ai/sdk';
+
+const execAsync = promisify(exec);
 
 const MODEL = 'claude-sonnet-4-6';
 
 const SCHEMA_PROMPT = `You are a real estate data extraction specialist for Qatar property market.
-Extract ALL unit/property records from the provided document.
+Extract ALL unit/property records from the provided file content.
 
 Return ONLY a JSON array of objects. Each object must use these exact field names:
 unit_code, property, unit_no, zone, zone_code, type, config, furnishing, kitchen,
 status, rent, service_charges, deposit_amount, agency_fee, listing_type,
-bedrooms, bathrooms, parking, floor, area_sqft, amenities, design_type,
-realtor_name, realtor_moci, moci_contract_status, moci_contract_number, legal_duration,
-contract_start_date, contract_end_date, location_map_url, media_url, notes,
-contact_details, view
+bedrooms, bathrooms, parking, floor, area_sqft, realtor_name, realtor_moci,
+moci_contract_status, moci_contract_number, legal_duration,
+contract_start_date, contract_end_date, location_map_url, media_url, notes
+
+- media_url: URL pointing to a photo folder, media storage, or document library for this unit (e.g. Google Drive, OneDrive, Dropbox link). Often found in a column labelled PHOTOS, Media, Images, or similar — the cell may display a label like "PHOTOS" with a hyperlink behind it; the hyperlink URL is provided in square brackets after the cell value, e.g. "PHOTOS [https://drive.google.com/…]". Extract the URL. null if absent.
 
 Normalisation rules:
-- property (MANDATORY — every record must have this):
-  * COMPOUND UNIT NUMBER FORMAT (common in Qatar leasing sheets): When a "Unit Number" or "Unit No." column contains a compound code like "EARP01-B00-F00-AA02" or "PROJ-B01-F03-C205" — i.e. a string with multiple segments separated by hyphens where one segment starts with "F" followed by digits (the floor) — split it at the LAST hyphen:
-      - property = everything before the last hyphen  →  "EARP01-B00-F00"
-      - unit_no  = the final segment after the last hyphen  →  "AA02"
-  * If the compound code does NOT follow this pattern, use the standard rules below.
-  * Standard rules: Look in a dedicated "Property", "Building", "Project", "Tower" column; OR a merged cell / heading above the data table; OR the document title; OR a label like "Property:", "Building:", "Project:" anywhere.
-  * Copy the same property name to every unit record that belongs to it.
-  * If you cannot find any property name, use the file's title or heading text — never leave it blank.
-- unit_no (MANDATORY — every record must have this):
-  * If the UNIT NUMBER column is a compound code (see property rule above), unit_no = the last hyphen-delimited segment (e.g. "AA02", "A1708").
-  * Otherwise look for any column: "Unit No.", "Apt No.", "Flat No.", "Room", "Room No.", "Suite", "Villa No.", "Office No.", "No.", "Ref.", "#", "SN", "S.N.", "Sl. No.", "Unit ID", "Unit", "APT".
-  * Strip area/size notation only: "5- (362 sqm)" → "5". Keep alphanumeric IDs as-is.
-  * If the only identifier is a serial/row number (1, 2, 3...), use that number.
-  * Never omit this field.
-  * BALCONY SUFFIX (CRITICAL): Many sheets encode balcony presence in the unit_no cell. ALWAYS strip this suffix before assigning unit_no:
-    - "102 / Balcony" → unit_no = "102"; add "Balcony" to amenities[]
-    - "1214 / No Balcony" → unit_no = "1214"; do NOT add Balcony amenity
-    - "1707 No Balcony" → unit_no = "1707"; do NOT add Balcony amenity (no slash variant)
-    The slash and balcony token are NEVER part of the unit number.
-  * COMMA/AMPERSAND MULTI-UNIT EXPANSION (CRITICAL): If a unit_no cell contains multiple flat/unit numbers separated by commas, ampersands (&), or both (e.g. "Flat No. 103,105,106,203,205,303,403,404,405,503,505" or "Flat 7, 15 & 20" or "Flat 12 & 37"), you MUST expand this into SEPARATE individual records — one record per flat/unit number. Every expanded record inherits ALL shared attributes from that row (property, zone, zone_code, type, config, furnishing, rent, status, realtor_name, etc.). For example: "Flat 7, 15 & 20" with rent 5500 → three records: unit_no "Flat 7", unit_no "Flat 15", unit_no "Flat 20", each with rent 5500 and all other fields identical. This is the most important extraction rule — failure to expand means missing records.
-- type: Apartment | Villa | Office | Studio
-  * Infer from unit_no: "APT." prefix → Apartment; "V"/"VIL" prefix → Villa
-  * OFFICE / AL KHOR OFFICE → Office; STUDIO → Studio; bare number → Apartment default
-- config: use format "N BHK" (e.g. "2 BHK", "3 BHK"); Studio → "Studio"; Office → "Office"
-  * Strip spacing: "2BHK" → "2 BHK"; "1BHK" → "1 BHK"
-  * "BR" is equivalent to "BHK" — "1br", "1BR", "1 BR" all normalise to "1 BHK"
-  * COMBINED ENTRY SPLITTING: If one cell contains TWO distinct configurations joined by " / " where BOTH sides contain a bedroom count (e.g. "3 BR Villa / 4 BR villa"), this is TWO separate units — emit SEPARATE records, one per configuration. Each record inherits all other row fields (property, unit_no, zone, rent, status, realtor_name, etc.). Do NOT confuse this with the unit_no balcony suffix pattern ("102 / Balcony") — that is a single unit.
-  * SUFFIX EXTRACTION (strip ALL of the following from config after extracting; config must contain ONLY "N BHK", "Studio", or "Office"):
-    (A) "+Maid" / "+ Maid" / "+Maid Room" / "with Maid" / "3 BR + Maid" → add "Maids Room" to amenities; config = bedroom count only
-    (B) "+Off" / "+off" / "+Office" / "1br+Off" → add "Office" to amenities; config = bedroom count only
-    (C) "- Large BY" / "Large BY" / "- Large Backyard" / "(Large BY)" → add "Large Backyard" to amenities; set design_type = "Large" if no other design code found; config = bedroom count only
-    (D) "with small backyard" / "small backyard" / "- Small BY" / "with Small Backyard" → add "Small Backyard" to amenities; config = bedroom count only
-    (E) "w/ pool" / "with pool" → add "Private Pool" to amenities (individual villa has its own pool); config = bedroom count only
-    (F) "- Large SP" where SP = Shared Pool → add "Shared Pool" to amenities; config = bedroom count only
-    (G) "Rowhouse" → set type = "Villa"; add "Rowhouse" to amenities; config = bedroom count only (e.g. "5 BR Rowhouse" → config "5 BHK", type "Villa")
-    (H) "(no backyard)" → strip; no amenity added; config = bedroom count only
-    (I) "Villa" or "villa" suffix → set type = "Villa"; strip from config (e.g. "3 BR Villa" → config "3 BHK", type "Villa")
-    (J) "Apartment" suffix → set type = "Apartment"; strip from config
-  * DESIGN TYPE CODES (extract into design_type field — NEVER include in config):
-    - "Type A" / "Type B" / "Type C" / "Type D" / "Type E" (e.g. "3 BR Type B") → design_type = "Type B"
-    - Single letter in quotes: "'A'", "'B'", "'C'", "'D'", "'E'" (e.g. "2 BR 'C'") → design_type = "C"
-    - "(Standard)" / "Standard" qualifier (e.g. "4 BR (Standard)", "4 BR -Standard BY") → design_type = "Standard"
-    - "(Medium)" (e.g. "4 BR (Medium)") → design_type = "Medium"
-    - "(Large BY)" already handled by suffix rule (C) above; set design_type = "Large"
-    - After all suffix and design type codes are stripped, config = "N BHK" only
+- status: map to one of Available | Leased | Reserved | Under_Maintenance
 - furnishing: Fully Furnished | Semi-Furnished | Unfurnished
-  * FF / FURNISHED / FULLY FURNISHED / LUXURY FULLY FURNISHED / FULLY-FURNISHED → Fully Furnished
-  * SF / SEMI-FURNISHED / SEMI FURNISHED → Semi-Furnished
-  * UF / UNFURNISHED / UN-FURNISHED → Unfurnished
-- status: normalise to one of these exact values:
-  * "Available" — READY FOR VIEWING, READY TO MOVE, Vacant, vacant, AVAILABLE, "AVAILABLE FROM {MONTH} {DAY}" (month-name + day format with no year)
-  * "Not Available" — CONTRACT, LEASED, Leased, CONTRACTED
-  * "Reserved" — BOOKED, RESERVED
-  * "Under Preparation" — UNDER MAINTENANCE, UNDER PREPARATION, UNDER RENOVATION, Upcoming, UPCOMING
-  * "Awaiting Activation on {dd/mm/yy}" — when a date is present in the status cell; format date as dd/mm/yy (e.g. "Awaiting Activation on 03/07/26")
-  * Skip the entire row if a property-level status is "FULL" with no unit data
-  * COMBINED STATUS+FURNISHING TOKENS: When a status cell contains multiple tokens (e.g. "Vacant - Fully furnished", "Upcoming - Semi furnished"):
-    - Extract the status part (before the dash/comma) and normalise it
-    - Extract the furnishing part and write it to the furnishing field
-    - "Mock up unit - FF" → status = "Available"; furnishing = "Furnished"; design_type = "Mock up unit"
-    - "Mock up unit - SF" → status = "Available"; furnishing = "Semi-Furnished"; design_type = "Mock up unit"
-    - "Vacant - Fully furnished" → status = "Available"; furnishing = "Furnished"
-    - "Upcoming - Semi furnished" → status = "Under Preparation"; furnishing = "Semi-Furnished"
 - listing_type: Rent | Sale
-- rent: numbers only, no currency — strip "QAR", "QR", commas, ".00", "/ month", contract term text in parentheses (e.g. "QR 6,000 / month (1 year contract)" → 6000; "QAR 6,500.00" → 6500)
-  * OFFER TERMS IN RENT CELL: When rent contains "+ N Month(s) Free" (e.g. "7000 + 1 Month Free", "10000 + 2 Months free"), extract numeric rent from the part BEFORE "+" only. Append to notes: "Month Free: N month(s)". Do NOT include offer text in the rent value.
-- dates: YYYY-MM-DD format (for contract dates etc.; status dates use dd/mm/yy as above)
-- realtor_name: The COMPANY or BROKERAGE name that owns/manages the listing. Look for a dedicated "Company", "Agent", "Broker", "Real Estate" column or the document issuer name (e.g. "Al Emadi Enterprises" from the document header/logo/title). NEVER put a person's first name or watchman/caretaker name here (e.g. "Hussein", "Mohamed", "Azeez" are watchman names — not realtors). If no company name is identifiable, omit realtor_name entirely.
-- amenities: string[] — an array of amenity tags present for the unit. Allowed values (use these exact strings only, omit any not applicable):
-  "Balcony", "Barbecue Area", "Built-in Wardrobes", "Central A/C", "Covered Parking",
-  "Private Gym", "Private Jacuzzi", "Kitchen Appliances", "Maids Room", "Pets Allowed",
-  "Private Garden", "Private Pool", "Shared Pool", "Study", "View of Water",
-  "Security", "Concierge", "Shared Spa", "Shared Gym", "Maid Service",
-  "Walk-in Closet", "View of Landmark", "Children's Play Area", "Lobby in Building",
-  "Children's Pool", "WiFi", "Office", "Large Backyard", "Small Backyard", "Rowhouse"
-  Rules:
-  (1) config "+Maid" suffix → "Maids Room"; strip from config
-  (2) config "+Off"/"+off" suffix → "Office"; strip from config
-  (3) WIFI/WiFi/Wi-Fi column "Yes" or "YES" → "WiFi"
-  (4) Balcony column "Yes" → "Balcony"
-  (5) unit_no "/ Balcony" suffix → "Balcony"; strip suffix from unit_no
-  (6) unit_no "/ No Balcony" or "No Balcony" suffix → NO amenity; strip suffix from unit_no
-  (7) config "- Large BY" / "Large BY" / "(Large BY)" → "Large Backyard"; strip from config
-  (8) config "with small backyard" / "small backyard" / "- Small BY" → "Small Backyard"; strip from config
-  (9) config "Rowhouse" → "Rowhouse" AND set type = "Villa"; strip from config
-  (10) config "w/ pool" / "with pool" (villa context, individual unit) → "Private Pool"; strip from config
-  (11) config "- Large SP" / "SP" suffix where SP = Shared Pool → "Shared Pool"; strip from config
-  (12) VIEW column value is "Swimming Pool" → add "Shared Pool" to amenities (shared pool serves the whole property)
-  (13) Omit the field entirely if no amenities are identified — do not include an empty array
-- area_sqft: numeric size from "Size Sq.", "Size (sqm)", "Area", "Sq.m" column — store the number as-is (label says sqft but we treat it as sqm for Qatar properties).
-- floor: numeric floor number from "Floor", "Fl." column — integer only.
-- contact_details: Extract from any Watchman, Caretaker, Contact, Supervisor, or "Watchman Number" / "Watchman No." column. Format as "{Name} {Phone}" (e.g. "Hussein 51838959"). This is NOT the realtor — do not put it in realtor_name. Do not include the label "Contact:" in the value. If both a name and phone are present store them together; if only a phone number is present store it alone.
-- view: Extract from any "VIEW", "View", "Orientation", "Facing", "Outlook" column. Normalise to the closest value from this list: Back View | Beach View | Canal View | City View | Clubhouse View | Community View | Corner View | Countryside View | Courtyard View | Desert View | Downtown View | Front View | Full View | Garden View | Golf Course View | Greenery View | Internal View | Lake View | Lagoon View | Landmark View | Main Road View | Marina View | Mountain View | Nature View | Neighbourhood View | Ocean View | Open View | Panoramic View | Park View | Partial View | Playground View | Pool View | Porto Arabia View | River View | Sea View | Side View | Skyline View | Sports View | Street View | Sunrise View | Sunset View | Swimming Pool View | Unobstructed View | Waterfront View. If the source value doesn't match any of these options closely, omit the field. Do not invent values outside this list.
-- property: The BUILDING or PROPERTY name — e.g. "C25 Al Waab", "E-A3 Airport", "V35 Meisameer". The "Bldg. Code / Area" or "Building Code" column is the property field. The document issuer name (e.g. "Al Emadi Enterprises") is the REALTOR, not the property. Do not confuse the two.
-- design_type: string — layout variant code or special unit designation, extracted from the config/bedroom column or status field. Omit entirely if not identifiable.
-  * Config suffix codes: "Type A/B/C/D/E" → "Type A" / "Type B" etc.; single quoted letter "'C'" → "C"; "(Standard)" or "-Standard" → "Standard"; "(Medium)" → "Medium"; "Large" qualifier from "(Large BY)" → "Large"
-  * Status field: "Mock up unit - FF" or "Mock up unit - SF" → "Mock up unit" (also parse furnishing from the token)
-  * Rowhouse in config → also set design_type = "Rowhouse" in addition to the amenity
-  * Do NOT put view codes (e.g. "SV/F", "Sea View / F") into design_type — those belong in the view field
-- Ignore: SN/serial numbers, section sub-headers (e.g. "UPCOMING VACANT APARTMENTS"), row colour banding, logos, footers, marketing text, offer details, Viewing Time column. Do NOT output standalone boolean maid_room or wifi fields — absorb them into amenities[] instead.
-- media_url: URL pointing to the unit's photo gallery, media storage, or Google Drive folder.
-  * Look for any column named: PHOTOS, Photo, Photos, Media, Gallery, Images, "Photo Link", "Media URL", "Photos Link", "Media Storage URL"
-  * When the cell has a [LINK:url] annotation, use that URL as media_url (it is the hyperlink embedded in the cell)
-  * When the cell VALUE itself is a plain URL (starts with http:// or https://), use it as media_url
-  * "PHOTOS" display text alone (no link) → omit media_url for that record
-  * Do NOT put this URL into notes — use the media_url field directly
-- If a field is not present in the source, omit it entirely (do not include null values)
-- For multi-column layouts (units side by side), extract each unit as a separate record
-
-REMARKS COLUMN RULES (applies whenever source has a "Remarks" column — parse ALL keywords in a single pass):
-- Amenities from Remarks keywords (case-insensitive):
-  * "GYM" → add "Shared Gym" to amenities
-  * "SWIMMING POOL" / "SHARED POOL" → add "Shared Pool" to amenities
-  * "STEAM & SAUNA" / "STEAM & SUANA" / "STEAM ROOM" → add "Shared Spa" to amenities
-  * "DEDICATED PARKING" / "COVERED PARKING" → parking = 1 (if not already set from another field)
-  * "24*7 SECURITY" / "24/7 SECURITY" / standalone "SECURITY" → add "Security" to amenities
-- Kahramaa from Remarks:
-  * "INCLUDING KAHRAMAA" → notes append "Kahramaa: Included (amount TBC)"
-  * "EXCLUDING KAHRAMAA" → notes append "Kahramaa: Excluded"
-  * "INCLUDING ALL BILLS" → notes append "W&E: Included; Kahramaa: Included"
-- Security Deposit from Remarks:
-  * "SECURITY DEPOSIT 1 MONTH RENTAL AMOUNT" → deposit_amount = rent × 1
-  * "SECURITY DEPOSIT 2 MONTH RENTAL AMOUNT" → deposit_amount = rent × 2
-- Any remaining Remarks text (after extracting the above) → append verbatim to notes
-
-PATTERN H — Multi-section property block sheet (e.g. "DREAM PROPERTY - AVAILABILITY LIST"):
-Detected when the sheet has repeating blocks of: section-header row → column-header row → data rows.
-- Section header row: a row whose first non-empty cell matches "{NAME} - {ZONE}" or "{NAME} {ZONE}" (no standard column headers on that row). Extract:
-  * property = part before " - " separator (e.g. "DVILLA", "CITIVILLA")
-  * zone name = part after " - " separator (e.g. "MANSOURA", "MUNTAZAH")
-  * Special case "B-42 MANSOURA" (hyphen is part of the name, no " - " separator): property = "B-42", zone = "MANSOURA"
-  * Apply property + zone to ALL data rows below until the next section header row
-- Column header rows (where first cell = "SI" or "S.No" and second cell = "Unit"): SKIP entirely — not data rows
-- SI / S.No column: per-section row counter — ignore entirely; do NOT use as unit_no
-- Unit column → unit_no
-- Type column encodes Config + Furnishing together in this pattern:
-  * "{N}BHK FF" → config = "N BHK", furnishing = "Fully Furnished"
-  * "{N}BHK UF" → config = "N BHK", furnishing = "Unfurnished"
-  * Normalise config: "2BHK" → "2 BHK" (insert space before BHK)
-- Colour legend rows (e.g. "BOOKED = UNDER PROCESS. CONFIRM WITH US BEFORE CLOSING THE DEAL"): SKIP as data; append text to notes field of ALL records extracted from this file as: "Notice: {legend text}"
-- Commercial sections (header contains SHOP / SHOPS / COMMERCIAL): SKIP all rows in that block
-- Labour accommodation sections (header contains LABOUR ACCOMMODATION / LABOUR CAMP / ROOM #): SKIP all rows in that block
-
-PATTERN G — Full-Financials Structured Table (Qatar property management leasing sheets):
-Triggered when the source has columns: Property | Location | Type | Description | Monthly Rent | Security Deposit | Kahramaa Deposit | Contract Processing Charge | Utilities | Amenities | PHOTOS | Contact Person | Kahrama Limit | Commission | Start Date | Booking Validity
-
-Column rules specific to Pattern G:
-- Property column contains "Flat # {num} ({property_code})" compound format:
-  * unit_no = the flat/unit number only (e.g. "109" from "Flat # 109 (CAP120 DJ)")
-  * property = the code in parentheses, e.g. "CAP120 DJ". If a section header row above the data group names the property differently, use that instead. This split rule applies ONLY to this compound format.
-- Location column: display text = zone name (→ zone field). If a [LINK:url] annotation is present on the cell, that URL → location_map_url.
-- Type column: "Flat" → type = "Apartment"; "Villa" → "Villa"; "Office" → "Office"; "Studio" → "Studio"
-- Description column: parse multiple sub-fields from one cell (separator is " - " or newline):
-  * Furnishing prefix in parentheses: "(Fully Furnished)" → Fully Furnished; "(Semi Furnished)" → Semi-Furnished; "(Unfurnished)" → Unfurnished
-  * Bedroom count: "N Bedroom" → config = "N BHK"; "Studio" → config = "Studio"
-  * Bathroom count: "N Bathroom" or "N.N Bathroom" → bathrooms (numeric, e.g. 1.5)
-  * Parking: "Without Parking" → parking = 0; "One Dedicated Parking" → parking = 1; "Two Dedicated Parking" → parking = 2
-  * "Hall - Kitchen" or "Open Kitchen" or "Closed Kitchen" → kitchen field (YES / OPEN / CLOSE); treat "Hall - Kitchen" as CLOSE (enclosed)
-  * Strip the separator " - " between elements; it is not meaningful data.
-- Monthly Rent → rent (numeric)
-- Security Deposit → deposit_amount (numeric; strip "QAR", "QR", commas)
-- Kahramaa Deposit → extract amount into notes as "Kahramaa Deposit: {raw value}"
-- Contract Processing Charge → agency_fee (numeric amount; strip "QR", "QAR", "(Cash)" etc.)
-- Utilities column:
-  * Contains "Water & Electricity" AND "Including" → notes append "W&E: Included"
-  * Contains "Water & Electricity" AND "Excluding" → notes append "W&E: Excluded"
-  * Contains "Electricity, Gas & Marafeq" → notes append "W&E: Marafeq (confirm W&E status)"
-  * "Free Internet" or "WiFi" keyword → add "WiFi" to amenities
-  * Other utility text → append verbatim to notes as "Utilities: {text}"
-- Amenities column: free-text list → map keywords to allowed amenities[] values (Swimming pool/Pool → "Shared Pool"; Gym → "Shared Gym"; Steam → omit or "Shared Spa"; Rooftop → note only)
-- PHOTOS column: cell display text "PHOTOS" is ignored. If a [LINK:url] annotation is present → media_url = that URL (do NOT put it in notes)
-- Contact Person column: may be formatted as "Name - Phone" or "Label - Phone" (e.g. "Security - 50032543") → contact_details = "{Name} {Phone}" (treat the label before " - " as the name)
-- Kahrama Limit column: append to notes as "Kahrama Limit: {raw value}"
-- Commission column: calculate agency_fee override only if agency_fee not already set: "1 Week" → round(rent × 12 / 52); "2 Week" → round(rent × 12 / 26); "1 Month" → rent. Append commission period to notes as "Commission: {raw value}".
-- Start Date column: "Immediately" → omit contract_start_date (available now); actual date → contract_start_date in YYYY-MM-DD
-- Booking Validity column: period stated (e.g. "2 Days", "7 Days") → notes append "Booking Validity: {value}"; blank or "N/A" → omit
-- Repeated header rows between data groups (same header text as row 3) must be discarded — treat them as section separators, not data.
-- section sub-header rows like "CURRENTLY AVAILABLE PROPERTIES (01,02 & 03 BHKS)" or "Available 01 Bedroom Apartments..." are context only — discard as data rows.
+- dates: YYYY-MM-DD format
+- rent/charges: numbers only, no currency symbols
+- If a field is not present, omit it (do not include null values)
+- For side-by-side multi-unit layouts, extract each unit as a separate record
+- Ignore headers, logos, footers, marketing text — only extract actual unit data
 
 Return raw JSON array only. No markdown, no explanation.`;
 
@@ -220,12 +58,12 @@ export async function POST(req: NextRequest) {
 
     // ── Image ──────────────────────────────────────────────────────────────────
     if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
-      const b64       = buf.toString('base64');
+      const b64      = buf.toString('base64');
       const mediaType = (ext === 'jpg' ? 'image/jpeg' : `image/${ext}`) as 'image/jpeg' | 'image/png' | 'image/webp';
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 16000,
+        max_tokens: 8096,
         messages: [{
           role: 'user',
           content: [
@@ -239,19 +77,19 @@ export async function POST(req: NextRequest) {
       units = parseUnits(text);
     }
 
-    // ── PDF — use Claude's native document reading (handles both text & image PDFs) ──
+    // ── PDF ────────────────────────────────────────────────────────────────────
     else if (ext === 'pdf') {
-      const b64 = buf.toString('base64');
+      const tmp = join(tmpdir(), `ingest-${Date.now()}.pdf`);
+      writeFileSync(tmp, buf);
+      const { stdout } = await execAsync(`pdftotext -layout "${tmp}" -`).catch(() => ({ stdout: '' }));
+      unlinkSync(tmp);
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 16000,
+        max_tokens: 8096,
         messages: [{
           role: 'user',
-          content: [
-            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
-            { type: 'text', text: SCHEMA_PROMPT },
-          ] as any,
+          content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${stdout}`,
         }],
       });
 
@@ -264,34 +102,35 @@ export async function POST(req: NextRequest) {
       const wb   = xlsx.read(buf, { type: 'buffer', cellDates: true });
       const rows: string[] = [];
       wb.SheetNames.forEach(name => {
-        const ws = wb.Sheets[name];
-        // Collect hyperlinks keyed by cell reference (e.g. "B4")
-        const links: Record<string, string> = {};
-        Object.entries(ws).forEach(([ref, cell]) => {
-          if (!ref.startsWith('!') && (cell as any).l?.Target) {
-            links[ref] = (cell as any).l.Target as string;
+        const ws    = wb.Sheets[name];
+        const ref   = ws['!ref'];
+        let data: unknown[][];
+        if (ref) {
+          // Custom extraction: append hyperlink URL in brackets so Claude sees it
+          const range = xlsx.utils.decode_range(ref);
+          data = [];
+          for (let r = range.s.r; r <= range.e.r; r++) {
+            const row: unknown[] = [];
+            for (let c = range.s.c; c <= range.e.c; c++) {
+              const addr = xlsx.utils.encode_cell({ r, c });
+              const cell = ws[addr] as (xlsx.CellObject & { l?: { Target?: string } }) | undefined;
+              if (!cell) { row.push(''); continue; }
+              const val = cell.v ?? '';
+              const link = cell.l?.Target;
+              row.push(link ? `${val} [${link}]` : val);
+            }
+            data.push(row);
           }
-        });
-        const range = xlsx.utils.decode_range(ws['!ref'] ?? 'A1');
-        const data: string[][] = [];
-        for (let r = range.s.r; r <= range.e.r; r++) {
-          const row: string[] = [];
-          for (let c = range.s.c; c <= range.e.c; c++) {
-            const ref  = xlsx.utils.encode_cell({ r, c });
-            const cell = ws[ref];
-            const val  = cell ? xlsx.utils.format_cell(cell) : '';
-            const url  = links[ref];
-            row.push(url ? `${val} [LINK:${url}]` : val);
-          }
-          data.push(row);
+        } else {
+          data = xlsx.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' });
         }
         rows.push(`=== Sheet: ${name} ===`);
-        rows.push(data.map(r => r.join('\t')).join('\n'));
+        rows.push(data.map(r => (r as unknown[]).join('\t')).join('\n'));
       });
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 16000,
+        max_tokens: 8096,
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}`,

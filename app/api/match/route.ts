@@ -163,13 +163,9 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    // Orphaned: REIMS units absent from this source file — scoped to properties
-    // present in the upload so units from unrelated properties are not affected.
-    const uploadedProperties = new Set(
-      records.map(r => normalise((r.property as string) ?? '')).filter(Boolean)
-    );
+    // Orphaned: REIMS units absent from this source file → flag for manual review
     const orphaned = existingUnits
-      .filter(u => !matchedUnitIds.has(u.id) && uploadedProperties.has(normalise(u.property)))
+      .filter(u => !matchedUnitIds.has(u.id))
       .map(u => ({
         id:          u.id,
         property:    u.property,

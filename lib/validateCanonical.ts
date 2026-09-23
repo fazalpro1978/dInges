@@ -1,4 +1,4 @@
-import { MASTER_FIELDS, normalizeFieldAlias } from './importSchema';
+import { MASTER_FIELDS } from './importSchema';
 
 export interface SchemaError {
   field: string;
@@ -31,8 +31,7 @@ export function validateCanonical(payload: Record<string, unknown>): SchemaResul
     }
 
     if (field.kind === 'enum' && field.enumValues && str !== '') {
-      const normalized = normalizeFieldAlias(field.key, str);
-      const matched = field.enumValues.find(v => v.toLowerCase() === normalized.toLowerCase());
+      const matched = field.enumValues.find(v => v.toLowerCase() === str.toLowerCase());
       if (!matched) {
         errors.push({ field: field.key, label: field.label, rule: 'enum', value: val, allowed: field.enumValues });
       }

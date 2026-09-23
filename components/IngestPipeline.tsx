@@ -69,7 +69,7 @@ function deltaBadge(status: DeltaStatus | undefined) {
 // Pipeline stages: 0=Upload, 1=Match&Review, 2=Validation, 3=Stage Analysis, 4=REIMS Queue, 5=Done
 const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS Queue', 'Done'];
 
-const FURNISHING_OPTIONS = ['Fully Furnished', 'Semi-Furnished', 'Unfurnished'];
+const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
 const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
 const VIEW_OPTIONS = [
@@ -181,8 +181,6 @@ export default function IngestPipeline() {
   const [bulkRealtor, setBulkRealtor] = useState<{ name: string; moci: string }>({ name: '', moci: '' });
   const [bulkZone, setBulkZone] = useState<{ code: string; name: string }>({ code: '', name: '' });
   const [zones, setZones] = useState<ZoneEntry[]>([]);
-  // Multi-zone group assignment: property name → { code, name }
-  const [propZones, setPropZones] = useState<Record<string, { code: string; name: string }>>({});
 
   // Master Code panel
   const [entityCodes, setEntityCodes] = useState<EntityCode[]>([]);
@@ -252,21 +250,6 @@ export default function IngestPipeline() {
             setBulkRealtor(s.savedBulkRealtor ?? { name: '', moci: '' });
             setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
             setRecordActions(s.savedRecordActions ?? {});
-            // Restore propZones; if missing, seed from matched records
-            if (s.savedPropZones && Object.keys(s.savedPropZones).length > 0) {
-              setPropZones(s.savedPropZones);
-            } else {
-              const seed: Record<string, { code: string; name: string }> = {};
-              for (const r of (s.savedMatched ?? [])) {
-                const prop = String(r.resolvedData?.property ?? '');
-                if (!prop || seed[prop]) continue;
-                seed[prop] = {
-                  code: String(r.resolvedData?.zone_code ?? ''),
-                  name: String(r.resolvedData?.zone ?? ''),
-                };
-              }
-              setPropZones(seed);
-            }
             if (s.savedRunId) setRunId(s.savedRunId);
             setStage(s.savedStage);
             fetch('/api/realtors').then(r => r.json()).then(d => setRealtors(d.realtors ?? [])).catch(() => {});
@@ -312,12 +295,11 @@ export default function IngestPipeline() {
         savedRejectedInValidation: Array.from(rejectedInValidation),
         savedBulkRealtor: bulkRealtor,
         savedBulkZone: bulkZone,
-        savedPropZones: propZones,
         savedRecordActions: recordActions,
         savedRunId: runId,
       }));
     } catch {}
-  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, propZones, excludedIdx, fileName, fileSize, summary, runId]);
+  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, excludedIdx, fileName, fileSize, summary, runId]);
 
   // Amenities baseline — snapshot resolvedData.amenities on stage-2 entry so
   // bulk edits can be reverted. Reset when leaving stage 2.
@@ -369,19 +351,6 @@ export default function IngestPipeline() {
       setRejectedInValidation(new Set());
       setBulkRealtor({ name: '', moci: '' });
       setBulkZone({ code: '', name: '' });
-      // Seed per-property zone assignments from extracted data
-      const seedZones: Record<string, { code: string; name: string }> = {};
-      for (const r of records) {
-        const prop = String(r.resolvedData.property ?? '');
-        if (!prop) continue;
-        if (!seedZones[prop]) {
-          seedZones[prop] = {
-            code: String(r.resolvedData.zone_code ?? ''),
-            name: String(r.resolvedData.zone ?? ''),
-          };
-        }
-      }
-      setPropZones(seedZones);
       setSummary(matchData.summary);
       setStructuredStage('idle');
       setPendingFile(null);
@@ -462,11 +431,13 @@ export default function IngestPipeline() {
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
   const handleMcApply = useCallback(async () => {
-    // AccessGate: verify axiom_upload_authorised before any smart_code generation
-    const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').single();
-    if (!profile?.axiom_upload_authorised) {
-      setError('Smart Code generation requires upload authorisation.');
-      return;
+    // AccessGate: superusers/admins are always authorised; others check profile flag
+    if (!['superuser', 'administrator'].includes(userRole)) {
+      const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').maybeSingle();
+      if (!profile?.axiom_upload_authorised) {
+        setError('Smart Code generation requires upload authorisation.');
+        return;
+      }
     }
 
     const { buildMasterCode, getNowSegments } = await import('@/lib/buildMasterCode');
@@ -480,20 +451,38 @@ export default function IngestPipeline() {
     });
     const pfx = master_code.slice(0, 8);
 
-    // DynamicTypeMapping: resolve 2-char type code from unit config field
+    // DynamicTypeMapping: resolve 2-char type code — local map first, DB fallback
+    const TYPE_CODE_MAP: Record<string, string> = {
+      'Studio': 'ST', '1 BHK': '1B', '2 BHK': '2B', '3 BHK': '3B',
+      '4 BHK': '4B', '4+ BHK': '4B', '5 BHK': '5B', '5+ BHK': '5B',
+      '6+ BHK': '6B', 'Penthouse': 'PH', 'Office': 'OF',
+      '4 BHK + Maid': '4M', '4 BHK + Maid (Private)': '4M',
+      '5 BHK + Maid (Private)': '5M', 'Duplex': 'DX', 'Townhouse': 'TH',
+    };
     const resolveTypeCode = async (config: unknown): Promise<string> => {
-      const { data } = await supabase
-        .from('cr_property_type_configs')
-        .select('type_code')
-        .eq('config_key', String(config ?? ''))
-        .maybeSingle();
-      return (data?.type_code as string | null) ?? 'XX';
+      const key = String(config ?? '');
+      if (TYPE_CODE_MAP[key]) return TYPE_CODE_MAP[key];
+      try {
+        const { data, error } = await supabase
+          .from('cr_property_type_configs')
+          .select('type_code')
+          .eq('config_key', key)
+          .maybeSingle();
+        if (!error && data?.type_code) return data.type_code as string;
+      } catch { /* ignore — table may not exist in this env */ }
+      return 'XX';
     };
 
     // SequenceGenerator + NaturalKeyDeduplication: assign unique smart_code via atomic RPC
     const updatedMatched = await Promise.all(
       matched.map(async (m, i) => {
         if (excludedIdx.has(i)) return m;
+
+        // ST_UPDATED: preserve existing REIMS smart_code — only the MC timestamp refreshes at apply
+        if (m.delta_status === 'ST_UPDATED' && m.existingSnapshot?.smart_code) {
+          return { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: m.existingSnapshot.smart_code } };
+        }
+
         const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
         const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
           p_category:  mcState.category,
@@ -1088,83 +1077,6 @@ export default function IngestPipeline() {
               </div>
             )}
 
-            {/* ── Multi-Zone Group Assignment ─────────────────────────── */}
-            {(() => {
-              const propGroups: Record<string, number[]> = {};
-              matched.forEach((r, i) => {
-                const prop = String(r.resolvedData.property ?? r._conflictResolved.property ?? '');
-                if (!prop) return;
-                if (!propGroups[prop]) propGroups[prop] = [];
-                propGroups[prop].push(i);
-              });
-              const propNames = Object.keys(propGroups);
-              if (propNames.length < 2) return null;
-              const allDone = propNames.every(p => propZones[p]?.code || propZones[p]?.name);
-              return (
-                <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/40 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-2 border-b border-purple-200 bg-purple-100/60">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
-                      Multi-Zone Group Assignment &nbsp;·&nbsp; {propNames.length} property groups detected
-                    </span>
-                    <button
-                      disabled={!allDone}
-                      onClick={() => {
-                        setMatched(prev => prev.map((m, i) => {
-                          if (excludedIdx.has(i)) return m;
-                          const prop = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
-                          const gz = propZones[prop];
-                          if (!gz) return m;
-                          return {
-                            ...m,
-                            _conflictResolved: {
-                              ...m._conflictResolved,
-                              ...(gz.code ? { zone_code: Number(gz.code) } : {}),
-                              ...(gz.name ? { zone: gz.name } : {}),
-                            },
-                          };
-                        }));
-                      }}
-                      className="text-xs px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold"
-                    >
-                      Apply All Groups
-                    </button>
-                  </div>
-                  <div className="divide-y divide-purple-100">
-                    {propNames.map(prop => {
-                      const gz = propZones[prop] ?? { code: '', name: '' };
-                      const extractedZone = String(matched[propGroups[prop][0]]?.resolvedData.zone ?? '');
-                      const isDone = !!(gz.code || gz.name);
-                      return (
-                        <div key={prop} className="flex items-center gap-3 px-4 py-2">
-                          <div className="w-48 shrink-0">
-                            <p className="text-xs font-semibold text-gray-800 truncate">{prop}</p>
-                            <p className="text-[10px] text-gray-400">{propGroups[prop].length} record{propGroups[prop].length !== 1 ? 's' : ''}</p>
-                          </div>
-                          {extractedZone && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 shrink-0">
-                              ✓ {extractedZone}
-                            </span>
-                          )}
-                          <div className="flex-1">
-                            <ZoneField
-                              code={gz.code}
-                              name={gz.name}
-                              zones={zones}
-                              onChange={next => setPropZones(prev => ({ ...prev, [prop]: next }))}
-                              onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
-                            />
-                          </div>
-                          <span className={`text-[10px] font-semibold shrink-0 ${isDone ? 'text-green-600' : 'text-gray-400'}`}>
-                            {isDone ? '✓ Done' : '— pending'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
             {/* ── 3-column bulk panel ─────────────────────────────────── */}
             <div className="grid grid-cols-3 border border-gray-200 rounded-xl overflow-hidden mb-4">
 
@@ -1486,18 +1398,20 @@ export default function IngestPipeline() {
 
                         {/* Smart Code — sticky, read-only; stacks 16-digit master_code over unit smart_code */}
                         <td className={`px-2 py-1.5 sticky left-[242px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
-                          {(getVal('master_code') || getVal('smart_code')) ? (
-                            <div className="flex flex-col gap-0.5">
-                              {getVal('master_code') && (
-                                <span className="font-mono text-[10px] font-bold text-blue-700 tracking-widest leading-tight">{getVal('master_code')}</span>
-                              )}
-                              {getVal('smart_code') && (
-                                <span className="font-mono text-[10px] font-bold text-green-700 tracking-wider bg-green-50 px-1 py-px rounded leading-tight">{getVal('smart_code')}</span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-300 text-xs">—</span>
-                          )}
+                          {(() => {
+                            const mc  = getVal('master_code');
+                            const sc  = getVal('smart_code') || (r.delta_status === 'ST_UPDATED' ? (r.existingSnapshot?.smart_code ?? '') : '');
+                            const isNew = r.delta_status === 'ST_NEW';
+                            return (mc || sc) ? (
+                              <div className="flex flex-col gap-0.5">
+                                {mc && <span className="font-mono text-[10px] font-bold text-blue-700 tracking-widest leading-tight">{mc}</span>}
+                                {sc  && <span className="font-mono text-[10px] font-bold text-green-700 tracking-wider bg-green-50 px-1 py-px rounded leading-tight">{sc}</span>}
+                                {!sc && isNew && <span className="text-[9px] text-gray-400 italic leading-tight">↺ gen on apply</span>}
+                              </div>
+                            ) : (
+                              <span className="text-gray-300 text-xs">—</span>
+                            );
+                          })()}
                         </td>
 
                         {/* Unit No — sticky, read-only */}

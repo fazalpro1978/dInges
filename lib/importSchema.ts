@@ -62,7 +62,7 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
 ];
 
 export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office'] as const;
-export const ENUM_FURNISHING    = ['Fully Furnished', 'Semi-Furnished', 'Unfurnished'] as const;
+export const ENUM_FURNISHING    = ['Furnished', 'Semi-Furnished', 'Unfurnished'] as const;
 export const ENUM_STATUS        = ['Available', 'Not Available', 'Reserved', 'Under Preparation'] as const;
 export const ENUM_KITCHEN       = ['Open', 'Closed', 'Yes', 'Pantry'] as const;
 
@@ -187,10 +187,10 @@ export function slugifyProperty(name: string): string {
 
 export type CastResult = { value: unknown; error?: string };
 
-export function normalizeFieldAlias(fieldKey: string, str: string): string {
+function normalizeFieldAlias(fieldKey: string, str: string): string {
   const s = str.toUpperCase().replace(/\s+/g, ' ').trim();
   if (fieldKey === 'furnishing') {
-    if (['FF', 'FURNISHED', 'FULLY FURNISHED', 'FULLY-FURNISHED', 'LUXURY FULLY FURNISHED', 'FULL FURNISHED'].includes(s)) return 'Fully Furnished';
+    if (['FF', 'FULLY FURNISHED', 'FULLY-FURNISHED', 'LUXURY FULLY FURNISHED', 'FULL FURNISHED'].includes(s)) return 'Furnished';
     if (['SF', 'SEMI FURNISHED', 'SEMI-FURNISHED', 'SEMIFURNISHED'].includes(s) || s.startsWith('SEMI')) return 'Semi-Furnished';
     if (['UF', 'UNFURNISHED', 'UN-FURNISHED'].includes(s)) return 'Unfurnished';
   }
