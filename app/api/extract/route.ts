@@ -36,7 +36,11 @@ Normalisation rules:
 Return raw JSON array only. No markdown, no explanation.`;
 
 function getClient() {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const opts: ConstructorParameters<typeof Anthropic>[0] = { apiKey: process.env.ANTHROPIC_API_KEY };
+  if (process.env.ANTHROPIC_WORKSPACE_ID) {
+    opts.defaultHeaders = { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID };
+  }
+  return new Anthropic(opts);
 }
 
 function parseUnits(text: string): Record<string, unknown>[] {
