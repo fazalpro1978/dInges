@@ -25,7 +25,7 @@ contract_start_date, contract_end_date, location_map_url, media_url, notes
 
 Normalisation rules:
 - status: map to one of Available | Leased | Reserved | Under_Maintenance
-- furnishing: Fully Furnished | Semi-Furnished | Unfurnished
+- furnishing: Furnished | Semi-Furnished | Unfurnished
 - listing_type: Rent | Sale
 - dates: YYYY-MM-DD format
 - rent/charges: numbers only, no currency symbols
