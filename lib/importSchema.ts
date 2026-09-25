@@ -42,7 +42,7 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
   {
     key: 'contact_details',
     label: 'Contact Details',
-    description: 'Watchman / caretaker name and phone (format: "Name Phone"). Exported to REIMS as Property Focal Point Info. Non-blocking — absence does not prevent import.',
+    description: 'Watchman / caretaker name and phone (format: "Name Phone"). Exported to REIMS: units.focal_point_name + units.focal_point_phone. Email (focal_point_email) must be updated directly in REIMS. Non-blocking — absence does not prevent import.',
   },
   {
     key: 'view',

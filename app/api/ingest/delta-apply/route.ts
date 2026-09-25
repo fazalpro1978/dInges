@@ -78,9 +78,16 @@ export async function POST(req: NextRequest) {
         }
 
         const updateFields: Record<string, unknown> = {};
-        const patchable = ['status', 'rent', 'furnishing', 'service_charges', 'deposit_amount', 'agency_fee', 'listing_type', 'operator_remarks', 'month_free_applicable', 'month_free_days', 'kahramaa_applicable', 'kahramaa_amount'];
+        const patchable = ['status', 'rent', 'furnishing', 'service_charges', 'deposit_amount', 'agency_fee', 'listing_type', 'operator_remarks', 'month_free_applicable', 'month_free_days', 'kahramaa_applicable', 'kahramaa_amount', 'focal_point_name', 'focal_point_phone', 'focal_point_email'];
         for (const f of patchable) {
           if (payload[f] != null && payload[f] !== '') updateFields[f] = payload[f];
+        }
+        // Split contact_details into focal_point columns for ST_UPDATED too
+        const cdPatch = typeof payload['contact_details'] === 'string' ? (payload['contact_details'] as string).trim() : '';
+        if (cdPatch) {
+          const pm = cdPatch.match(/^(.*?)\s+(\+?[\d\s\-().]{6,})$/);
+          if (pm) { updateFields.focal_point_name = pm[1].trim() || null; updateFields.focal_point_phone = pm[2].trim() || null; }
+          else { updateFields.focal_point_name = cdPatch; }
         }
 
         const { error: uErr } = await reims.from('units').update(updateFields).eq('id', unitId);
@@ -127,7 +134,20 @@ export async function POST(req: NextRequest) {
       });
 
       // Remove pipeline metadata before inserting
-      const { category: _c, entity_code: _e, agent_code: _a, type_code: _t, unitId: _u, __unit_id: _ui, ...unitPayload } = payload as Record<string, unknown>;
+      const { category: _c, entity_code: _e, agent_code: _a, type_code: _t, unitId: _u, __unit_id: _ui,
+              contact_details: _cd, ...unitPayload } = payload as Record<string, unknown>;
+
+      // Split contact_details ("Name Phone") → focal_point_name / focal_point_phone
+      const contactRaw = typeof _cd === 'string' ? _cd.trim() : '';
+      if (contactRaw) {
+        const phoneMatch = contactRaw.match(/^(.*?)\s+(\+?[\d\s\-().]{6,})$/);
+        if (phoneMatch) {
+          unitPayload.focal_point_name  = phoneMatch[1].trim() || null;
+          unitPayload.focal_point_phone = phoneMatch[2].trim() || null;
+        } else {
+          unitPayload.focal_point_name = contactRaw;
+        }
+      }
 
       const { error: iErr } = await reims.from('units').insert({
         ...unitPayload,
