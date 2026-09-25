@@ -75,7 +75,7 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
     key: 'kahramaa_applicable',
     label: 'Kahramaa',
     kind: 'string',
-    description: 'Whether Kahramaa (utility) deposit applies. true = "INCLUDING KAHRAMAA" or "INCLUDING ALL BILLS"; false = "EXCLUDING KAHRAMAA". Exported to REIMS: Financials → kahramaa_applicable (bool). Non-blocking.',
+    description: 'Whether tenant pays kahramaa deposit separately. false = "INCLUDING KAHRAMAA" / "INCLUDING ALL BILLS" (included in rent — deposit NOT applicable); true = "EXCLUDING KAHRAMAA" (tenant pays separately — deposit Applicable). Exported to REIMS: Financials → Kahramaa Deposit toggle. Non-blocking.',
   },
   {
     key: 'kahramaa_amount',
