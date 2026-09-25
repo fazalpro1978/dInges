@@ -71,6 +71,23 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
     kind: 'integer',
     description: 'Number of free months. Exported to REIMS: Financials → month_free_days (int4). E.g. "2 Months Free" → 2. Non-blocking.',
   },
+  {
+    key: 'kahramaa_applicable',
+    label: 'Kahramaa',
+    kind: 'string',
+    description: 'Whether Kahramaa (utility) deposit applies. true = "INCLUDING KAHRAMAA" or "INCLUDING ALL BILLS"; false = "EXCLUDING KAHRAMAA". Exported to REIMS: Financials → kahramaa_applicable (bool). Non-blocking.',
+  },
+  {
+    key: 'kahramaa_amount',
+    label: 'Kahramaa Amount (QAR)',
+    kind: 'integer',
+    description: 'Kahramaa deposit amount in QAR. Extracted from remarks e.g. "2000 FOR KAHRAMAA DEPOSIT" → 2000. Exported to REIMS: Financials → kahramaa_amount (numeric). Non-blocking.',
+  },
+  {
+    key: 'operator_remarks',
+    label: 'Remarks',
+    description: 'Auto-extracted operational notes: payment conditions (PDC, cheques), document requirements (CR, EST card, QID), deposit terms, accommodation notes. Exported to REIMS: Units Inventory → View Details → Operational → Operator Remarks. Non-blocking.',
+  },
 ];
 
 export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office'] as const;
