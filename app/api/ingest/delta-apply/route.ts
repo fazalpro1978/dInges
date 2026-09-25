@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
         }
 
         const updateFields: Record<string, unknown> = {};
-        const patchable = ['status', 'rent', 'furnishing', 'service_charges', 'deposit_amount', 'agency_fee', 'listing_type', 'operator_remarks', 'month_free_applicable', 'month_free_days', 'kahramaa_applicable', 'kahramaa_amount', 'focal_point_name', 'focal_point_phone', 'focal_point_email'];
+        const patchable = ['status', 'rent', 'furnishing', 'service_charges', 'deposit_amount', 'agency_fee', 'listing_type', 'operator_remarks', 'month_free_applicable', 'month_free_days', 'kahramaa_applicable', 'kahramaa_amount', 'water_electricity', 'water_electricity_limit_applicable', 'water_electricity_limit_amount', 'focal_point_name', 'focal_point_phone', 'focal_point_email'];
         for (const f of patchable) {
           if (payload[f] != null && payload[f] !== '') updateFields[f] = payload[f];
         }

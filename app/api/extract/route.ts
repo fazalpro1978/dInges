@@ -22,6 +22,7 @@ moci_contract_status, moci_contract_number, legal_duration,
 contract_start_date, contract_end_date, location_map_url, media_url, notes,
 month_free_applicable, month_free_days,
 kahramaa_applicable, kahramaa_amount,
+water_electricity, water_electricity_limit_applicable, water_electricity_limit_amount,
 operator_remarks
 
 - media_url: URL pointing to a photo folder, media storage, or document library for this unit (e.g. Google Drive, OneDrive, Dropbox link). Often found in a column labelled PHOTOS, Media, Images, or similar — the cell may display a label like "PHOTOS" with a hyperlink behind it; the hyperlink URL is provided in square brackets after the cell value, e.g. "PHOTOS [https://drive.google.com/…]". Extract the URL. null if absent.
@@ -29,6 +30,9 @@ operator_remarks
 - month_free_days: integer number of free months (e.g. "7000 + 1 Month Free" → 1, "10,000 + 2 Months free" → 2, "one month free" → 1). Extract from rent cell first, then remarks as fallback. Omit if month_free_applicable is false.
 - kahramaa_applicable: false when remarks say "INCLUDING KAHRAMAA", "INCLUDING ALL BILLS", "ALL BILLS INCLUDED", or any phrasing that utilities are included in the rent (tenant does NOT pay a separate kahramaa deposit). true when remarks say "EXCLUDING KAHRAMAA" or "KAHRAMAA NOT INCLUDED" (tenant pays kahramaa deposit separately). Omit only if kahramaa is not mentioned anywhere for this unit.
 - kahramaa_amount: numeric deposit amount for kahramaa extracted from remarks (e.g. "2000 FOR KAHRAMAA DEPOSIT" → 2000). Omit if not mentioned.
+- water_electricity: set to "Included" when remarks say "INCLUDING KAHRAMAA", "INCLUDING ALL BILLS", "ALL BILLS INCLUDED", or any phrasing that water & electricity is covered in the rent. Set to "Excluded" when remarks say "EXCLUDING KAHRAMAA" or utilities are explicitly stated as NOT included. Omit if not mentioned.
+- water_electricity_limit_applicable: true if remarks mention a usage limit or cap on water/electricity (e.g. "KAHRAMAA UP TO 500 QAR"). Omit if not mentioned.
+- water_electricity_limit_amount: numeric QAR cap for water/electricity (e.g. "KAHRAMAA UP TO 500 QAR" → 500). Omit if not mentioned.
 - deposit_amount: if remarks specify the security deposit as a multiple of rent (e.g. "SECURITY DEPOSIT 1 MONTH RENTAL AMOUNT", "SECURITY DEPOSIT 2 MONTHS RENT"), set deposit_amount = N × rent (where N is the number of months stated and rent is the extracted rent value for this unit). If remarks give a fixed QAR deposit amount (e.g. "SECURITY DEPOSIT 5000 QAR"), use that number directly. If the column already has an explicit deposit value, keep it — only derive from remarks when the column is blank or absent.
 - operator_remarks: auto-extract payment conditions, document requirements, and operational notes from the remarks/notes column. Examples: "PDC FOR RENT PAYMENT", "CR, EST CARD, QID REQUIRED", "SECURITY DEPOSIT 1 MONTH RENTAL AMOUNT", "LABOUR CAMP ACCOMMODATION NEAR UMM-SALAL". Do NOT include furnishing or amenity information here (those go in their own fields). Concatenate multiple conditions with " · ". Omit if remarks contain no operational notes.
 

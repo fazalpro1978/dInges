@@ -84,6 +84,24 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
     description: 'Kahramaa deposit amount in QAR. Extracted from remarks e.g. "2000 FOR KAHRAMAA DEPOSIT" → 2000. Exported to REIMS: Financials → kahramaa_amount (numeric). Non-blocking.',
   },
   {
+    key: 'water_electricity',
+    label: 'Water & Electricity',
+    kind: 'string',
+    description: 'Whether water & electricity is included in the rent. "Included" when remarks say "INCLUDING KAHRAMAA" / "INCLUDING ALL BILLS". "Excluded" when remarks say "EXCLUDING KAHRAMAA". Exported to REIMS: Service & Utility Charges → Water & Electricity dropdown. Non-blocking.',
+  },
+  {
+    key: 'water_electricity_limit_applicable',
+    label: 'W&E Limit',
+    kind: 'string',
+    description: 'Whether a usage cap applies to included water & electricity. true when remarks specify a QAR limit (e.g. "KAHRAMAA UP TO 500 QAR"). Exported to REIMS: water_electricity_limit_applicable. Non-blocking.',
+  },
+  {
+    key: 'water_electricity_limit_amount',
+    label: 'W&E Limit Amount (QAR)',
+    kind: 'numeric',
+    description: 'Monthly cap on covered water & electricity in QAR. Extracted from remarks. Exported to REIMS: water_electricity_limit_amount. Non-blocking.',
+  },
+  {
     key: 'operator_remarks',
     label: 'Remarks',
     description: 'Auto-extracted operational notes: payment conditions (PDC, cheques), document requirements (CR, EST card, QID), deposit terms, accommodation notes. Exported to REIMS: Units Inventory → View Details → Operational → Operator Remarks. Non-blocking.',
