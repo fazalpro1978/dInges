@@ -19,16 +19,19 @@ unit_code, property, unit_no, zone, zone_code, type, config, furnishing, kitchen
 status, rent, service_charges, deposit_amount, agency_fee, listing_type,
 bedrooms, bathrooms, parking, floor, area_sqft, realtor_name, realtor_moci,
 moci_contract_status, moci_contract_number, legal_duration,
-contract_start_date, contract_end_date, location_map_url, media_url, notes
+contract_start_date, contract_end_date, location_map_url, media_url, notes,
+month_free_applicable, month_free_days
 
 - media_url: URL pointing to a photo folder, media storage, or document library for this unit (e.g. Google Drive, OneDrive, Dropbox link). Often found in a column labelled PHOTOS, Media, Images, or similar — the cell may display a label like "PHOTOS" with a hyperlink behind it; the hyperlink URL is provided in square brackets after the cell value, e.g. "PHOTOS [https://drive.google.com/…]". Extract the URL. null if absent.
+- month_free_applicable: true if the rent cell contains any "month free" incentive (e.g. "7000 + 1 Month Free", "10,000 + 2 Months free"). false otherwise.
+- month_free_days: integer number of free months extracted from the rent cell (e.g. "7000 + 1 Month Free" → 1, "10,000 + 2 Months free" → 2). Omit if month_free_applicable is false.
 
 Normalisation rules:
 - status: map to one of Available | Leased | Reserved | Under_Maintenance
 - furnishing: Furnished | Semi-Furnished | Unfurnished
 - listing_type: Rent | Sale
 - dates: YYYY-MM-DD format
-- rent/charges: numbers only, no currency symbols
+- rent/charges: numbers only, no currency symbols — strip any "+ N Month(s) Free" suffix before extracting the rent number
 - If a field is not present, omit it (do not include null values)
 - For side-by-side multi-unit layouts, extract each unit as a separate record
 - Ignore headers, logos, footers, marketing text — only extract actual unit data

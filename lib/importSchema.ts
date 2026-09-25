@@ -59,6 +59,18 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
     label: 'Remarks',
     description: 'Admin / Superuser operational notes for this unit. Exported to REIMS: Units Inventory → View Details → Operational → Operator Remarks. Non-blocking — absence does not prevent import.',
   },
+  {
+    key: 'month_free_applicable',
+    label: 'Month Free',
+    kind: 'string',
+    description: 'Whether a free-month incentive applies. Exported to REIMS: Financials → Month Free toggle. Derived from rent cells like "7000 + 1 Month Free". Non-blocking — absence defaults to Not Applicable.',
+  },
+  {
+    key: 'month_free_days',
+    label: 'Month Free (count)',
+    kind: 'integer',
+    description: 'Number of free months. Exported to REIMS: Financials → month_free_days (int4). E.g. "2 Months Free" → 2. Non-blocking.',
+  },
 ];
 
 export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office'] as const;
