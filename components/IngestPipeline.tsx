@@ -224,6 +224,8 @@ export default function IngestPipeline() {
   // Tracks whether any amenities bulk-add has been applied so the revert button
   // knows there is something to undo.
   const [amenitiesBulkDirty, setAmenitiesBulkDirty] = useState(false);
+  // Tracks which property groups are collapsed in the multi-zone accordion (empty = all expanded)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   // Snapshot of resolvedData.amenities per rowIndex captured on stage-2 entry.
   // Used as the revert target — isolates the original uploaded values from any
   // bulk-add or inline chip edits performed during Validation.
@@ -480,17 +482,17 @@ export default function IngestPipeline() {
     const getRecordZoneCode = (m: MatchedRecord): string => {
       const prop = String(m._conflictResolved.property ?? m.resolvedData.property ?? '');
       const pz   = propZones[prop];
-      const code = pz?.code || String(m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code || '00');
+      const code = pz?.code || String((m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code) || '00');
       return String(code).padStart(2, '0');
     };
     const getRecordZoneName = (m: MatchedRecord): string => {
       const prop = String(m._conflictResolved.property ?? m.resolvedData.property ?? '');
       const pz   = propZones[prop];
-      return pz?.name || String(m._conflictResolved.zone ?? m.resolvedData.zone ?? bulkZone.name || '');
+      return pz?.name || String((m._conflictResolved.zone ?? m.resolvedData.zone ?? bulkZone.name) || '');
     };
 
     // Build one master_code per zone group; fall back to a batch-level code for single-zone batches
-    const zoneCodes = [...new Set(matched.filter((_, i) => !excludedIdx.has(i)).map(m => getRecordZoneCode(m)))];
+    const zoneCodes = Array.from(new Set(matched.filter((_, i) => !excludedIdx.has(i)).map(m => getRecordZoneCode(m))));
     const masterCodeByZone: Record<string, string> = {};
     for (const zc of zoneCodes) {
       masterCodeByZone[zc] = buildMasterCode({
@@ -920,6 +922,17 @@ export default function IngestPipeline() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
+  // Prop-group index — used by both the multi-zone accordion and the standalone unit list gate
+  const matchPropGroups: Record<string, number[]> = {};
+  matched.forEach((r, i) => {
+    const prop = String(r.resolvedData.property ?? r._conflictResolved.property ?? '');
+    if (!prop) return;
+    if (!matchPropGroups[prop]) matchPropGroups[prop] = [];
+    matchPropGroups[prop].push(i);
+  });
+  const matchPropNames = Object.keys(matchPropGroups);
+  const isMultiZone    = matchPropNames.length >= 2;
+
   const { openNav } = useNav();
 
   return (
@@ -1215,18 +1228,9 @@ export default function IngestPipeline() {
               </div>
             </div>
 
-            {/* ── Multi-Zone Group Assignment ─────────────────────────── */}
-            {(() => {
-              const propGroups: Record<string, number[]> = {};
-              matched.forEach((r, i) => {
-                const prop = String(r.resolvedData.property ?? r._conflictResolved.property ?? '');
-                if (!prop) return;
-                if (!propGroups[prop]) propGroups[prop] = [];
-                propGroups[prop].push(i);
-              });
-              const propNames = Object.keys(propGroups);
-              if (propNames.length < 2) return null;
-              const allZonesDone  = propNames.every(p => propZones[p]?.code || propZones[p]?.name);
+            {/* ── Multi-Zone Accordion (2+ property groups) ───────────── */}
+            {isMultiZone && (() => {
+              const allZonesDone  = matchPropNames.every(p => propZones[p]?.code || propZones[p]?.name);
               const realtorSet    = !!bulkRealtor.name.trim();
               const noConflicts   = unresolvedConflicts === 0;
               const canGenerateMC = allZonesDone && realtorSet && noConflicts;
@@ -1236,10 +1240,11 @@ export default function IngestPipeline() {
                 !noConflicts  && `Resolve ${unresolvedConflicts} conflict${unresolvedConflicts > 1 ? 's' : ''}`,
               ].filter(Boolean) as string[];
               return (
-                <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/40 overflow-hidden">
+                <div className="mb-4 rounded-xl border border-purple-200 overflow-hidden" style={{ background: 'rgba(250,248,255,0.6)' }}>
+                  {/* Panel header */}
                   <div className="flex items-center justify-between px-4 py-2 border-b border-purple-200 bg-purple-100/60">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
-                      Multi-Zone Group Assignment &nbsp;·&nbsp; {propNames.length} property groups detected
+                      Multi-Zone Group Assignment &nbsp;·&nbsp; {matchPropNames.length} property groups detected
                     </span>
                     <div className="flex items-center gap-2">
                       <button
@@ -1247,17 +1252,10 @@ export default function IngestPipeline() {
                         onClick={() => {
                           setMatched(prev => prev.map((m, i) => {
                             if (excludedIdx.has(i)) return m;
-                            const prop = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
-                            const gz = propZones[prop];
+                            const p = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
+                            const gz = propZones[p];
                             if (!gz) return m;
-                            return {
-                              ...m,
-                              _conflictResolved: {
-                                ...m._conflictResolved,
-                                ...(gz.code ? { zone_code: Number(gz.code) } : {}),
-                                ...(gz.name ? { zone: gz.name } : {}),
-                              },
-                            };
+                            return { ...m, _conflictResolved: { ...m._conflictResolved, ...(gz.code ? { zone_code: Number(gz.code) } : {}), ...(gz.name ? { zone: gz.name } : {}) } };
                           }));
                         }}
                         className="text-xs px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold"
@@ -1275,43 +1273,129 @@ export default function IngestPipeline() {
                       </button>
                     </div>
                   </div>
-                  {/* Gate status strip — shows what's still blocking MC generation */}
+                  {/* Gate status strip */}
                   {!canGenerateMC && (
                     <div className="flex items-center gap-2 px-4 py-1.5 border-b border-amber-200" style={{ background: '#fffbeb' }}>
                       <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Needed for MC:</span>
-                      {gateItems.map((item, idx) => (
-                        <span key={idx} className="text-[10px] text-amber-700">· {item}</span>
+                      {gateItems.map((item, gi) => (
+                        <span key={gi} className="text-[10px] text-amber-700">· {item}</span>
                       ))}
                     </div>
                   )}
+                  {/* Group accordion rows */}
                   <div className="divide-y divide-purple-100">
-                    {propNames.map(prop => {
+                    {matchPropNames.map(prop => {
                       const gz = propZones[prop] ?? { code: '', name: '' };
-                      const extractedZone = String(matched[propGroups[prop][0]]?.resolvedData.zone ?? '');
+                      const extractedZone = String(matched[matchPropGroups[prop][0]]?.resolvedData.zone ?? '');
                       const isDone = !!(gz.code || gz.name);
+                      const isExpanded = !collapsedGroups.has(prop);
+                      const groupConflictCount = matchPropGroups[prop].filter(idx => {
+                        const r = matched[idx];
+                        return r.action === 'conflict' && r.conflictFields &&
+                          Object.keys(r.conflictFields).some(f => r._conflictResolved[f] === undefined);
+                      }).length;
                       return (
-                        <div key={prop} className="flex items-center gap-3 px-4 py-2">
-                          <div className="w-48 shrink-0">
-                            <p className="text-xs font-semibold text-gray-800 truncate">{prop}</p>
-                            <p className="text-[10px] text-gray-400">{propGroups[prop].length} record{propGroups[prop].length !== 1 ? 's' : ''}</p>
-                          </div>
-                          {extractedZone && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 shrink-0">
-                              ✓ {extractedZone}
+                        <div key={prop}>
+                          {/* Group header */}
+                          <div className="flex items-center gap-3 px-4 py-2" style={{ background: 'rgba(245,243,255,0.5)' }}>
+                            <button
+                              onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); n.has(prop) ? n.delete(prop) : n.add(prop); return n; })}
+                              className="text-[11px] text-purple-400 hover:text-purple-700 w-4 shrink-0 text-center leading-none"
+                            >
+                              {isExpanded ? '▼' : '▶'}
+                            </button>
+                            <div className="w-44 shrink-0">
+                              <p className="text-xs font-semibold text-gray-800 truncate">{prop}</p>
+                              <p className="text-[10px] text-gray-400">{matchPropGroups[prop].length} unit{matchPropGroups[prop].length !== 1 ? 's' : ''}</p>
+                            </div>
+                            {groupConflictCount > 0 && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0"
+                                style={{ background: '#fef3c7', color: '#b45309', borderColor: '#fcd34d' }}>
+                                ⚠ {groupConflictCount} unresolved
+                              </span>
+                            )}
+                            {extractedZone && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300 shrink-0">
+                                ✓ {extractedZone}
+                              </span>
+                            )}
+                            <div className="flex-1">
+                              <ZoneField
+                                code={gz.code}
+                                name={gz.name}
+                                zones={zones}
+                                onChange={next => setPropZones(prev => ({ ...prev, [prop]: next }))}
+                                onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
+                              />
+                            </div>
+                            <span className={`text-[10px] font-semibold shrink-0 ${isDone ? 'text-green-600' : 'text-gray-400'}`}>
+                              {isDone ? '✓ Done' : '— pending'}
                             </span>
-                          )}
-                          <div className="flex-1">
-                            <ZoneField
-                              code={gz.code}
-                              name={gz.name}
-                              zones={zones}
-                              onChange={next => setPropZones(prev => ({ ...prev, [prop]: next }))}
-                              onZoneAdded={z => setZones(prev => [...prev, z].sort((a, b) => a.district_name.localeCompare(b.district_name)))}
-                            />
                           </div>
-                          <span className={`text-[10px] font-semibold shrink-0 ${isDone ? 'text-green-600' : 'text-gray-400'}`}>
-                            {isDone ? '✓ Done' : '— pending'}
-                          </span>
+                          {/* Unit rows */}
+                          {isExpanded && (
+                            <div className="divide-y divide-purple-50" style={{ background: 'rgba(248,246,255,0.5)' }}>
+                              {matchPropGroups[prop].map(idx => {
+                                const r = matched[idx];
+                                const computedSC   = (r._conflictResolved.smart_code as string | null) ?? null;
+                                const isConflicting = r._conflictResolved.__patch_only === true;
+                                const isUpdated     = r.delta_status === 'ST_UPDATED';
+                                const hasUnresolved = r.action === 'conflict' && r.conflictFields &&
+                                  Object.keys(r.conflictFields).some(f => r._conflictResolved[f] === undefined);
+                                return (
+                                  <div key={idx}
+                                    className="pl-10 pr-4 py-2"
+                                    style={{
+                                      borderLeft: hasUnresolved ? '3px solid #fbbf24' : isUpdated ? '3px solid #39ff14' : '3px solid transparent',
+                                      background: hasUnresolved ? 'rgba(255,251,235,0.7)' : isUpdated ? 'rgba(240,255,240,0.4)' : undefined,
+                                      ...(isUpdated ? { boxShadow: 'inset 3px 0 8px -2px rgba(57,255,20,0.15)' } : {}),
+                                    }}
+                                  >
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <input
+                                        type="checkbox"
+                                        checked={!excludedIdx.has(idx)}
+                                        onChange={e => setExcludedIdx(prev => { const n = new Set(prev); e.target.checked ? n.delete(idx) : n.add(idx); return n; })}
+                                      />
+                                      <span className="text-xs text-gray-400 w-5">#{r.rowIndex + 1}</span>
+                                      {actionBadge(r.action)}
+                                      {confidenceBadge(r.matchType, r.matchConfidence)}
+                                      {r.resolvedData.unit_no ? (
+                                        <span className="inline-flex items-center gap-1 shrink-0 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+                                          <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide">Unit</span>
+                                          <span className="text-xs font-bold text-blue-700 font-mono">{String(r.resolvedData.unit_no)}</span>
+                                        </span>
+                                      ) : null}
+                                      {isConflicting && computedSC && (
+                                        <span className="inline-flex items-center gap-1 shrink-0 bg-amber-100 border border-amber-400 rounded px-2 py-0.5">
+                                          <span className="text-[9px] font-bold text-amber-600 uppercase">PATCH</span>
+                                          <span className="font-mono text-xs font-bold text-amber-700">{computedSC}</span>
+                                        </span>
+                                      )}
+                                      {!isConflicting && computedSC && (
+                                        <span className="inline-flex items-center shrink-0 bg-green-50 border border-green-200 rounded px-2 py-0.5">
+                                          <span className="font-mono text-xs font-bold text-green-700 tracking-wider">{computedSC}</span>
+                                        </span>
+                                      )}
+                                      {r.existingSnapshot && (
+                                        <span className="text-xs font-bold hidden sm:inline px-2 py-0.5 rounded"
+                                          style={isUpdated ? { background: '#39ff14', color: '#064e03', boxShadow: '0 0 6px 1px #39ff14' } : { color: '#9ca3af' }}>
+                                          was: {r.existingSnapshot.status} · QAR {r.existingSnapshot.rent?.toLocaleString()}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {/* Conflict resolver — inline, always visible for conflict records */}
+                                    {r.action === 'conflict' && (
+                                      <ConflictResolver
+                                        record={r}
+                                        onChange={updated => setMatched(prev => prev.map((m, mi) => mi === idx ? updated : m))}
+                                      />
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1320,6 +1404,8 @@ export default function IngestPipeline() {
               );
             })()}
 
+            {/* Unit cards — single-zone batches only; multi-zone uses accordion above */}
+            {!isMultiZone && (
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => {
                 const computedSC = (r._conflictResolved.smart_code as string | null) ?? null;
@@ -1383,6 +1469,7 @@ export default function IngestPipeline() {
                 );
               })}
             </div>
+            )}
 
             <div className="mt-6 flex items-center justify-end gap-3">
               {!mcState.generated_code && (
