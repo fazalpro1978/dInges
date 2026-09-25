@@ -475,10 +475,33 @@ export default function IngestPipeline() {
     const { date_seg, time_seg } = mcState.date_seg
       ? { date_seg: mcState.date_seg, time_seg: mcState.time_seg }
       : getNowSegments();
-    const zc = (bulkZone.code || '00').padStart(2, '0');
-    const master_code = buildMasterCode({
+
+    // Per-record zone helpers — propZones takes precedence over _conflictResolved, then bulkZone
+    const getRecordZoneCode = (m: MatchedRecord): string => {
+      const prop = String(m._conflictResolved.property ?? m.resolvedData.property ?? '');
+      const pz   = propZones[prop];
+      const code = pz?.code || String(m._conflictResolved.zone_code ?? m.resolvedData.zone_code ?? bulkZone.code || '00');
+      return String(code).padStart(2, '0');
+    };
+    const getRecordZoneName = (m: MatchedRecord): string => {
+      const prop = String(m._conflictResolved.property ?? m.resolvedData.property ?? '');
+      const pz   = propZones[prop];
+      return pz?.name || String(m._conflictResolved.zone ?? m.resolvedData.zone ?? bulkZone.name || '');
+    };
+
+    // Build one master_code per zone group; fall back to a batch-level code for single-zone batches
+    const zoneCodes = [...new Set(matched.filter((_, i) => !excludedIdx.has(i)).map(m => getRecordZoneCode(m)))];
+    const masterCodeByZone: Record<string, string> = {};
+    for (const zc of zoneCodes) {
+      masterCodeByZone[zc] = buildMasterCode({
+        category: mcState.category, entity_code: mcState.entity_code,
+        agent_code: effectiveAgentCode, zone_code: zc, date_seg, time_seg,
+      });
+    }
+    // For audit/registration, use the first zone's master_code as the representative
+    const master_code = masterCodeByZone[zoneCodes[0]] ?? buildMasterCode({
       category: mcState.category, entity_code: mcState.entity_code,
-      agent_code: effectiveAgentCode, zone_code: zc, date_seg, time_seg,
+      agent_code: effectiveAgentCode, zone_code: (bulkZone.code || '00').padStart(2, '0'), date_seg, time_seg,
     });
     const pfx = master_code.slice(0, 8);
 
@@ -508,10 +531,13 @@ export default function IngestPipeline() {
     const updatedMatched = await Promise.all(
       matched.map(async (m, i) => {
         if (excludedIdx.has(i)) return m;
+        const zc          = getRecordZoneCode(m);
+        const zoneName    = getRecordZoneName(m);
+        const mc          = masterCodeByZone[zc] ?? master_code;
 
         // ST_UPDATED: preserve existing REIMS smart_code — only the MC timestamp refreshes at apply
         if (m.delta_status === 'ST_UPDATED' && m.existingSnapshot?.smart_code) {
-          return { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: m.existingSnapshot.smart_code } };
+          return { ...m, _conflictResolved: { ...m._conflictResolved, master_code: mc, smart_code: m.existingSnapshot.smart_code } };
         }
 
         const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
@@ -524,21 +550,21 @@ export default function IngestPipeline() {
           p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
           p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
           p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
-          p_zone_name: bulkZone.name,
+          p_zone_name: zoneName,
         });
-        if (!assignment) return { ...m, _conflictResolved: { ...m._conflictResolved, master_code } };
+        if (!assignment) return { ...m, _conflictResolved: { ...m._conflictResolved, master_code: mc } };
         if (assignment.action === 'patch') {
           return {
             ...m,
             _conflictResolved: {
               ...m._conflictResolved,
-              master_code,
+              master_code: mc,
               smart_code: assignment.smart_code,
               __patch_only: true,
             },
           };
         }
-        return { ...m, _conflictResolved: { ...m._conflictResolved, master_code, smart_code: assignment.smart_code } };
+        return { ...m, _conflictResolved: { ...m._conflictResolved, master_code: mc, smart_code: assignment.smart_code } };
       })
     );
     setMatched(updatedMatched);
@@ -562,23 +588,26 @@ export default function IngestPipeline() {
       }).catch(err => console.error('[MC Override Log] error', err));
     }
 
-    fetch('/api/master-code/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        master_code, category: mcState.category,
-        entity_code: mcState.entity_code || null, agent_code: effectiveAgentCode || null,
-        zone_code: zc, date_seg, time_seg, seq_num: mcState.seq_num,
-        property_ref: propertyRef ?? null,
-        batch_id: null,
-      }),
-    }).then(async r => {
-      if (!r.ok && r.status !== 409) {
-        const body = await r.json().catch(() => ({}));
-        console.error('[MC Register] failed', r.status, body);
-      }
-    }).catch(err => console.error('[MC Register] network error', err));
-  }, [mcState, effectiveAgentCode, bulkZone.code, bulkZone.name, matched, excludedIdx]);
+    // Register all zone-group master codes
+    await Promise.all(Object.entries(masterCodeByZone).map(([zc, mc]) =>
+      fetch('/api/master-code/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          master_code: mc, category: mcState.category,
+          entity_code: mcState.entity_code || null, agent_code: effectiveAgentCode || null,
+          zone_code: zc, date_seg, time_seg, seq_num: mcState.seq_num,
+          property_ref: propertyRef ?? null,
+          batch_id: null,
+        }),
+      }).then(async r => {
+        if (!r.ok && r.status !== 409) {
+          const body = await r.json().catch(() => ({}));
+          console.error('[MC Register] failed', r.status, body);
+        }
+      }).catch(err => console.error('[MC Register] network error', err))
+    ));
+  }, [mcState, effectiveAgentCode, bulkZone.code, bulkZone.name, propZones, matched, excludedIdx]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
@@ -1197,36 +1226,64 @@ export default function IngestPipeline() {
               });
               const propNames = Object.keys(propGroups);
               if (propNames.length < 2) return null;
-              const allDone = propNames.every(p => propZones[p]?.code || propZones[p]?.name);
+              const allZonesDone  = propNames.every(p => propZones[p]?.code || propZones[p]?.name);
+              const realtorSet    = !!bulkRealtor.name.trim();
+              const noConflicts   = unresolvedConflicts === 0;
+              const canGenerateMC = allZonesDone && realtorSet && noConflicts;
+              const gateItems     = [
+                !allZonesDone && 'Assign zone to every group',
+                !realtorSet   && 'Set Bulk Realtor in Record Fields',
+                !noConflicts  && `Resolve ${unresolvedConflicts} conflict${unresolvedConflicts > 1 ? 's' : ''}`,
+              ].filter(Boolean) as string[];
               return (
                 <div className="mb-4 rounded-xl border border-purple-200 bg-purple-50/40 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2 border-b border-purple-200 bg-purple-100/60">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700">
                       Multi-Zone Group Assignment &nbsp;·&nbsp; {propNames.length} property groups detected
                     </span>
-                    <button
-                      disabled={!allDone}
-                      onClick={() => {
-                        setMatched(prev => prev.map((m, i) => {
-                          if (excludedIdx.has(i)) return m;
-                          const prop = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
-                          const gz = propZones[prop];
-                          if (!gz) return m;
-                          return {
-                            ...m,
-                            _conflictResolved: {
-                              ...m._conflictResolved,
-                              ...(gz.code ? { zone_code: Number(gz.code) } : {}),
-                              ...(gz.name ? { zone: gz.name } : {}),
-                            },
-                          };
-                        }));
-                      }}
-                      className="text-xs px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold"
-                    >
-                      Apply All Groups
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        disabled={!allZonesDone}
+                        onClick={() => {
+                          setMatched(prev => prev.map((m, i) => {
+                            if (excludedIdx.has(i)) return m;
+                            const prop = String(m.resolvedData.property ?? m._conflictResolved.property ?? '');
+                            const gz = propZones[prop];
+                            if (!gz) return m;
+                            return {
+                              ...m,
+                              _conflictResolved: {
+                                ...m._conflictResolved,
+                                ...(gz.code ? { zone_code: Number(gz.code) } : {}),
+                                ...(gz.name ? { zone: gz.name } : {}),
+                              },
+                            };
+                          }));
+                        }}
+                        className="text-xs px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-semibold"
+                      >
+                        Apply Zones to All Groups
+                      </button>
+                      <button
+                        disabled={!canGenerateMC}
+                        title={gateItems.length ? `Still needed: ${gateItems.join(' · ')}` : undefined}
+                        onClick={handleMcApply}
+                        className="text-xs px-3 py-1 rounded disabled:opacity-40 text-white font-semibold transition-colors"
+                        style={{ background: canGenerateMC ? '#16a34a' : '#9ca3af' }}
+                      >
+                        Generate Master Codes →
+                      </button>
+                    </div>
                   </div>
+                  {/* Gate status strip — shows what's still blocking MC generation */}
+                  {!canGenerateMC && (
+                    <div className="flex items-center gap-2 px-4 py-1.5 border-b border-amber-200" style={{ background: '#fffbeb' }}>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Needed for MC:</span>
+                      {gateItems.map((item, idx) => (
+                        <span key={idx} className="text-[10px] text-amber-700">· {item}</span>
+                      ))}
+                    </div>
+                  )}
                   <div className="divide-y divide-purple-100">
                     {propNames.map(prop => {
                       const gz = propZones[prop] ?? { code: '', name: '' };
