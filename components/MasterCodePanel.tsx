@@ -32,11 +32,12 @@ type Props = {
   onAgentChange:   (code: string) => void;
   onApply:         () => void;
   onOpenOverride?: () => void;
+  hideApply?:      boolean;  // suppress Apply button for multi-zone batches (use accordion Generate instead)
 };
 
 export default function MasterCodePanel({
   state, agentCode, zoneCode, entityCodes, agents, recordCount,
-  onStateChange, onAgentChange, onApply, onOpenOverride,
+  onStateChange, onAgentChange, onApply, onOpenOverride, hideApply = false,
 }: Props) {
   const prefix = buildMasterPrefix({
     category: state.category,
@@ -287,14 +288,20 @@ export default function MasterCodePanel({
             >↻ Re-check</button>
           )}
 
-          {/* Apply button — Phase 2, only shown when clear */}
-          <button
-            disabled={!canApply}
-            onClick={onApply}
-            className="w-full text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-30 text-white rounded font-semibold"
-          >
-            Apply to {recordCount} record{recordCount !== 1 ? 's' : ''}
-          </button>
+          {/* Apply button — hidden for multi-zone batches; use accordion Generate Master Codes instead */}
+          {hideApply ? (
+            <div className="w-full text-center text-[10px] text-purple-600 border border-purple-200 rounded py-1.5 bg-purple-50">
+              Use <strong>Generate Master Codes →</strong> in the Multi-Zone panel below
+            </div>
+          ) : (
+            <button
+              disabled={!canApply}
+              onClick={onApply}
+              className="w-full text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-30 text-white rounded font-semibold"
+            >
+              Apply to {recordCount} record{recordCount !== 1 ? 's' : ''}
+            </button>
+          )}
         </div>
       </div>
     </div>

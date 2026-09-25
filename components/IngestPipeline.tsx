@@ -1224,6 +1224,7 @@ export default function IngestPipeline() {
                   onAgentChange={setSelectedAgentCode}
                   onApply={handleMcApply}
                   onOpenOverride={() => setOverrideModalOpen(true)}
+                  hideApply={isMultiZone}
                 />
               </div>
             </div>
