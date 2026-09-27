@@ -37,17 +37,42 @@ export default function ExceptionsPage() {
   const [exceptions, setExceptions] = useState<ExceptionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
 
-  useEffect(() => {
+  const reload = () => {
+    setLoading(true);
     fetch('/api/exceptions')
       .then(r => r.json())
-      .then(d => {
-        if (d.error) throw new Error(d.error);
-        setExceptions(d.exceptions ?? []);
-      })
+      .then(d => { if (d.error) throw new Error(d.error); setExceptions(d.exceptions ?? []); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  const clearScope = async (scope: 'schema_errors' | 'low_confidence' | 'all') => {
+    const labels: Record<string, string> = {
+      schema_errors:  'all Schema Errors',
+      low_confidence: 'all Low-Confidence matches',
+      all:            'ALL exceptions',
+    };
+    if (!confirm(`Clear ${labels[scope]}? This cannot be undone.`)) return;
+    setClearing(true);
+    try {
+      const res = await fetch('/api/exceptions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      reload();
+    } catch (e) {
+      alert(`Clear failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setClearing(false);
+    }
+  };
 
   const schemaErrors  = exceptions.filter(e => e.status === 'schema_error');
   const lowConfidence = exceptions.filter(e => e.status !== 'schema_error' && e.match_confidence < 0.85);
@@ -93,12 +118,36 @@ export default function ExceptionsPage() {
               <h2 className="text-sm font-semibold text-gray-900">All Exceptions</h2>
               <p className="text-xs text-gray-400 mt-0.5">Records that require manual review before they can proceed to REIMS</p>
             </div>
-            <button
-              onClick={() => { setLoading(true); fetch('/api/exceptions').then(r => r.json()).then(d => { setExceptions(d.exceptions ?? []); setLoading(false); }); }}
-              className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 font-medium"
-            >
-              Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={clearing || loading || exceptions.filter(e => e.exception_type === 'Schema Error').length === 0}
+                onClick={() => clearScope('schema_errors')}
+                className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {clearing ? '…' : 'Clear Schema Errors'}
+              </button>
+              <button
+                disabled={clearing || loading || exceptions.filter(e => e.exception_type !== 'Schema Error').length === 0}
+                onClick={() => clearScope('low_confidence')}
+                className="text-xs px-3 py-1.5 rounded-lg border border-amber-200 text-amber-600 hover:bg-amber-50 font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {clearing ? '…' : 'Clear Low Confidence'}
+              </button>
+              <button
+                disabled={clearing || loading || exceptions.length === 0}
+                onClick={() => clearScope('all')}
+                className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {clearing ? 'Clearing…' : 'Clear All'}
+              </button>
+              <button
+                onClick={reload}
+                disabled={loading}
+                className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 font-medium disabled:opacity-40"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           {loading && (

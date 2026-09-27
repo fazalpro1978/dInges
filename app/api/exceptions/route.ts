@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '@/lib/serverAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,4 +61,66 @@ export async function GET(_req: NextRequest) {
   });
 
   return NextResponse.json({ exceptions, total: exceptions.length });
+}
+
+/**
+ * DELETE /api/exceptions
+ * Body: { scope: 'schema_errors' | 'low_confidence' | 'all' }
+ * Permanently deletes matching staged_records (and orphaned upload_runs).
+ */
+export async function DELETE(req: NextRequest) {
+  const auth = await requireAuth(req);
+  if (!auth.ok) return auth.response;
+
+  const { scope } = (await req.json()) as { scope: 'schema_errors' | 'low_confidence' | 'all' };
+  if (!['schema_errors', 'low_confidence', 'all'].includes(scope)) {
+    return NextResponse.json({ error: 'scope must be schema_errors | low_confidence | all' }, { status: 400 });
+  }
+
+  // Build filter matching the same records the GET returns
+  let filter = '';
+  if (scope === 'schema_errors') {
+    filter = `reviewer_notes.like.[SCHEMA ERROR]%`;
+  } else if (scope === 'low_confidence') {
+    filter = `and(match_confidence.lt.0.85,match_confidence.gt.0)`;
+  } else {
+    // all — schema errors OR low confidence
+    filter = `or(reviewer_notes.like.[SCHEMA ERROR]%,and(match_confidence.lt.0.85,match_confidence.gt.0))`;
+  }
+
+  const { data: toDelete, error: fetchErr } = await admin
+    .from('staged_records')
+    .select('id, run_id')
+    .or(
+      scope === 'schema_errors'
+        ? 'reviewer_notes.like.[SCHEMA ERROR]%'
+        : scope === 'low_confidence'
+          ? 'match_confidence.lt.0.85,match_confidence.gt.0'
+          : 'reviewer_notes.like.[SCHEMA ERROR]%,match_confidence.lt.0.85',
+    );
+
+  if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+  if (!toDelete || toDelete.length === 0) return NextResponse.json({ deleted: 0 });
+
+  const ids    = toDelete.map(r => r.id as string);
+  const runIds = Array.from(new Set(toDelete.map(r => r.run_id as string)));
+
+  // Delete staged_records
+  const { error: delErr } = await admin.from('staged_records').delete().in('id', ids);
+  if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 });
+
+  // Delete upload_runs that now have no staged_records left
+  const { data: remaining } = await admin
+    .from('staged_records')
+    .select('run_id')
+    .in('run_id', runIds);
+
+  const runIdsWithRecords = new Set((remaining ?? []).map(r => r.run_id as string));
+  const orphanRunIds = runIds.filter(id => !runIdsWithRecords.has(id));
+
+  if (orphanRunIds.length > 0) {
+    await admin.from('upload_runs').delete().in('id', orphanRunIds);
+  }
+
+  return NextResponse.json({ deleted: ids.length, runsRemoved: orphanRunIds.length });
 }
