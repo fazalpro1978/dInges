@@ -252,6 +252,15 @@ function normalizeFieldAlias(fieldKey: string, str: string): string {
     if (['VIL', 'VILLA'].includes(s) || s === 'V') return 'Villa';
     if (s === 'OFFICE' || s.endsWith('OFFICE')) return 'Office';
     if (s === 'STUDIO') return 'Studio';
+    if (s === 'SHOP') return 'Shop';
+    // "Residential" / "Residiential" / "Commercial" are building CATEGORIES, not unit types —
+    // clear them so validateCanonical does not block with a false enum error.
+    if (['RESIDENTIAL', 'RESIDIENTIAL', 'COMMERCIAL', 'INDUSTRIAL'].includes(s)) return '';
+  }
+  if (fieldKey === 'kitchen') {
+    if (s === 'CLOSE') return 'Closed';
+    if (s === 'OPEN') return 'Open';
+    if (s === 'PANTRY') return 'Pantry';
   }
   return str;
 }

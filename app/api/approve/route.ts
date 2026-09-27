@@ -70,16 +70,41 @@ export async function POST(req: NextRequest) {
       const deltaStatus = (staged as Record<string, unknown>).delta_status as string | null ?? null;
       const rawPayload = a.resolvedData ?? (staged.resolved_data as Record<string, unknown>);
 
-      // Normalise furnishing aliases before schema validation so "Furnished" → "Fully Furnished"
+      // Normalise field aliases before schema validation — last line of defence
       // regardless of what the AI returned or what the user typed in the Validation editor.
       const payload: Record<string, unknown> = { ...rawPayload };
+
+      // Furnishing
       if (typeof payload.furnishing === 'string') {
-        const f = payload.furnishing.trim().toUpperCase();
-        if (f === 'FURNISHED' || f === 'FF' || f === 'FULL FURNISHED' || f === 'FULLY-FURNISHED') {
+        const f = payload.furnishing.trim().toUpperCase().replace(/\s+/g, ' ');
+        if (['FURNISHED', 'FF', 'FULL FURNISHED', 'FULLY-FURNISHED', 'FULLY FURNISHED'].includes(f)) {
           payload.furnishing = 'Fully Furnished';
-        } else if (f === 'SEMI FURNISHED' || f === 'SEMI-FURNISHED' || f === 'SF') {
+        } else if (['SEMI FURNISHED', 'SEMI-FURNISHED', 'SF', 'SEMIFURNISHED'].includes(f) || f.startsWith('SEMI')) {
           payload.furnishing = 'Semi-Furnished';
+        } else if (['UF', 'UNFURNISHED', 'UN-FURNISHED'].includes(f)) {
+          payload.furnishing = 'Unfurnished';
         }
+      }
+
+      // Kitchen
+      if (typeof payload.kitchen === 'string') {
+        const k = payload.kitchen.trim().toUpperCase();
+        if (k === 'CLOSE') payload.kitchen = 'Closed';
+        else if (k === 'OPEN') payload.kitchen = 'Open';
+        else if (k === 'PANTRY') payload.kitchen = 'Pantry';
+      }
+
+      // Property Type — clear building-category strings that are not valid unit types
+      if (typeof payload.type === 'string') {
+        const t = payload.type.trim().toUpperCase().replace(/\s+/g, ' ');
+        if (['RESIDENTIAL', 'RESIDIENTIAL', 'COMMERCIAL', 'INDUSTRIAL'].includes(t)) {
+          payload.type = null; // will surface as required-field error or empty — better than false enum block
+        }
+        if (['FLAT', 'APT', 'APT.', 'APARTMENT'].includes(t)) payload.type = 'Apartment';
+        if (t === 'STUDIO') payload.type = 'Studio';
+        if (t === 'VILLA' || t === 'VIL') payload.type = 'Villa';
+        if (t === 'OFFICE' || t.endsWith('OFFICE') || t === 'OFFICES') payload.type = 'Office';
+        if (t === 'SHOP') payload.type = 'Shop';
       }
 
       // ST_UNCHANGED: no field changes detected — mark approved for audit, skip vetted write

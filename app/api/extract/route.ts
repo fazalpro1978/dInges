@@ -71,7 +71,8 @@ Normalisation rules:
 - status: map to one of Available | Leased | Reserved | Under_Maintenance
 - furnishing: Fully Furnished | Semi-Furnished | Unfurnished — only set when explicitly stated (see FURNISHING rules above)
 - listing_type: Rent | Sale
-- type: map "Flat" or "flat" → "Apartment"; "studio" or "Studio" → "Studio"; "Office" or "Offices" → "Office"; "Shop" → "Shop"
+- type: map "Flat" or "flat" → "Apartment"; "studio" or "Studio" → "Studio"; "Office" or "Offices" → "Office"; "Shop" → "Shop". CRITICAL: "Residential", "Residiential", "Commercial", "Industrial" are BUILDING CATEGORY labels (property-level), NOT unit types — NEVER output these as the type field. Unit type must come from the unit-type column (Flat/Studio/Office/Shop etc.), never from the building-category column.
+- kitchen: normalise "CLOSE" or "Close" → "Closed"; "OPEN" → "Open"
 - config: parse BHK pattern from remarks e.g. "2BHK + 2 BATHROOM" → config: "2 BHK"; "3 BHK + 2 BATHROOM" → config: "3 BHK"
 - bathrooms: parse from remarks e.g. "2BHK + 2 BATHROOM" → bathrooms: 2; "2BHK + 1 BATHROOM" → bathrooms: 1
 - dates: YYYY-MM-DD format
