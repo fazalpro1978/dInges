@@ -1633,12 +1633,26 @@ export default function IngestPipeline() {
               <table className="w-full text-xs min-w-[1200px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold">
-                    <th className="px-3 py-2 text-left w-8 sticky left-0 z-20 bg-gray-50">#</th>
-                    <th className="px-2 py-2 text-left w-10 sticky left-8 z-20 bg-gray-50">Match</th>
-                    <th className="px-2 py-2 text-center w-10 sticky left-[72px] z-20 bg-gray-50">Δ</th>
-                    <th className="px-2 py-2 text-left min-w-[130px] sticky left-[112px] z-20 bg-gray-50">Property</th>
-                    <th className="px-2 py-2 text-left min-w-[144px] sticky left-[242px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Smart Code</th>
-                    <th className="px-2 py-2 text-left w-16 sticky left-[386px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Unit No.</th>
+                    <th className="px-2 py-2 text-center w-8 sticky left-0 z-20 bg-gray-50">
+                      <input
+                        type="checkbox"
+                        title="Select / deselect all rows"
+                        checked={matched.length > 0 && rejectedInValidation.size === 0}
+                        ref={el => {
+                          if (el) {
+                            el.indeterminate = rejectedInValidation.size > 0 && rejectedInValidation.size < matched.length;
+                          }
+                        }}
+                        onChange={e => setRejectedInValidation(e.target.checked ? new Set() : new Set(matched.map(r => r.rowIndex)))}
+                        className="cursor-pointer"
+                      />
+                    </th>
+                    <th className="px-3 py-2 text-left w-8 sticky left-8 z-20 bg-gray-50">#</th>
+                    <th className="px-2 py-2 text-left w-10 sticky left-16 z-20 bg-gray-50">Match</th>
+                    <th className="px-2 py-2 text-center w-10 sticky left-[104px] z-20 bg-gray-50">Δ</th>
+                    <th className="px-2 py-2 text-left min-w-[130px] sticky left-[144px] z-20 bg-gray-50">Property</th>
+                    <th className="px-2 py-2 text-left min-w-[144px] sticky left-[274px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Smart Code</th>
+                    <th className="px-2 py-2 text-left w-16 sticky left-[418px] z-20 bg-gray-50 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.08)]">Unit No.</th>
                     <th className="px-2 py-2 text-left w-14">Zone #</th>
                     <th className="px-2 py-2 text-left min-w-[100px]">Zone</th>
                     <th className="px-2 py-2 text-left w-20">Type</th>
@@ -1666,17 +1680,29 @@ export default function IngestPipeline() {
                     const bgRow = rejected ? 'bg-red-50' : isUnchanged ? 'bg-gray-50' : 'bg-white hover:bg-gray-50';
                     return (
                       <tr key={r.rowIndex} className={`${rejected || isUnchanged ? 'opacity-50' : 'text-gray-900'}`}>
-                        <td className={`px-3 py-1.5 text-gray-400 font-medium sticky left-0 z-10 ${bgRow}`}>{r.rowIndex + 1}</td>
-                        <td className={`px-2 py-1.5 sticky left-8 z-10 ${bgRow}`}>{actionBadge(r.action)}</td>
-                        <td className={`px-2 py-1.5 text-center sticky left-[72px] z-10 ${bgRow}`}>{deltaBadge(r.delta_status)}</td>
+                        <td className={`px-2 py-1.5 text-center sticky left-0 z-10 ${bgRow}`}>
+                          <input
+                            type="checkbox"
+                            checked={!rejected}
+                            onChange={e => setRejectedInValidation(prev => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.delete(r.rowIndex); else next.add(r.rowIndex);
+                              return next;
+                            })}
+                            className="cursor-pointer"
+                          />
+                        </td>
+                        <td className={`px-3 py-1.5 text-gray-400 font-medium sticky left-8 z-10 ${bgRow}`}>{r.rowIndex + 1}</td>
+                        <td className={`px-2 py-1.5 sticky left-16 z-10 ${bgRow}`}>{actionBadge(r.action)}</td>
+                        <td className={`px-2 py-1.5 text-center sticky left-[104px] z-10 ${bgRow}`}>{deltaBadge(r.delta_status)}</td>
 
                         {/* Property — sticky, read-only */}
-                        <td className={`px-2 py-1.5 sticky left-[112px] z-10 ${bgRow}`}>
+                        <td className={`px-2 py-1.5 sticky left-[144px] z-10 ${bgRow}`}>
                           <span className={!getVal('property') ? 'text-red-500 font-bold' : 'text-gray-900 font-semibold'}>{getVal('property') || '!'}</span>
                         </td>
 
                         {/* Smart Code — sticky, read-only; stacks 16-digit master_code over unit smart_code */}
-                        <td className={`px-2 py-1.5 sticky left-[242px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                        <td className={`px-2 py-1.5 sticky left-[274px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
                           {(() => {
                             const mc  = getVal('master_code');
                             const sc  = getVal('smart_code') || (r.delta_status === 'ST_UPDATED' ? (r.existingSnapshot?.smart_code ?? '') : '');
@@ -1694,7 +1720,7 @@ export default function IngestPipeline() {
                         </td>
 
                         {/* Unit No — sticky, read-only */}
-                        <td className={`px-2 py-1.5 sticky left-[386px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
+                        <td className={`px-2 py-1.5 sticky left-[418px] z-10 ${bgRow} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]`}>
                           <span className={!getVal('unit_no') ? 'text-red-500 font-bold' : 'text-blue-700 font-mono font-medium'}>{getVal('unit_no') || '!'}</span>
                         </td>
 
