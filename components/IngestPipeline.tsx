@@ -205,6 +205,8 @@ export default function IngestPipeline() {
   const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
   const [editingCell, setEditingCell] = useState<{ rowIndex: number; field: string } | null>(null);
   const [bulkFill, setBulkFill] = useState<Record<string, string>>({});
+  // Validation undo history — capped at 20 snapshots
+  const [valHistory, setValHistory] = useState<Array<{ matched: MatchedRecord[]; rejected: Set<number> }>>([]);
 
   // Stage 3 → staged run + Staged Analysis decisions
   const [runId, setRunId] = useState<string | null>(null);
@@ -414,7 +416,29 @@ export default function IngestPipeline() {
 
   // ── Inline cell editing for Validation table ──────────────────────────────
 
+  // Save a Validation snapshot BEFORE mutating matched or rejectedInValidation
+  const snapValidation = useCallback(() => {
+    setValHistory(prev => [
+      ...prev.slice(-19),
+      {
+        matched: matched.map(m => ({ ...m, _conflictResolved: { ...m._conflictResolved } })),
+        rejected: new Set(rejectedInValidation),
+      },
+    ]);
+  }, [matched, rejectedInValidation]);
+
+  const handleUndo = useCallback(() => {
+    setValHistory(prev => {
+      if (!prev.length) return prev;
+      const snap = prev[prev.length - 1];
+      setMatched(snap.matched);
+      setRejectedInValidation(snap.rejected);
+      return prev.slice(0, -1);
+    });
+  }, []);
+
   const handleCellEdit = useCallback((rowIndex: number, field: string, value: string | string[]) => {
+    snapValidation();
     const coerced: unknown = Array.isArray(value)
       ? value
       : (field === 'zone_code' || field === 'bathrooms')
@@ -432,7 +456,7 @@ export default function IngestPipeline() {
         : m,
     ));
     setEditingCell(null);
-  }, [zones]);
+  }, [zones, snapValidation]);
 
   // Auto-open override modal when check detects unit-level conflicts
   useEffect(() => {
@@ -749,6 +773,7 @@ export default function IngestPipeline() {
       });
       setRecordActions(actions);
 
+      setValHistory([]); // clear undo history on leaving Validation
       setStage(3); // Stage Analysis
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Stage failed');
@@ -1549,14 +1574,24 @@ export default function IngestPipeline() {
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  disabled={valHistory.length === 0}
+                  onClick={handleUndo}
+                  title={valHistory.length > 0 ? `Undo last action (${valHistory.length} step${valHistory.length !== 1 ? 's' : ''} available)` : 'Nothing to undo'}
+                  className="text-xs px-3 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+                  Undo{valHistory.length > 0 ? ` (${valHistory.length})` : ''}
+                </button>
+                <button
                   onClick={() => {
+                    snapValidation();
                     setRejectedInValidation(new Set());
                     generateValidationExport(matched);
                   }}
                   className="text-xs px-3 py-1.5 border border-green-300 text-green-700 rounded-lg hover:bg-green-50 font-semibold"
                 >Accept All</button>
                 <button
-                  onClick={() => setRejectedInValidation(new Set(matched.map(r => r.rowIndex)))}
+                  onClick={() => { snapValidation(); setRejectedInValidation(new Set(matched.map(r => r.rowIndex))); }}
                   className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-semibold"
                 >Reject All</button>
                 <button
@@ -1617,6 +1652,7 @@ export default function IngestPipeline() {
                           const zoneExtra = (f.field === 'zone_code')
                             ? (() => { const z = zones.find(z => z.zone_code === Number(val)); return z ? { zone: z.district_name } : {}; })()
                             : {};
+                          snapValidation();
                           setMatched(prev => prev.map(m => rejectedInValidation.has(m.rowIndex) ? m : {
                             ...m, _conflictResolved: { ...m._conflictResolved, [f.field]: coerced, ...zoneExtra },
                           }));
@@ -1643,7 +1679,7 @@ export default function IngestPipeline() {
                             el.indeterminate = rejectedInValidation.size > 0 && rejectedInValidation.size < matched.length;
                           }
                         }}
-                        onChange={e => setRejectedInValidation(e.target.checked ? new Set() : new Set(matched.map(r => r.rowIndex)))}
+                        onChange={e => { snapValidation(); setRejectedInValidation(e.target.checked ? new Set() : new Set(matched.map(r => r.rowIndex))); }}
                         className="cursor-pointer"
                       />
                     </th>
@@ -1684,11 +1720,11 @@ export default function IngestPipeline() {
                           <input
                             type="checkbox"
                             checked={!rejected}
-                            onChange={e => setRejectedInValidation(prev => {
+                            onChange={e => { snapValidation(); setRejectedInValidation(prev => {
                               const next = new Set(prev);
                               if (e.target.checked) next.delete(r.rowIndex); else next.add(r.rowIndex);
                               return next;
-                            })}
+                            }); }}
                             className="cursor-pointer"
                           />
                         </td>
@@ -1799,12 +1835,12 @@ export default function IngestPipeline() {
                           <div className="flex items-center justify-center gap-1">
                             <button
                               title="Accept"
-                              onClick={() => setRejectedInValidation(prev => { const next = new Set(prev); next.delete(r.rowIndex); return next; })}
+                              onClick={() => { snapValidation(); setRejectedInValidation(prev => { const next = new Set(prev); next.delete(r.rowIndex); return next; }); }}
                               className={`w-7 h-7 rounded-full text-sm font-bold transition-colors ${!rejected ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-600'}`}
                             >✓</button>
                             <button
                               title="Reject"
-                              onClick={() => setRejectedInValidation(prev => { const next = new Set(prev); next.add(r.rowIndex); return next; })}
+                              onClick={() => { snapValidation(); setRejectedInValidation(prev => { const next = new Set(prev); next.add(r.rowIndex); return next; }); }}
                               className={`w-7 h-7 rounded-full text-sm font-bold transition-colors ${rejected ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-500'}`}
                             >✕</button>
                           </div>
