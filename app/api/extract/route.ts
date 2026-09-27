@@ -43,7 +43,7 @@ PRICE vs SIZE (SQM) DISAMBIGUATION — critical rule:
   Property & Unit → Classification → Size (sqm).
 
 FURNISHING rules — set "furnishing" ONLY when explicitly stated; never infer it:
-- Source text "Furnished" or "Fully Furnished" or "FF" → furnishing: "Furnished"
+- Source text "Furnished" or "Fully Furnished" or "FF" → furnishing: "Fully Furnished"
 - Source text "Semi Furnished", "Semi-Furnished", "SF" → furnishing: "Semi-Furnished"
 - Source text "Shell & Core": DO NOT set furnishing. Instead add to operator_remarks:
   "Shell & Core — structural state only; tenant responsible for all interior finishes
@@ -69,7 +69,7 @@ subtotal rows, not unit records.
 
 Normalisation rules:
 - status: map to one of Available | Leased | Reserved | Under_Maintenance
-- furnishing: Furnished | Semi-Furnished | Unfurnished — only set when explicitly stated (see FURNISHING rules above)
+- furnishing: Fully Furnished | Semi-Furnished | Unfurnished — only set when explicitly stated (see FURNISHING rules above)
 - listing_type: Rent | Sale
 - type: map "Flat" or "flat" → "Apartment"; "studio" or "Studio" → "Studio"; "Office" or "Offices" → "Office"; "Shop" → "Shop"
 - config: parse BHK pattern from remarks e.g. "2BHK + 2 BATHROOM" → config: "2 BHK"; "3 BHK + 2 BATHROOM" → config: "3 BHK"
