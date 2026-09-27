@@ -69,7 +69,7 @@ function deltaBadge(status: DeltaStatus | undefined) {
 // Pipeline stages: 0=Upload, 1=Match&Review, 2=Validation, 3=Stage Analysis, 4=REIMS Queue, 5=Done
 const STAGE_LABELS = ['Upload', 'Match & Review', 'Validation', 'Stage', 'REIMS Queue', 'Done'];
 
-const FURNISHING_OPTIONS = ['Furnished', 'Semi-Furnished', 'Unfurnished'];
+const FURNISHING_OPTIONS = ['Fully Furnished', 'Semi-Furnished', 'Unfurnished'];
 const TYPE_OPTIONS       = ['Apartment', 'Villa', 'Office', 'Studio'];
 const KITCHEN_OPTIONS    = ['Open', 'Closed', 'Yes', 'Pantry'];
 const VIEW_OPTIONS = [
@@ -1813,7 +1813,7 @@ export default function IngestPipeline() {
                         <td className={td('furnishing')} onClick={() => startEdit('furnishing')}>
                           {isEdit('furnishing')
                             ? <select autoFocus className="w-full bg-white border border-blue-400 rounded px-1 py-0.5 text-xs" defaultValue={getVal('furnishing')} onChange={e => handleCellEdit(r.rowIndex, 'furnishing', e.target.value)} onBlur={e => handleCellEdit(r.rowIndex, 'furnishing', e.target.value)}><option value="">—</option>{FURNISHING_OPTIONS.map(o => <option key={o}>{o}</option>)}</select>
-                            : <span className={!getVal('furnishing') ? 'text-amber-500 font-bold' : getVal('furnishing') === 'Furnished' ? 'text-green-700 font-medium' : getVal('furnishing') === 'Semi-furnished' ? 'text-amber-600 font-medium' : 'text-gray-600'}>{getVal('furnishing') || '?'}</span>}
+                            : <span className={!getVal('furnishing') ? 'text-amber-500 font-bold' : getVal('furnishing') === 'Fully Furnished' ? 'text-green-700 font-medium' : getVal('furnishing') === 'Semi-Furnished' ? 'text-amber-600 font-medium' : 'text-gray-600'}>{getVal('furnishing') || '?'}</span>}
                         </td>
 
                         {/* Status */}
@@ -2235,7 +2235,7 @@ export default function IngestPipeline() {
                         {[
                           finalData.type       ? { label: String(finalData.type),       color: 'text-violet-600' }  : null,
                           finalData.config     ? { label: String(finalData.config),     color: 'text-indigo-600' }  : null,
-                          finalData.furnishing ? { label: String(finalData.furnishing), color: finalData.furnishing === 'Furnished' ? 'text-green-600' : finalData.furnishing === 'Semi-furnished' ? 'text-amber-600' : 'text-gray-500' } : null,
+                          finalData.furnishing ? { label: String(finalData.furnishing), color: finalData.furnishing === 'Fully Furnished' ? 'text-green-600' : finalData.furnishing === 'Semi-Furnished' ? 'text-amber-600' : 'text-gray-500' } : null,
                           finalData.status     ? { label: String(finalData.status),     color: finalData.status === 'Available' ? 'text-green-600 font-semibold' : 'text-gray-500' } : null,
                           finalData.rent       ? { label: `QAR ${Number(finalData.rent).toLocaleString()}`, color: 'text-emerald-700 font-semibold' } : null,
                         ].filter(Boolean).map((item, idx, arr) => (

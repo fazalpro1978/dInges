@@ -68,7 +68,19 @@ export async function POST(req: NextRequest) {
       }
 
       const deltaStatus = (staged as Record<string, unknown>).delta_status as string | null ?? null;
-      const payload = a.resolvedData ?? (staged.resolved_data as Record<string, unknown>);
+      const rawPayload = a.resolvedData ?? (staged.resolved_data as Record<string, unknown>);
+
+      // Normalise furnishing aliases before schema validation so "Furnished" → "Fully Furnished"
+      // regardless of what the AI returned or what the user typed in the Validation editor.
+      const payload: Record<string, unknown> = { ...rawPayload };
+      if (typeof payload.furnishing === 'string') {
+        const f = payload.furnishing.trim().toUpperCase();
+        if (f === 'FURNISHED' || f === 'FF' || f === 'FULL FURNISHED' || f === 'FULLY-FURNISHED') {
+          payload.furnishing = 'Fully Furnished';
+        } else if (f === 'SEMI FURNISHED' || f === 'SEMI-FURNISHED' || f === 'SF') {
+          payload.furnishing = 'Semi-Furnished';
+        }
+      }
 
       // ST_UNCHANGED: no field changes detected — mark approved for audit, skip vetted write
       if (deltaStatus === 'ST_UNCHANGED') {
