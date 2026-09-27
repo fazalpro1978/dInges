@@ -1248,6 +1248,18 @@ export default function IngestPipeline() {
                       Multi-Zone Group Assignment &nbsp;·&nbsp; {matchPropNames.length} property groups detected
                     </span>
                     <div className="flex items-center gap-2">
+                      {(() => {
+                        const allIdxs = matchPropNames.flatMap(p => matchPropGroups[p]);
+                        const allExcluded = allIdxs.length > 0 && allIdxs.every(i => excludedIdx.has(i));
+                        return (
+                          <button
+                            onClick={() => setExcludedIdx(allExcluded ? new Set() : new Set(allIdxs))}
+                            className="text-xs px-3 py-1 rounded bg-purple-200 hover:bg-purple-300 text-purple-800 font-semibold"
+                          >
+                            {allExcluded ? 'Select All' : 'Deselect All'}
+                          </button>
+                        );
+                      })()}
                       <button
                         disabled={!allZonesDone}
                         onClick={() => {
@@ -1305,6 +1317,25 @@ export default function IngestPipeline() {
                             >
                               {isExpanded ? '▼' : '▶'}
                             </button>
+                            <input
+                              type="checkbox"
+                              title="Select / deselect all units in this group"
+                              checked={matchPropGroups[prop].every(i => !excludedIdx.has(i))}
+                              ref={el => {
+                                if (el) {
+                                  const allSel = matchPropGroups[prop].every(i => !excludedIdx.has(i));
+                                  const someSel = matchPropGroups[prop].some(i => !excludedIdx.has(i));
+                                  el.indeterminate = !allSel && someSel;
+                                }
+                              }}
+                              onChange={e => setExcludedIdx(prev => {
+                                const n = new Set(prev);
+                                if (e.target.checked) matchPropGroups[prop].forEach(i => n.delete(i));
+                                else matchPropGroups[prop].forEach(i => n.add(i));
+                                return n;
+                              })}
+                              className="shrink-0 cursor-pointer"
+                            />
                             <div className="w-44 shrink-0">
                               <p className="text-xs font-semibold text-gray-800 truncate">{prop}</p>
                               <p className="text-[10px] text-gray-400">{matchPropGroups[prop].length} unit{matchPropGroups[prop].length !== 1 ? 's' : ''}</p>
