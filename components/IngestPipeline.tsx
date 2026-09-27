@@ -1438,6 +1438,22 @@ export default function IngestPipeline() {
 
             {/* Unit cards — single-zone batches only; multi-zone uses accordion above */}
             {!isMultiZone && (
+            <div>
+              {/* Select All / Deselect All bar */}
+              <div className="flex items-center justify-between px-3 py-1.5 mb-1 rounded-lg bg-gray-50 border border-gray-200">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  {matched.length - excludedIdx.size} / {matched.length} units selected
+                </span>
+                <button
+                  onClick={() => {
+                    const allExcluded = matched.length > 0 && matched.every((_, i) => excludedIdx.has(i));
+                    setExcludedIdx(allExcluded ? new Set() : new Set(matched.map((_, i) => i)));
+                  }}
+                  className="text-xs px-3 py-0.5 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold"
+                >
+                  {matched.length > 0 && matched.every((_, i) => excludedIdx.has(i)) ? 'Select All' : 'Deselect All'}
+                </button>
+              </div>
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => {
                 const computedSC = (r._conflictResolved.smart_code as string | null) ?? null;
@@ -1500,6 +1516,7 @@ export default function IngestPipeline() {
                 </div>
                 );
               })}
+            </div>
             </div>
             )}
 
