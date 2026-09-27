@@ -33,6 +33,12 @@ export type ExtendedFieldDef = {
 };
 export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
   {
+    key: 'size_sqm',
+    label: 'Size (sqm)',
+    kind: 'numeric',
+    description: 'Unit area in square metres. For commercial units (Office, Shop) the price/rent column often contains the SQM area rather than rent — this field captures that value. Exported to REIMS: Units Inventory → Property & Unit → Classification → Size (sqm). Non-blocking — absence does not prevent import.',
+  },
+  {
     key: 'amenities',
     label: 'Amenities',
     kind: 'multiselect',
@@ -237,7 +243,7 @@ export type CastResult = { value: unknown; error?: string };
 function normalizeFieldAlias(fieldKey: string, str: string): string {
   const s = str.toUpperCase().replace(/\s+/g, ' ').trim();
   if (fieldKey === 'furnishing') {
-    if (['FF', 'FULLY FURNISHED', 'FULLY-FURNISHED', 'LUXURY FULLY FURNISHED', 'FULL FURNISHED'].includes(s)) return 'Furnished';
+    if (['FF', 'FULLY FURNISHED', 'FULLY-FURNISHED', 'LUXURY FULLY FURNISHED', 'FULL FURNISHED', 'FURNISHED'].includes(s)) return 'Furnished';
     if (['SF', 'SEMI FURNISHED', 'SEMI-FURNISHED', 'SEMIFURNISHED'].includes(s) || s.startsWith('SEMI')) return 'Semi-Furnished';
     if (['UF', 'UNFURNISHED', 'UN-FURNISHED'].includes(s)) return 'Unfurnished';
   }

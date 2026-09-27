@@ -16,7 +16,7 @@ Extract ALL unit/property records from the provided file content.
 
 Return ONLY a JSON array of objects. Each object must use these exact field names:
 unit_code, property, unit_no, zone, zone_code, type, config, furnishing, kitchen,
-status, rent, service_charges, deposit_amount, agency_fee, listing_type,
+status, rent, size_sqm, service_charges, deposit_amount, agency_fee, listing_type,
 bedrooms, bathrooms, parking, floor, area_sqft, realtor_name, realtor_moci,
 moci_contract_status, moci_contract_number, legal_duration,
 contract_start_date, contract_end_date, location_map_url, media_url, notes,
@@ -25,26 +25,60 @@ kahramaa_applicable, kahramaa_amount,
 water_electricity, water_electricity_limit_applicable, water_electricity_limit_amount,
 operator_remarks
 
+REMARKS SPANNING MULTIPLE COLUMNS: When a spreadsheet spreads remarks/notes across
+several adjacent columns (e.g. columns G, H, I all contain partial remarks for the
+same unit), concatenate all non-empty values from those columns into a single string
+before applying any extraction rules below.
+
+PRICE vs SIZE (SQM) DISAMBIGUATION — critical rule:
+- For RESIDENTIAL units (Flat, Studio, Apartment, Villa): the price/rent column
+  contains the monthly QAR rent → populate "rent". Do NOT populate "size_sqm" from
+  this column unless a separate SQM column exists.
+- For COMMERCIAL units (Office, Shop, Showroom, Warehouse) or when the word "SQM"
+  or "sqm" appears anywhere in the same row: the price column contains the unit area
+  in square metres, NOT rent → populate "size_sqm" with that number. Leave "rent"
+  null/omitted. Never treat an SQM area value as a rent amount.
+- size_sqm: numeric square metre area of the unit. Populate only when the source
+  value is confirmed as area (SQM), not rent. Maps to REIMS → Units Inventory →
+  Property & Unit → Classification → Size (sqm).
+
+FURNISHING rules — set "furnishing" ONLY when explicitly stated; never infer it:
+- Source text "Furnished" or "Fully Furnished" or "FF" → furnishing: "Furnished"
+- Source text "Semi Furnished", "Semi-Furnished", "SF" → furnishing: "Semi-Furnished"
+- Source text "Shell & Core": DO NOT set furnishing. Instead add to operator_remarks:
+  "Shell & Core — structural state only; tenant responsible for all interior finishes
+  and fittings." Set status: "Available".
+- Source text "Ready for move in": this indicates status only → status: "Available".
+  Do NOT set furnishing based on this phrase.
+- No furnishing mention at all → omit furnishing entirely (do not default to Unfurnished).
+
+SKIP ROWS: Ignore any row where the property/building name cell contains
+"Total vacant units", "Total", "Sub-total", or similar summary text — these are
+subtotal rows, not unit records.
+
 - media_url: URL pointing to a photo folder, media storage, or document library for this unit (e.g. Google Drive, OneDrive, Dropbox link). Often found in a column labelled PHOTOS, Media, Images, or similar — the cell may display a label like "PHOTOS" with a hyperlink behind it; the hyperlink URL is provided in square brackets after the cell value, e.g. "PHOTOS [https://drive.google.com/…]". Extract the URL. null if absent.
-- month_free_applicable: true if the rent cell OR the remarks/notes column contains any "month free" incentive — any phrasing like "1 Month Free", "2 Months free", "one month free", "+ 1 Free Month", etc. false otherwise.
-- month_free_days: integer number of free months (e.g. "7000 + 1 Month Free" → 1, "10,000 + 2 Months free" → 2, "one month free" → 1). Extract from rent cell first, then remarks as fallback. Omit if month_free_applicable is false.
-- kahramaa_applicable: false when remarks say "INCLUDING KAHRAMAA", "INCLUDING ALL BILLS", "ALL BILLS INCLUDED", or any phrasing that utilities are included in the rent (tenant does NOT pay a separate kahramaa deposit). true when remarks say "EXCLUDING KAHRAMAA" or "KAHRAMAA NOT INCLUDED" (tenant pays kahramaa deposit separately). Omit only if kahramaa is not mentioned anywhere for this unit.
+- month_free_applicable: true if the rent cell OR the remarks/notes column contains any "month free" incentive — any phrasing like "1 Month Free", "2 Months free", "one month free", "+ 1 Free Month", "1ST MONTH FREE", "FIRST MONTH FREE", etc. false otherwise.
+- month_free_days: integer number of free months (e.g. "7000 + 1 Month Free" → 1, "10,000 + 2 Months free" → 2, "one month free" → 1, "2 MONTHS FREE" → 2). Extract from rent cell first, then remarks as fallback. Omit if month_free_applicable is false.
+- kahramaa_applicable: false when remarks say "INCLUDING KAHRAMAA", "INCLUDING KAHRAMA", "INCLUDING ALL BILLS", "ALL BILLS INCLUDED", or any phrasing that utilities are included in the rent (tenant does NOT pay a separate kahramaa deposit). true when remarks say "EXCLUDING KAHRAMAA" or "KAHRAMAA NOT INCLUDED" (tenant pays kahramaa deposit separately). Omit only if kahramaa is not mentioned anywhere for this unit.
 - kahramaa_amount: numeric deposit amount for kahramaa extracted from remarks (e.g. "2000 FOR KAHRAMAA DEPOSIT" → 2000). Omit if not mentioned.
-- water_electricity: set to "Included" when remarks say "INCLUDING KAHRAMAA", "INCLUDING ALL BILLS", "ALL BILLS INCLUDED", or any phrasing that water & electricity is covered in the rent. Set to "Excluded" when remarks say "EXCLUDING KAHRAMAA" or utilities are explicitly stated as NOT included. Omit if not mentioned.
+- water_electricity: set to "Included" when remarks say "INCLUDING KAHRAMAA", "INCLUDING KAHRAMA", "INCLUDING ALL BILLS", "ALL BILLS INCLUDED", or any phrasing that water & electricity is covered in the rent. Set to "Excluded" when remarks say "EXCLUDING KAHRAMAA" or utilities are explicitly stated as NOT included. Omit if not mentioned.
 - water_electricity_limit_applicable: true if remarks mention a usage limit or cap on water/electricity (e.g. "KAHRAMAA UP TO 500 QAR"). Omit if not mentioned.
 - water_electricity_limit_amount: numeric QAR cap for water/electricity (e.g. "KAHRAMAA UP TO 500 QAR" → 500). Omit if not mentioned.
 - deposit_amount: if remarks specify the security deposit as a multiple of rent (e.g. "SECURITY DEPOSIT 1 MONTH RENTAL AMOUNT", "SECURITY DEPOSIT 2 MONTHS RENT"), set deposit_amount = N × rent (where N is the number of months stated and rent is the extracted rent value for this unit). If remarks give a fixed QAR deposit amount (e.g. "SECURITY DEPOSIT 5000 QAR"), use that number directly. If the column already has an explicit deposit value, keep it — only derive from remarks when the column is blank or absent.
-- operator_remarks: auto-extract payment conditions, document requirements, and operational notes from the remarks/notes column. Examples: "PDC FOR RENT PAYMENT", "CR, EST CARD, QID REQUIRED", "SECURITY DEPOSIT 1 MONTH RENTAL AMOUNT", "LABOUR CAMP ACCOMMODATION NEAR UMM-SALAL". Do NOT include furnishing or amenity information here (those go in their own fields). Concatenate multiple conditions with " · ". Omit if remarks contain no operational notes.
+- operator_remarks: auto-extract payment conditions, document requirements, and operational notes from the remarks/notes column. Examples: "PDC FOR RENT PAYMENT", "CR, EST CARD, QID REQUIRED", "SECURITY DEPOSIT 1 MONTH RENTAL AMOUNT", "LABOUR CAMP ACCOMMODATION NEAR UMM-SALAL". Also include "Shell & Core" condition notes here when applicable (see FURNISHING rules above). Do NOT include furnishing or amenity information here (those go in their own fields). Concatenate multiple conditions with " · ". Omit if remarks contain no operational notes.
 
 Normalisation rules:
 - status: map to one of Available | Leased | Reserved | Under_Maintenance
-- furnishing: Furnished | Semi-Furnished | Unfurnished
+- furnishing: Furnished | Semi-Furnished | Unfurnished — only set when explicitly stated (see FURNISHING rules above)
 - listing_type: Rent | Sale
+- type: map "Flat" or "flat" → "Apartment"; "studio" or "Studio" → "Studio"; "Office" or "Offices" → "Office"; "Shop" → "Shop"
+- config: parse BHK pattern from remarks e.g. "2BHK + 2 BATHROOM" → config: "2 BHK"; "3 BHK + 2 BATHROOM" → config: "3 BHK"
+- bathrooms: parse from remarks e.g. "2BHK + 2 BATHROOM" → bathrooms: 2; "2BHK + 1 BATHROOM" → bathrooms: 1
 - dates: YYYY-MM-DD format
 - rent/charges: numbers only, no currency symbols — strip any "+ N Month(s) Free" suffix before extracting the rent number
 - If a field is not present, omit it (do not include null values)
 - For side-by-side multi-unit layouts, extract each unit as a separate record
-- Ignore headers, logos, footers, marketing text — only extract actual unit data
+- Ignore headers, logos, footers, marketing text, and subtotal rows — only extract actual unit data
 
 Return raw JSON array only. No markdown, no explanation.`;
 
