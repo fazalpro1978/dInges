@@ -107,16 +107,6 @@ export async function POST(req: NextRequest) {
         if (t === 'SHOP') payload.type = 'Shop';
       }
 
-      // ST_UNCHANGED: no field changes detected — mark approved for audit, skip vetted write
-      if (deltaStatus === 'ST_UNCHANGED') {
-        await admin
-          .from('staged_records')
-          .update({ status: 'approved', reviewer_notes: 'ST_UNCHANGED — no DB write', reviewed_at: now, reviewed_by: reviewer })
-          .eq('id', a.stagedId);
-        approvedCount++;
-        continue;
-      }
-
       const { valid, errors } = validateCanonical(payload);
 
       if (!valid) {
