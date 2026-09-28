@@ -93,7 +93,7 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
     key: 'water_electricity',
     label: 'Water & Electricity',
     kind: 'string',
-    description: 'Whether water & electricity is included in the rent. "Included" when remarks say "INCLUDING KAHRAMAA" / "INCLUDING ALL BILLS". "Excluded" when remarks say "EXCLUDING KAHRAMAA". Exported to REIMS: Service & Utility Charges → Water & Electricity dropdown. Non-blocking.',
+    description: 'Whether water & electricity is included in the rent. "Included" when ANY column (remarks, dedicated utilities/kahramaa column, or terms column) says "INCLUDING KAHRAMAA", "INCLUDING KAHRAMA", "Including Kahrama", "ALL BILLS INCLUDED". "Excluded" when "EXCLUDING KAHRAMAA" or similar appears. Exported to REIMS: Service & Utility Charges → Water & Electricity dropdown. Non-blocking.',
   },
   {
     key: 'water_electricity_limit_applicable',
