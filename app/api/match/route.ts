@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     const [unitsRes, aliasRes] = await Promise.all([
-      reims.from('units').select('id, unit_code, property, unit_no, status, rent, furnishing, type, config, zone, smart_code, master_code'),
+      reims.from('units').select('id, unit_code, property, unit_no, status, rent, furnishing, type, config, zone, smart_code, master_code, water_electricity, month_free_applicable, month_free_days, floor, size_sqm, kahramaa_applicable'),
       reims.from('building_aliases').select('canonical_name, alias').limit(500),
     ]);
 
@@ -56,6 +56,9 @@ export async function POST(req: NextRequest) {
       id: string; unit_code: string; property: string; unit_no: string;
       status: string; rent: number; furnishing: string; type: string; config: string; zone: string;
       smart_code: string | null; master_code: string | null;
+      water_electricity: string | null; month_free_applicable: boolean | null;
+      month_free_days: number | null; floor: number | null; size_sqm: number | null;
+      kahramaa_applicable: boolean | null;
     }[];
 
     const aliasMap = new Map<string, string>(
@@ -137,11 +140,15 @@ export async function POST(req: NextRequest) {
       let delta_status: 'ST_NEW' | 'ST_UPDATED' | 'ST_UNCHANGED' = 'ST_NEW';
       if (matched) {
         matchedUnitIds.add(matched.id);
-        const fieldsToCheck = ['status', 'rent', 'furnishing'] as const;
+        const fieldsToCheck = [
+          'status', 'rent', 'furnishing',
+          'water_electricity', 'month_free_applicable', 'month_free_days',
+          'floor', 'size_sqm', 'kahramaa_applicable',
+        ] as const;
         const hasChange = fieldsToCheck.some(field => {
           const inVal = rec[field];
           if (inVal == null || inVal === '') return false;
-          const exVal = matched[field as keyof typeof matched];
+          const exVal = (matched as Record<string, unknown>)[field];
           return String(inVal).toLowerCase().trim() !== String(exVal ?? '').toLowerCase().trim();
         });
         delta_status = hasChange ? 'ST_UPDATED' : 'ST_UNCHANGED';
