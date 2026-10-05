@@ -9,10 +9,11 @@ const admin = createClient(
 
 export async function GET(req: NextRequest) {
   const p        = req.nextUrl.searchParams;
-  const phase    = p.get('phase') ?? '';
-  const from     = p.get('from') ?? '';
-  const to       = p.get('to') ?? '';
-  const search   = p.get('search') ?? '';
+  const phase      = p.get('phase')       ?? '';
+  const from       = p.get('from')        ?? '';
+  const to         = p.get('to')          ?? '';
+  const search     = p.get('search')      ?? '';
+  const uploadedBy = p.get('uploaded_by') ?? '';
   const limit    = Math.min(parseInt(p.get('limit') ?? '50'), 200);
   const offset   = parseInt(p.get('offset') ?? '0');
 
@@ -22,10 +23,11 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
-  if (phase)  q = q.eq('phase', phase);
-  if (from)   q = q.gte('created_at', from);
-  if (to)     q = q.lte('created_at', to + 'T23:59:59Z');
-  if (search) q = q.ilike('file_name', `%${search}%`);
+  if (phase)      q = q.eq('phase', phase);
+  if (from)       q = q.gte('created_at', from);
+  if (to)         q = q.lte('created_at', to + 'T23:59:59Z');
+  if (search)     q = q.ilike('file_name', `%${search}%`);
+  if (uploadedBy) q = q.ilike('uploaded_by', `%${uploadedBy}%`);
 
   const { data, error, count } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

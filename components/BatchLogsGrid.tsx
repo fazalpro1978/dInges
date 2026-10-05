@@ -506,9 +506,10 @@ export default function BatchLogsGrid() {
   const [error, setError]           = useState('');
   const [page, setPage]             = useState(1);
   const [search, setSearch]         = useState('');
-  const [filterPhase, setFilterPhase] = useState('');
-  const [filterFrom, setFilterFrom] = useState('');
-  const [filterTo, setFilterTo]     = useState('');
+  const [filterPhase, setFilterPhase]           = useState('');
+  const [filterFrom, setFilterFrom]             = useState('');
+  const [filterTo, setFilterTo]                 = useState('');
+  const [filterUploadedBy, setFilterUploadedBy] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copiedId, setCopiedId]     = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -537,17 +538,18 @@ export default function BatchLogsGrid() {
   const [codeInputSmart, setCodeInputSmart]   = useState('');
   const [assigningCodes, setAssigningCodes]   = useState(false);
 
-  const load = useCallback(async (p: number, s: string, phase: string, from: string, to: string) => {
+  const load = useCallback(async (p: number, s: string, phase: string, from: string, to: string, uploadedBy: string) => {
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({
         limit:  String(PAGE_SIZE),
         offset: String((p - 1) * PAGE_SIZE),
-        ...(s     && { search: s }),
-        ...(phase && { phase }),
-        ...(from  && { from }),
-        ...(to    && { to }),
+        ...(s          && { search: s }),
+        ...(phase      && { phase }),
+        ...(from       && { from }),
+        ...(to         && { to }),
+        ...(uploadedBy && { uploaded_by: uploadedBy }),
       });
       const res  = await fetch(`/api/batch-logs?${params}`, { cache: 'no-store' });
       const data = await res.json() as { logs: BatchLog[]; total: number; error?: string };
@@ -607,7 +609,7 @@ export default function BatchLogsGrid() {
             ? `${n} record${n !== 1 ? 's' : ''} re-queued successfully. REIMS will pick them up shortly.`
             : (data.message ?? 'Records already in queue.')
         );
-        await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
+        await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo, filterUploadedBy)]);
       }
     } catch (e) {
       setReinstateToast(e instanceof Error ? e.message : 'Network error — please try again.');
@@ -616,18 +618,18 @@ export default function BatchLogsGrid() {
       setReinstatingId(null);
       setTimeout(() => { setReinstateToast(null); setReinstateToastIsError(false); }, 10000);
     }
-  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo, filterUploadedBy]);
 
   const markDone = useCallback(async (runId: string) => {
     setMarkingDoneId(runId);
     try {
       const res = await fetch(`/api/runs/${runId}/force-complete`, { method: 'POST' });
       if (res.ok) {
-        await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
+        await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo, filterUploadedBy)]);
       }
     } catch {}
     setMarkingDoneId(null);
-  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo, filterUploadedBy]);
 
   const killRun = useCallback(async (runId: string | null, batchId: string) => {
     setKillingId(batchId);
@@ -657,7 +659,7 @@ export default function BatchLogsGrid() {
           failed:    prev.failed.filter(i     => i.batch_id !== batchId),
         } : prev);
         setKillToast('Run cancelled and removed from the pipeline health panel.');
-        await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
+        await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo, filterUploadedBy)]);
       }
     } catch (e) {
       setKillToast(e instanceof Error ? e.message : 'Network error — please try again.');
@@ -666,7 +668,7 @@ export default function BatchLogsGrid() {
       setKillingId(null);
       setTimeout(() => { setKillToast(null); setKillToastIsError(false); }, 10000);
     }
-  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo, filterUploadedBy]);
 
   const bulkKillRuns = useCallback(async (items: Array<{ runId: string | null; batchId: string }>) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -690,8 +692,8 @@ export default function BatchLogsGrid() {
     setKillToast(failed ? `${items.length - failed} killed, ${failed} failed.` : `${items.length} run${items.length !== 1 ? 's' : ''} killed.`);
     setKillToastIsError(failed > 0);
     setTimeout(() => { setKillToast(null); setKillToastIsError(false); }, 10000);
-    await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
-  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+    await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo, filterUploadedBy)]);
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo, filterUploadedBy]);
 
   const bulkReinstateRuns = useCallback(async (items: Array<{ runId: string; batchId: string }>) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -709,8 +711,8 @@ export default function BatchLogsGrid() {
     setReinstateToast(failed ? `${items.length - failed} re-queued, ${failed} failed.` : `${items.length} run${items.length !== 1 ? 's' : ''} re-queued. REIMS will pick them up shortly.`);
     setReinstateToastIsError(failed > 0);
     setTimeout(() => { setReinstateToast(null); setReinstateToastIsError(false); }, 10000);
-    await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo)]);
-  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo]);
+    await Promise.all([loadPipelineStatus(), load(page, search, filterPhase, filterFrom, filterTo, filterUploadedBy)]);
+  }, [load, loadPipelineStatus, page, search, filterPhase, filterFrom, filterTo, filterUploadedBy]);
 
   useEffect(() => {
     loadPipelineStatus();
@@ -718,9 +720,9 @@ export default function BatchLogsGrid() {
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => load(page, search, filterPhase, filterFrom, filterTo), 250);
+    debounceRef.current = setTimeout(() => load(page, search, filterPhase, filterFrom, filterTo, filterUploadedBy), 250);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [load, page, search, filterPhase, filterFrom, filterTo]);
+  }, [load, page, search, filterPhase, filterFrom, filterTo, filterUploadedBy]);
 
   function resetPage() { setPage(1); }
 
@@ -735,10 +737,11 @@ export default function BatchLogsGrid() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const params = new URLSearchParams({ format: fmt });
-      if (search)      params.set('search', search);
-      if (filterPhase) params.set('phase', filterPhase);
-      if (filterFrom)  params.set('from', filterFrom);
-      if (filterTo)    params.set('to', filterTo);
+      if (search)           params.set('search', search);
+      if (filterPhase)      params.set('phase', filterPhase);
+      if (filterFrom)       params.set('from', filterFrom);
+      if (filterTo)         params.set('to', filterTo);
+      if (filterUploadedBy) params.set('uploaded_by', filterUploadedBy);
       const res = await fetch(`/api/batch-logs/export?${params}`, {
         headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
       });
@@ -752,7 +755,7 @@ export default function BatchLogsGrid() {
       URL.revokeObjectURL(url);
     } catch {}
     setExporting(null);
-  }, [search, filterPhase, filterFrom, filterTo]);
+  }, [search, filterPhase, filterFrom, filterTo, filterUploadedBy]);
 
   const loadUploaders = useCallback(async () => {
     if (uploadersFetchedRef.current) return;
@@ -909,7 +912,13 @@ export default function BatchLogsGrid() {
             value={search}
             onChange={(e) => { setSearch(e.target.value); resetPage(); }}
             placeholder="Search file name…"
-            className="flex-1 min-w-[180px] border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+            className="flex-1 min-w-[160px] border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+          />
+          <input
+            value={filterUploadedBy}
+            onChange={(e) => { setFilterUploadedBy(e.target.value); resetPage(); }}
+            placeholder="Uploaded by…"
+            className="w-36 border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500"
           />
           <select
             value={filterPhase}
@@ -934,7 +943,7 @@ export default function BatchLogsGrid() {
               className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500" />
           </div>
           <button
-            onClick={() => { setSearch(''); setFilterPhase(''); setFilterFrom(''); setFilterTo(''); resetPage(); }}
+            onClick={() => { setSearch(''); setFilterPhase(''); setFilterFrom(''); setFilterTo(''); setFilterUploadedBy(''); resetPage(); }}
             className="text-xs text-gray-400 hover:text-gray-700 underline"
           >Clear</button>
           <span className="ml-auto text-[11px] text-gray-400">{total} batch{total !== 1 ? 'es' : ''}</span>

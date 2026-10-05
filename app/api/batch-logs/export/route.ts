@@ -24,11 +24,12 @@ export async function GET(req: NextRequest) {
   if (!auth.ok) return auth.response;
 
   const { searchParams } = new URL(req.url);
-  const format = searchParams.get('format') ?? 'csv';
-  const search = searchParams.get('search') ?? '';
-  const phase  = searchParams.get('phase')  ?? '';
-  const from   = searchParams.get('from')   ?? '';
-  const to     = searchParams.get('to')     ?? '';
+  const format     = searchParams.get('format')      ?? 'csv';
+  const search     = searchParams.get('search')      ?? '';
+  const phase      = searchParams.get('phase')       ?? '';
+  const from       = searchParams.get('from')        ?? '';
+  const to         = searchParams.get('to')          ?? '';
+  const uploadedBy = searchParams.get('uploaded_by') ?? '';
 
   let q = admin
     .from('batch_logs')
@@ -36,10 +37,11 @@ export async function GET(req: NextRequest) {
     .order('uploaded_at', { ascending: false })
     .limit(5000);
 
-  if (search) q = q.ilike('file_name', `%${search}%`);
-  if (phase)  q = q.eq('phase', phase);
-  if (from)   q = q.gte('uploaded_at', from);
-  if (to)     q = q.lte('uploaded_at', `${to}T23:59:59`);
+  if (search)     q = q.ilike('file_name', `%${search}%`);
+  if (phase)      q = q.eq('phase', phase);
+  if (from)       q = q.gte('uploaded_at', from);
+  if (to)         q = q.lte('uploaded_at', `${to}T23:59:59`);
+  if (uploadedBy) q = q.ilike('uploaded_by', `%${uploadedBy}%`);
 
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
