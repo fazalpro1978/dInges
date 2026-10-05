@@ -322,12 +322,12 @@ export default function ExceptionsPage() {
                     const style = exceptionStyle(ex.exception_type);
                     const isActing = actionLoading === ex.id;
                     const isFixing = fixingId === ex.id;
+                    const isSchemaError = ex.reviewer_notes?.startsWith('[SCHEMA ERROR]');
+                    const errorFields = parseSchemaErrorFields(ex.reviewer_notes);
                     // Schema errors land as status='rejected' by the automated validator but
                     // are still fixable — only hide actions for non-schema manual rejections/approvals.
                     const alreadyDone = ex.status === 'approved' ||
                       (ex.status === 'rejected' && !isSchemaError);
-                    const isSchemaError = ex.reviewer_notes?.startsWith('[SCHEMA ERROR]');
-                    const errorFields = parseSchemaErrorFields(ex.reviewer_notes);
 
                     return (
                       <React.Fragment key={ex.id}>
