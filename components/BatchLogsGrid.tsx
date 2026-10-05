@@ -858,6 +858,18 @@ export default function BatchLogsGrid() {
             className="text-xs text-gray-400 hover:text-gray-700 underline"
           >Clear</button>
           <span className="ml-auto text-[11px] text-gray-400">{total} batch{total !== 1 ? 'es' : ''}</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {(['csv', 'xlsx'] as const).map(fmt => (
+              <a
+                key={fmt}
+                href={`/api/batch-logs/export?format=${fmt}${search ? `&search=${encodeURIComponent(search)}` : ''}${filterPhase ? `&phase=${filterPhase}` : ''}${filterFrom ? `&from=${filterFrom}` : ''}${filterTo ? `&to=${filterTo}` : ''}`}
+                download
+                className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-colors uppercase"
+              >
+                ⬇ {fmt}
+              </a>
+            ))}
+          </div>
         </div>
 
         {/* Error */}
@@ -883,15 +895,15 @@ export default function BatchLogsGrid() {
             <table className="w-full text-xs table-fixed">
               <colgroup>
                 <col style={{ width: '8%'  }} />
-                <col style={{ width: '14%' }} />
-                <col style={{ width: '9%'  }} />
-                <col style={{ width: '9%'  }} />
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '8%'  }} />
+                <col style={{ width: '8%'  }} />
                 <col style={{ width: '6%'  }} />
                 <col style={{ width: '6%'  }} />
                 <col style={{ width: '6%'  }} />
                 <col style={{ width: '5%'  }} />
-                <col style={{ width: '11%' }} />
-                <col style={{ width: '9%'  }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '8%'  }} />
                 <col style={{ width: '7%'  }} />
                 <col style={{ width: '10%' }} />
               </colgroup>
@@ -927,7 +939,7 @@ export default function BatchLogsGrid() {
                         </td>
                         {/* File Name */}
                         <td className="px-3 py-2.5 overflow-hidden">
-                          <span className="text-gray-900 font-medium truncate block" title={log.file_name}>
+                          <span className="text-gray-900 font-medium break-all leading-tight text-[11px]" title={log.file_name}>
                             {log.file_name}
                           </span>
                           {log.run_id && (

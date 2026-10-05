@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     .from('profiles')
     .select('id, full_name, agent_code')
     .eq('is_active', true)
-    .in('role', ['superuser', 'administrator', 'staff', 'agent'])
+    .in('role', ['superuser', 'administrator'])
     .order('full_name');
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
