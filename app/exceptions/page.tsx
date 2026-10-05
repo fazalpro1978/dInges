@@ -18,7 +18,21 @@ interface ExceptionRecord {
   unit_no: string | null;
   type: string | null;
   exception_type: string;
+  batch_id:    string | null;
+  file_name:   string | null;
+  uploaded_at: string | null;
   run: { source_file: string; uploaded_by: string; created_at: string } | null;
+}
+
+function fmtUploadedAt(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+function shortBatchId(id: string | null): string {
+  return id ? id.slice(0, 8).toUpperCase() : '—';
 }
 
 const EXCEPTION_COLOURS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -90,7 +104,7 @@ export default function ExceptionsPage() {
         }
       />
 
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-[1600px] mx-auto px-6 py-8 space-y-6">
 
         {/* Summary strip */}
         <div className="grid grid-cols-2 gap-4">
@@ -166,15 +180,17 @@ export default function ExceptionsPage() {
 
           {!loading && exceptions.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs min-w-[900px]">
+              <table className="w-full text-xs min-w-[1280px]">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100 text-gray-500 font-semibold">
+                  <tr className="bg-gray-50 border-b border-gray-100 text-gray-500 font-semibold uppercase tracking-wide text-[10px]">
                     <th className="px-4 py-2.5 text-left">Flag</th>
                     <th className="px-4 py-2.5 text-left">Row</th>
                     <th className="px-4 py-2.5 text-left">Property</th>
                     <th className="px-4 py-2.5 text-left">Unit No.</th>
                     <th className="px-4 py-2.5 text-left">Type</th>
-                    <th className="px-4 py-2.5 text-left">Source File</th>
+                    <th className="px-4 py-2.5 text-left">File Name</th>
+                    <th className="px-4 py-2.5 text-left">Batch ID</th>
+                    <th className="px-4 py-2.5 text-left">Uploaded At</th>
                     <th className="px-4 py-2.5 text-left">Match</th>
                     <th className="px-4 py-2.5 text-left w-64">Notes</th>
                     <th className="px-4 py-2.5 text-left">Status</th>
@@ -185,28 +201,51 @@ export default function ExceptionsPage() {
                     const style = exceptionStyle(ex.exception_type);
                     return (
                       <tr key={ex.id} className="hover:bg-gray-50 text-gray-800">
-                        <td className="px-4 py-2.5">
+                        {/* Flag */}
+                        <td className="px-4 py-2.5 whitespace-nowrap">
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: style.bg, color: style.text }}>
                             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: style.dot }} />
                             {ex.exception_type}
                           </span>
                         </td>
+                        {/* Row */}
                         <td className="px-4 py-2.5 text-gray-400 font-medium">{ex.row_index + 1}</td>
-                        <td className="px-4 py-2.5 font-semibold text-gray-900">{ex.property ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-blue-700 font-mono">{ex.unit_no ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-violet-700">{ex.type ?? '—'}</td>
-                        <td className="px-4 py-2.5 text-gray-500 truncate max-w-[160px]" title={ex.run?.source_file ?? ''}>
-                          {ex.run?.source_file ?? <span className="text-gray-300">—</span>}
+                        {/* Property */}
+                        <td className="px-4 py-2.5 font-semibold text-gray-900 whitespace-nowrap">{ex.property ?? '—'}</td>
+                        {/* Unit No. */}
+                        <td className="px-4 py-2.5 text-blue-700 font-mono whitespace-nowrap">{ex.unit_no ?? '—'}</td>
+                        {/* Type */}
+                        <td className="px-4 py-2.5 text-violet-700 whitespace-nowrap">{ex.type ?? '—'}</td>
+                        {/* File Name */}
+                        <td className="px-4 py-2.5 text-gray-600 max-w-[200px]">
+                          <span className="block break-words leading-tight text-[11px]" title={ex.file_name ?? ''}>
+                            {ex.file_name ?? <span className="text-gray-300">—</span>}
+                          </span>
                         </td>
-                        <td className="px-4 py-2.5">
+                        {/* Batch ID */}
+                        <td className="px-4 py-2.5 whitespace-nowrap">
+                          {ex.batch_id ? (
+                            <span className="font-mono text-[11px] text-blue-600" title={ex.batch_id}>
+                              {shortBatchId(ex.batch_id)}
+                            </span>
+                          ) : <span className="text-gray-300">—</span>}
+                        </td>
+                        {/* Uploaded At */}
+                        <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-[11px]">
+                          {fmtUploadedAt(ex.uploaded_at)}
+                        </td>
+                        {/* Match */}
+                        <td className="px-4 py-2.5 whitespace-nowrap">
                           {ex.match_type === 'fuzzy'
                             ? <span className="text-amber-600 font-semibold">Fuzzy {Math.round(ex.match_confidence * 100)}%</span>
                             : <span className="text-gray-500 capitalize">{ex.match_type}</span>}
                         </td>
+                        {/* Notes */}
                         <td className="px-4 py-2.5 text-gray-500 max-w-[256px]">
                           <span className="line-clamp-2">{ex.reviewer_notes ?? '—'}</span>
                         </td>
-                        <td className="px-4 py-2.5">
+                        {/* Status */}
+                        <td className="px-4 py-2.5 whitespace-nowrap">
                           <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${
                             ex.status === 'schema_error' ? 'bg-red-100 text-red-700'
                             : ex.status === 'pending'    ? 'bg-blue-100 text-blue-700'

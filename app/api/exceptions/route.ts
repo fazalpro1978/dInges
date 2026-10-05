@@ -27,30 +27,36 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ exceptions: [], total: 0 });
   }
 
-  // Batch-fetch run details
+  // Batch-fetch run details + batch log traceability in parallel
   const runIds = Array.from(new Set(records.map(r => r.run_id as string)));
-  const { data: runs } = await admin
-    .from('upload_runs')
-    .select('id, source_file, uploaded_by, staged_at')
-    .in('id', runIds);
+  const [{ data: runs }, { data: batchLogs }] = await Promise.all([
+    admin.from('upload_runs').select('id, source_file, uploaded_by, staged_at').in('id', runIds),
+    admin.from('batch_logs').select('run_id, batch_id, file_name, uploaded_at').in('run_id', runIds),
+  ]);
 
-  const runMap = Object.fromEntries((runs ?? []).map(r => [r.id, r]));
+  const runMap      = Object.fromEntries((runs      ?? []).map(r => [r.id,      r]));
+  const batchLogMap = Object.fromEntries((batchLogs ?? []).map(b => [b.run_id,  b]));
 
   const exceptions = records.map(r => {
-    const run = runMap[r.run_id as string] ?? null;
-    const rd = r.resolved_data as Record<string, unknown> | null;
+    const run = runMap[r.run_id as string]      ?? null;
+    const bl  = batchLogMap[r.run_id as string] ?? null;
+    const rd  = r.resolved_data as Record<string, unknown> | null;
     return {
-      id:             r.id,
-      run_id:         r.run_id,
-      row_index:      r.row_index,
-      status:         r.status,
-      match_type:     r.match_type,
+      id:               r.id,
+      run_id:           r.run_id,
+      row_index:        r.row_index,
+      status:           r.status,
+      match_type:       r.match_type,
       match_confidence: r.match_confidence,
-      reviewer_notes: r.reviewer_notes,
-      staged_at:     r.staged_at,
-      property:       rd?.property ?? null,
-      unit_no:        rd?.unit_no ?? null,
-      type:           rd?.type ?? null,
+      reviewer_notes:   r.reviewer_notes,
+      staged_at:        r.staged_at,
+      property:         rd?.property ?? null,
+      unit_no:          rd?.unit_no  ?? null,
+      type:             rd?.type     ?? null,
+      // Batch traceability
+      batch_id:         bl?.batch_id    ?? null,
+      file_name:        bl?.file_name   ?? run?.source_file ?? null,
+      uploaded_at:      bl?.uploaded_at ?? null,
       // Exception classification
       exception_type:
         String(r.reviewer_notes ?? '').startsWith('[SCHEMA ERROR]') ? 'Schema Error'
