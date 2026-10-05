@@ -23,6 +23,8 @@ type BatchLog = {
   review_approve_at:     string | null;
   done_at:               string | null;
   created_at:            string;
+  master_code?:          string | null;
+  smart_code?:           string | null;
   upload_runs?: {
     status:          string;
     approved_count:  number;
@@ -522,6 +524,13 @@ export default function BatchLogsGrid() {
   const [confirmKillId, setConfirmKillId]       = useState<string | null>(null);
   const [markingDoneId, setMarkingDoneId]       = useState<string | null>(null);
 
+  const [editingUploaderId, setEditingUploaderId] = useState<string | null>(null);
+  const [uploaderProfiles, setUploaderProfiles]   = useState<Array<{ id: string; full_name: string; agent_code: string }>>([]);
+  const [uploaderInputVal, setUploaderInputVal]   = useState('');
+  const [assigningUploader, setAssigningUploader] = useState(false);
+  const [assignToast, setAssignToast]             = useState<string | null>(null);
+  const uploadersFetchedRef                       = useRef(false);
+
   const load = useCallback(async (p: number, s: string, phase: string, from: string, to: string) => {
     setLoading(true);
     setError('');
@@ -715,6 +724,62 @@ export default function BatchLogsGrid() {
     setTimeout(() => setCopiedId(null), 1500);
   }
 
+  const loadUploaders = useCallback(async () => {
+    if (uploadersFetchedRef.current) return;
+    uploadersFetchedRef.current = true;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/batch-logs/uploaders', {
+        headers: { ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+      });
+      if (res.ok) {
+        const data = await res.json() as { uploaders: Array<{ id: string; full_name: string; agent_code: string }> };
+        setUploaderProfiles(data.uploaders ?? []);
+      } else {
+        uploadersFetchedRef.current = false;
+      }
+    } catch {
+      uploadersFetchedRef.current = false;
+    }
+  }, []);
+
+  const startEditUploader = useCallback(async (batchId: string, currentName: string) => {
+    setUploaderInputVal(currentName ?? '');
+    setEditingUploaderId(batchId);
+    await loadUploaders();
+  }, [loadUploaders]);
+
+  const saveUploader = useCallback(async (batchId: string) => {
+    if (!uploaderInputVal.trim() || assigningUploader) return;
+    setAssigningUploader(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/batch-logs/${batchId}/assign-uploader`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ uploaded_by: uploaderInputVal }),
+      });
+      const data = await res.json() as { ok?: boolean; uploaded_by?: string; error?: string };
+      if (res.ok && data.ok) {
+        setLogs(prev => prev.map(l => l.batch_id === batchId ? { ...l, uploaded_by: data.uploaded_by ?? uploaderInputVal } : l));
+        setEditingUploaderId(null);
+        setAssignToast('Uploader assigned successfully.');
+        setTimeout(() => setAssignToast(null), 4000);
+      } else {
+        setAssignToast(data.error ?? 'Assignment failed.');
+        setTimeout(() => setAssignToast(null), 5000);
+      }
+    } catch {
+      setAssignToast('Network error. Please try again.');
+      setTimeout(() => setAssignToast(null), 5000);
+    } finally {
+      setAssigningUploader(false);
+    }
+  }, [uploaderInputVal, assigningUploader]);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const { openNav } = useNav();
@@ -800,6 +865,11 @@ export default function BatchLogsGrid() {
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">{error}</div>
         )}
 
+        {/* Assign toast */}
+        {assignToast && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-700 font-medium">{assignToast}</div>
+        )}
+
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {loading ? (
@@ -813,20 +883,21 @@ export default function BatchLogsGrid() {
             <table className="w-full text-xs table-fixed">
               <colgroup>
                 <col style={{ width: '8%'  }} />
-                <col style={{ width: '16%' }} />
-                <col style={{ width: '10%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '9%'  }} />
                 <col style={{ width: '9%'  }} />
                 <col style={{ width: '6%'  }} />
                 <col style={{ width: '6%'  }} />
                 <col style={{ width: '6%'  }} />
                 <col style={{ width: '5%'  }} />
-                <col style={{ width: '12%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '9%'  }} />
+                <col style={{ width: '7%'  }} />
                 <col style={{ width: '10%' }} />
-                <col style={{ width: '12%' }} />
               </colgroup>
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
-                  {['Batch ID', 'File Name', 'Uploaded By', 'Phase', 'Total', '✓ OK', '✗ Failed', 'Errors', 'Uploaded At', 'Done At', 'Alert'].map((h) => (
+                  {['Batch ID', 'File Name', 'Uploaded By', 'Phase', 'Total', '✓ OK', '✗ Failed', 'Errors', 'Uploaded At', 'Done At', 'Codes', 'Alert'].map((h) => (
                     <th key={h} className="px-3 py-2.5 text-left text-[10px] font-bold text-gray-500 uppercase tracking-wider truncate">
                       {h}
                     </th>
@@ -866,7 +937,53 @@ export default function BatchLogsGrid() {
                           )}
                         </td>
                         {/* Uploaded By */}
-                        <td className="px-3 py-2.5 text-gray-600 truncate">{log.uploaded_by ?? '—'}</td>
+                        <td className="px-3 py-2.5 overflow-hidden">
+                          {editingUploaderId === log.batch_id ? (
+                            <div className="flex items-center gap-1">
+                              <select
+                                value={uploaderInputVal}
+                                onChange={e => setUploaderInputVal(e.target.value)}
+                                className="flex-1 border border-blue-400 rounded px-1.5 py-0.5 text-[11px] focus:outline-none bg-white text-gray-900 min-w-0"
+                                autoFocus
+                              >
+                                <option value="">— pick agent —</option>
+                                {uploaderProfiles.map(p => (
+                                  <option key={p.id} value={p.full_name}>
+                                    {p.full_name}{p.agent_code ? ` (${p.agent_code})` : ''}
+                                  </option>
+                                ))}
+                                {uploaderInputVal && !uploaderProfiles.some(p => p.full_name === uploaderInputVal) && (
+                                  <option value={uploaderInputVal}>{uploaderInputVal}</option>
+                                )}
+                              </select>
+                              <button
+                                onClick={() => saveUploader(log.batch_id)}
+                                disabled={assigningUploader || !uploaderInputVal.trim()}
+                                title="Save"
+                                className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white transition-colors shrink-0"
+                              >
+                                {assigningUploader ? '…' : '✓'}
+                              </button>
+                              <button
+                                onClick={() => setEditingUploaderId(null)}
+                                disabled={assigningUploader}
+                                title="Cancel"
+                                className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-100 disabled:opacity-40 transition-colors shrink-0"
+                              >✕</button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 group">
+                              <span className="text-gray-600 truncate text-[11px]">{log.uploaded_by || '—'}</span>
+                              {['done', 'killed'].includes(log.phase) && (
+                                <button
+                                  onClick={() => startEditUploader(log.batch_id, log.uploaded_by)}
+                                  title="Reassign uploader"
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-blue-400 hover:text-blue-600 shrink-0 leading-none"
+                                >✎</button>
+                              )}
+                            </div>
+                          )}
+                        </td>
                         {/* Phase */}
                         <td className="px-3 py-2.5 overflow-hidden"><PhasePill phase={log.phase} /></td>
                         {/* Counts */}
@@ -893,6 +1010,19 @@ export default function BatchLogsGrid() {
                         {/* Dates */}
                         <td className="px-3 py-2.5 text-gray-500 truncate text-[11px]">{fmtDate(log.uploaded_at)}</td>
                         <td className="px-3 py-2.5 text-gray-500 truncate text-[11px]">{fmtDate(log.done_at)}</td>
+                        {/* Codes — dual-stacked when present, null-safe for legacy */}
+                        <td className="px-3 py-2.5 overflow-hidden">
+                          {log.master_code ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-mono text-[9px] text-blue-600 tracking-tight leading-tight">{log.master_code}</span>
+                              {log.smart_code && (
+                                <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700 inline-block w-fit leading-tight">{log.smart_code}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-200 text-[10px]">—</span>
+                          )}
+                        </td>
                         {/* Alert / Action */}
                         <td className="px-3 py-2.5 overflow-hidden">
                           {flag === 'abandoned' && (
@@ -961,7 +1091,7 @@ export default function BatchLogsGrid() {
                       {/* Expanded error detail */}
                       {isExpanded && errCount > 0 && (
                         <tr className="border-b border-red-100 bg-red-50/40">
-                          <td colSpan={11} className="px-6 py-3">
+                          <td colSpan={12} className="px-6 py-3">
                             <p className="text-[10px] font-bold text-red-700 uppercase tracking-widest mb-2">
                               Row-Level Anomalies — {errCount} error{errCount !== 1 ? 's' : ''}
                             </p>
