@@ -531,6 +531,11 @@ export default function BatchLogsGrid() {
   const [assignToast, setAssignToast]             = useState<string | null>(null);
   const uploadersFetchedRef                       = useRef(false);
 
+  const [editingCodesId, setEditingCodesId]   = useState<string | null>(null);
+  const [codeInputMaster, setCodeInputMaster] = useState('');
+  const [codeInputSmart, setCodeInputSmart]   = useState('');
+  const [assigningCodes, setAssigningCodes]   = useState(false);
+
   const load = useCallback(async (p: number, s: string, phase: string, from: string, to: string) => {
     setLoading(true);
     setError('');
@@ -780,6 +785,56 @@ export default function BatchLogsGrid() {
     }
   }, [uploaderInputVal, assigningUploader]);
 
+  function startEditCodes(batchId: string, master: string | null, smart: string | null) {
+    setCodeInputMaster(master ?? '');
+    setCodeInputSmart(smart ?? '');
+    setEditingCodesId(batchId);
+  }
+
+  const saveCodes = useCallback(async (batchId: string) => {
+    if (assigningCodes) return;
+    if (codeInputMaster && !/^\d{16}$/.test(codeInputMaster)) {
+      setAssignToast('Master Code must be exactly 16 digits (numbers only).');
+      setTimeout(() => setAssignToast(null), 4000);
+      return;
+    }
+    if (codeInputSmart && codeInputSmart.length !== 14) {
+      setAssignToast(`Smart Code must be exactly 14 characters (currently ${codeInputSmart.length}).`);
+      setTimeout(() => setAssignToast(null), 4000);
+      return;
+    }
+    setAssigningCodes(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/batch-logs/${batchId}/assign-codes`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({ master_code: codeInputMaster, smart_code: codeInputSmart }),
+      });
+      const data = await res.json() as { ok?: boolean; master_code?: string | null; smart_code?: string | null; error?: string };
+      if (res.ok && data.ok) {
+        setLogs(prev => prev.map(l => l.batch_id === batchId
+          ? { ...l, master_code: data.master_code ?? null, smart_code: data.smart_code ?? null }
+          : l
+        ));
+        setEditingCodesId(null);
+        setAssignToast('Codes assigned successfully.');
+        setTimeout(() => setAssignToast(null), 4000);
+      } else {
+        setAssignToast(data.error ?? 'Code assignment failed.');
+        setTimeout(() => setAssignToast(null), 5000);
+      }
+    } catch {
+      setAssignToast('Network error. Please try again.');
+      setTimeout(() => setAssignToast(null), 5000);
+    } finally {
+      setAssigningCodes(false);
+    }
+  }, [codeInputMaster, codeInputSmart, assigningCodes]);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const { openNav } = useNav();
@@ -1022,17 +1077,63 @@ export default function BatchLogsGrid() {
                         {/* Dates */}
                         <td className="px-3 py-2.5 text-gray-500 truncate text-[11px]">{fmtDate(log.uploaded_at)}</td>
                         <td className="px-3 py-2.5 text-gray-500 truncate text-[11px]">{fmtDate(log.done_at)}</td>
-                        {/* Codes — dual-stacked when present, null-safe for legacy */}
+                        {/* Codes — dual-stacked, manually editable for done/killed */}
                         <td className="px-3 py-2.5 overflow-hidden">
-                          {log.master_code ? (
-                            <div className="flex flex-col gap-0.5">
-                              <span className="font-mono text-[9px] text-blue-600 tracking-tight leading-tight">{log.master_code}</span>
-                              {log.smart_code && (
-                                <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700 inline-block w-fit leading-tight">{log.smart_code}</span>
-                              )}
+                          {editingCodesId === log.batch_id ? (
+                            <div className="flex flex-col gap-1">
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={codeInputMaster}
+                                onChange={e => setCodeInputMaster(e.target.value.replace(/\D/g, '').slice(0, 16))}
+                                placeholder="16-digit master"
+                                maxLength={16}
+                                autoFocus
+                                className="border border-blue-400 rounded px-1.5 py-0.5 text-[9px] font-mono text-blue-700 focus:outline-none bg-white w-full"
+                              />
+                              <input
+                                type="text"
+                                value={codeInputSmart}
+                                onChange={e => setCodeInputSmart(e.target.value.slice(0, 14))}
+                                placeholder="14-char smart"
+                                maxLength={14}
+                                className="border border-green-400 rounded px-1.5 py-0.5 text-[9px] font-mono text-green-700 focus:outline-none bg-white w-full"
+                              />
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => saveCodes(log.batch_id)}
+                                  disabled={assigningCodes}
+                                  className="flex-1 text-[9px] font-bold py-0.5 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white transition-colors"
+                                >
+                                  {assigningCodes ? '…' : '✓'}
+                                </button>
+                                <button
+                                  onClick={() => setEditingCodesId(null)}
+                                  disabled={assigningCodes}
+                                  className="text-[9px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-100 disabled:opacity-40 transition-colors"
+                                >✕</button>
+                              </div>
                             </div>
                           ) : (
-                            <span className="text-gray-200 text-[10px]">—</span>
+                            <div className="group">
+                              {log.master_code ? (
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="font-mono text-[9px] text-blue-600 tracking-tight leading-tight">{log.master_code}</span>
+                                  {log.smart_code && (
+                                    <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700 inline-block w-fit leading-tight">{log.smart_code}</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-gray-300 text-[10px]">—</span>
+                              )}
+                              {['done', 'killed'].includes(log.phase) && (
+                                <button
+                                  onClick={() => startEditCodes(log.batch_id, log.master_code ?? null, log.smart_code ?? null)}
+                                  title="Assign codes"
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-blue-400 hover:text-blue-600 block leading-none mt-0.5"
+                                >✎</button>
+                              )}
+                            </div>
                           )}
                         </td>
                         {/* Alert / Action */}
