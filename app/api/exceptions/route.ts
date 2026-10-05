@@ -16,7 +16,7 @@ export async function GET(_req: NextRequest) {
   // schema_error records are always included regardless of confidence.
   const { data: records, error } = await admin
     .from('staged_records')
-    .select('id, run_id, row_index, resolved_data, match_type, match_confidence, status, reviewer_notes, staged_at')
+    .select('id, run_id, row_index, resolved_data, match_type, match_confidence, status, reviewer_notes, staged_at, delta_status')
     .or('and(match_confidence.lt.0.85,match_confidence.gt.0),reviewer_notes.like.[SCHEMA ERROR]%')
     .order('staged_at', { ascending: false })
     .limit(300);
@@ -53,6 +53,8 @@ export async function GET(_req: NextRequest) {
       property:         rd?.property ?? null,
       unit_no:          rd?.unit_no  ?? null,
       type:             rd?.type     ?? null,
+      resolved_data:    rd,
+      delta_status:     r.delta_status,
       // Batch traceability
       batch_id:         bl?.batch_id    ?? null,
       file_name:        bl?.file_name   ?? run?.source_file ?? null,
