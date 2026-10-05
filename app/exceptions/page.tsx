@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import TopBar from '@/components/TopBar';
 import { useNav } from '@/components/AppShell';
 import Link from 'next/link';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import supabase from '@/lib/supabaseClient';
 
 interface ExceptionRecord {
   id: string;
@@ -70,12 +70,10 @@ export default function ExceptionsPage() {
   const [fixingId, setFixingId] = useState<string | null>(null);
   const [fixFields, setFixFields] = useState<Record<string, string>>({});
 
-  const supabase = createClientComponentClient();
-
   const getToken = useCallback(async (): Promise<string | null> => {
     const { data: { session } } = await supabase.auth.getSession();
     return session?.access_token ?? null;
-  }, [supabase]);
+  }, []);
 
   const showToast = (msg: string) => {
     setActionToast(msg);
