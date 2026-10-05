@@ -530,6 +530,7 @@ export default function BatchLogsGrid() {
   const [assigningUploader, setAssigningUploader] = useState(false);
   const [assignToast, setAssignToast]             = useState<string | null>(null);
   const uploadersFetchedRef                       = useRef(false);
+  const [exporting, setExporting]                 = useState<'csv' | 'xlsx' | null>(null);
 
   const [editingCodesId, setEditingCodesId]   = useState<string | null>(null);
   const [codeInputMaster, setCodeInputMaster] = useState('');
@@ -729,6 +730,30 @@ export default function BatchLogsGrid() {
     setTimeout(() => setCopiedId(null), 1500);
   }
 
+  const handleExport = useCallback(async (fmt: 'csv' | 'xlsx') => {
+    setExporting(fmt);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const params = new URLSearchParams({ format: fmt });
+      if (search)      params.set('search', search);
+      if (filterPhase) params.set('phase', filterPhase);
+      if (filterFrom)  params.set('from', filterFrom);
+      if (filterTo)    params.set('to', filterTo);
+      const res = await fetch(`/api/batch-logs/export?${params}`, {
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `batch-logs-${new Date().toISOString().slice(0, 10)}.${fmt}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {}
+    setExporting(null);
+  }, [search, filterPhase, filterFrom, filterTo]);
+
   const loadUploaders = useCallback(async () => {
     if (uploadersFetchedRef.current) return;
     uploadersFetchedRef.current = true;
@@ -915,14 +940,14 @@ export default function BatchLogsGrid() {
           <span className="ml-auto text-[11px] text-gray-400">{total} batch{total !== 1 ? 'es' : ''}</span>
           <div className="flex items-center gap-1.5 shrink-0">
             {(['csv', 'xlsx'] as const).map(fmt => (
-              <a
+              <button
                 key={fmt}
-                href={`/api/batch-logs/export?format=${fmt}${search ? `&search=${encodeURIComponent(search)}` : ''}${filterPhase ? `&phase=${filterPhase}` : ''}${filterFrom ? `&from=${filterFrom}` : ''}${filterTo ? `&to=${filterTo}` : ''}`}
-                download
-                className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-colors uppercase"
+                onClick={() => handleExport(fmt)}
+                disabled={exporting !== null}
+                className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 transition-colors uppercase"
               >
-                ⬇ {fmt}
-              </a>
+                {exporting === fmt ? '…' : `⬇ ${fmt}`}
+              </button>
             ))}
           </div>
         </div>
