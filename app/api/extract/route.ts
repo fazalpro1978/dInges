@@ -6,6 +6,7 @@ import { writeFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import Anthropic from '@anthropic-ai/sdk';
+import { isDanatQatarSheet, parseDanatQatar } from '../../../lib/parsers/danatQatar';
 
 const execAsync = promisify(exec);
 
@@ -152,6 +153,18 @@ export async function POST(req: NextRequest) {
     // ── Excel / CSV ────────────────────────────────────────────────────────────
     else if (['xlsx', 'xls', 'csv'].includes(ext)) {
       const wb   = xlsx.read(buf, { type: 'buffer', cellDates: true });
+
+      // ── Source-specific parsers (no AI call; output matches Claude shape) ──
+      for (const name of wb.SheetNames) {
+        if (isDanatQatarSheet(name, wb.Sheets[name])) {
+          units = parseDanatQatar(wb.Sheets[name]);
+          break;
+        }
+      }
+      if (units.length > 0) {
+        return NextResponse.json({ units, fileName: file.name, count: units.length });
+      }
+
       const rows: string[] = [];
       wb.SheetNames.forEach(name => {
         const ws    = wb.Sheets[name];
