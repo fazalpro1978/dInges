@@ -114,7 +114,7 @@ export const EXTENDED_FIELDS: ExtendedFieldDef[] = [
   },
 ];
 
-export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office'] as const;
+export const ENUM_PROPERTY_TYPE = ['Apartment', 'Villa', 'Townhouse', 'Penthouse', 'Studio', 'Duplex', 'Office', 'Rowhouse'] as const;
 export const ENUM_FURNISHING    = ['Fully Furnished', 'Semi-Furnished', 'Unfurnished'] as const;
 export const ENUM_STATUS        = ['Available', 'Not Available', 'Reserved', 'Under Preparation'] as const;
 export const ENUM_KITCHEN       = ['Open', 'Closed', 'Yes', 'Pantry'] as const;

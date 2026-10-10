@@ -69,13 +69,17 @@ subtotal rows, not unit records.
 - operator_remarks: auto-extract payment conditions, document requirements, and operational notes from the remarks/notes column. Examples: "PDC FOR RENT PAYMENT", "CR, EST CARD, QID REQUIRED", "SECURITY DEPOSIT 1 MONTH RENTAL AMOUNT", "LABOUR CAMP ACCOMMODATION NEAR UMM-SALAL". Also include "Shell & Core" condition notes here when applicable (see FURNISHING rules above). Do NOT include furnishing or amenity information here (those go in their own fields). Concatenate multiple conditions with " · ". Omit if remarks contain no operational notes.
 
 Normalisation rules:
-- status: map to one of Available | Leased | Reserved | Under_Maintenance
-- furnishing: Fully Furnished | Semi-Furnished | Unfurnished — only set when explicitly stated (see FURNISHING rules above)
+- status: map to one of Available | Leased | Reserved | Under_Maintenance. "Vacant" → "Available". "Upcoming" → "Under_Maintenance". Never output "Upcoming" or "Vacant" literally.
+- furnishing: Fully Furnished | Semi-Furnished | Unfurnished — only set when explicitly stated (see FURNISHING rules above). "Mock up unit - FF" → furnishing: "Fully Furnished". "Mock up unit - SF" → furnishing: "Semi-Furnished".
 - listing_type: Rent | Sale
-- type: map "Flat" or "flat" → "Apartment"; "studio" or "Studio" → "Studio"; "Office" or "Offices" → "Office"; "Shop" → "Shop". CRITICAL: "Residential", "Residiential", "Commercial", "Industrial" are BUILDING CATEGORY labels (property-level), NOT unit types — NEVER output these as the type field. Unit type must come from the unit-type column (Flat/Studio/Office/Shop etc.), never from the building-category column.
+- type: map "Flat" or "flat" → "Apartment"; "studio" or "Studio" → "Studio"; "Office" or "Offices" → "Office"; "Shop" → "Shop"; "Rowhouse" → "Rowhouse". CRITICAL: "Residential", "Residiential", "Commercial", "Industrial" are BUILDING CATEGORY labels (property-level), NOT unit types — NEVER output these as the type field. Unit type must come from the unit-type column (Flat/Studio/Office/Shop etc.), never from the building-category column.
 - kitchen: normalise "CLOSE" or "Close" → "Closed"; "OPEN" → "Open"
-- config: parse BHK pattern from remarks e.g. "2BHK + 2 BATHROOM" → config: "2 BHK"; "3 BHK + 2 BATHROOM" → config: "3 BHK"
+- config: parse BHK or BR pattern. "2BHK" or "2 BR" → config: "2 BHK"; "3 BHK + 2 BATHROOM" → config: "3 BHK". Strip any qualifiers (Standard, Medium, Large BY, with pool, with backyard, Type A, Type B, etc.) from the bedroom count before setting config — qualifiers go to amenities and design_type instead.
 - bathrooms: parse from remarks e.g. "2BHK + 2 BATHROOM" → bathrooms: 2; "2BHK + 1 BATHROOM" → bathrooms: 1
+- design_type: extract layout/design qualifiers from the No. of Bedrooms or config field: "(Standard)" → "Standard"; "(Medium)" → "Medium"; "Type A"/"Type B"/"Type C" → "Type A"/"Type B"/"Type C"; "Mock up unit" → "Mock up unit"; "Giardino" → "Giardino"; "No Backyard" → "No Backyard". Omit if no qualifier.
+- amenities: extract from No. of Bedrooms or remarks. "with pool" or "w/ pool" or "Large SP" → "Private Pool"; "Large BY" or "Large Backyard" → "Large Backyard"; "with small backyard" or "Standard BY" → "Small Backyard"; "with small backyard" → "Small Backyard". Return as array of strings.
+- DUAL PRICING: when a unit has two rent values listed (e.g., one for Semi-Furnished and one for Fully Furnished), set rent to the LOWER value (Semi-Furnished price) and rent_ff to the HIGHER value (Fully Furnished price).
+- contract_end_date: populate from "Evacuation Date" column (YYYY-MM-DD format) — this is when the current lease ends and the unit becomes available.
 - dates: YYYY-MM-DD format
 - rent/charges: numbers only, no currency symbols — strip any "+ N Month(s) Free" suffix before extracting the rent number
 - If a field is not present, omit it (do not include null values)
@@ -157,7 +161,7 @@ export async function POST(req: NextRequest) {
       // ── Source-specific parsers (no AI call; output matches Claude shape) ──
       for (const name of wb.SheetNames) {
         if (isDanatQatarSheet(name, wb.Sheets[name])) {
-          units = parseDanatQatar(wb.Sheets[name]);
+          units = await parseDanatQatar(wb.Sheets[name]);
           break;
         }
       }

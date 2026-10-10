@@ -1,21 +1,26 @@
 // lib/parsers/danatQatar.ts
-// Dedicated pre-processor for the Danat Qatar realtor template.
+// Dedicated pre-processor for the Danat Qatar realtor XLSX template.
 // Runs as a source-specific layer BEFORE the standard pipeline — importSchema.ts,
 // castAndValidateField, cr_assign_smart_code and cr_generate_master_code are untouched.
 //
 // Template signature: "Units Import" sheet, 15 columns, rows 2–118+
 // Realtor: Danat Qatar (Alfardan Gardens / Majduleen Gardens, Doha)
+//
+// Zone lookup: queries cr_zone_codes from the Code Registry (shared Supabase project).
+// Fuzzy-matches Area/Location text against district_name; leaves zone_code null if
+// no match — operator fills it in the Validation stage.
 
 import * as xlsx from 'xlsx';
+import { registry } from '../registryClient';
 
 // ── Column indices (0-based) ────────────────────────────────────────────────
 const COL = {
   property:      0,   // Property Name *
   unit_no:       1,   // Property Unit No *
-  // zone_number: 2 → always blank; derived from area_location instead
+  // zone_number: 2 → always blank in this template
   area_location: 3,   // Area / Location → zone (text) + zone_code (derived)
   type:          4,   // Property Type *
-  subtype:       5,   // Property Subtype * → config
+  subtype:       5,   // Property Subtype * → config  (BHK format: "4 BHK")
   furnishing:    6,   // Furnishing Status *
   // bathrooms:  7 → blank
   // kitchen:    8 → blank
@@ -27,30 +32,44 @@ const COL = {
   // realtor:   14 → blank; hardcoded below
 } as const;
 
-// ── Zone derivation (Area/Location text → integer zone_code) ───────────────
-// Qatar administrative zone codes. Unknown areas are left null; the
-// Validation stage surfaces them for manual entry.
-const ZONE_LOOKUP: [string, number][] = [
-  ['al waab - abu sidra', 27],
-  ['al waab abu sidra',   27],
-  ['al waab',            27],
-  ['abu sidra',          27],
-  ['the pearl',          63],
-  ['pearl qatar',        63],
-  ['lusail',             69],
-  ['west bay',           66],
-  ['msheireb',           22],
-  ['al sadd',            27],
-  ['al dafna',           66],
-  ['al khail',           69],
-];
+// ── Zone lookup from Code Registry ─────────────────────────────────────────
+// Normalise a string to lowercase alpha-numeric tokens for fuzzy comparison.
+function normStr(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
 
-function deriveZone(raw: string): { zone: string; zone_code: number | undefined } {
-  const zone = raw.trim();
-  const norm = zone.toLowerCase().replace(/\s+/g, ' ');
-  for (const [key, code] of ZONE_LOOKUP) {
-    if (norm.includes(key)) return { zone, zone_code: code };
+type ZoneRow = { zone_code: number; district_name: string };
+
+async function loadZones(): Promise<ZoneRow[]> {
+  const { data } = await registry
+    .from('cr_zone_codes')
+    .select('zone_code, district_name')
+    .order('zone_code');
+  return (data ?? []) as ZoneRow[];
+}
+
+function resolveZoneFromList(
+  areaText: string,
+  zones: ZoneRow[],
+): { zone: string; zone_code: number | undefined } {
+  const zone = areaText.trim();
+  if (!zone) return { zone: '', zone_code: undefined };
+
+  const normArea = normStr(zone);
+
+  for (const z of zones) {
+    const normDistrict = normStr(z.district_name);
+    // Full substring match in either direction
+    if (normArea.includes(normDistrict) || normDistrict.includes(normArea)) {
+      return { zone, zone_code: z.zone_code };
+    }
+    // All words of the district name appear in the area text (handles minor re-ordering)
+    const words = normDistrict.split(' ').filter(Boolean);
+    if (words.length >= 2 && words.every(w => normArea.includes(w))) {
+      return { zone, zone_code: z.zone_code };
+    }
   }
+
   return { zone, zone_code: undefined };
 }
 
@@ -58,11 +77,13 @@ function deriveZone(raw: string): { zone: string; zone_code: number | undefined 
 
 function normStatus(raw: string): string {
   switch (raw.trim().toLowerCase()) {
-    case 'available':   return 'Available';
-    case 'upcoming':    return 'Under_Maintenance';   // Danat Qatar-specific rule
-    case 'leased':      return 'Leased';
-    case 'reserved':    return 'Reserved';
-    default:            return raw.trim();
+    case 'available':         return 'Available';
+    case 'vacant':            return 'Available';      // Danat Qatar PDF term
+    case 'upcoming':          return 'Under_Maintenance'; // confirmed rule
+    case 'leased':            return 'Leased';
+    case 'reserved':          return 'Reserved';
+    case 'under_maintenance': return 'Under_Maintenance';
+    default:                  return raw.trim();
   }
 }
 
@@ -82,15 +103,72 @@ function normType(raw: string): string {
   if (s === 'OFFICE')                                    return 'Office';
   if (s === 'TOWNHOUSE')                                 return 'Townhouse';
   if (s === 'DUPLEX')                                    return 'Duplex';
+  if (s === 'ROWHOUSE')                                  return 'Rowhouse';
   return raw.trim();
 }
 
-function normConfig(raw: string): string {
-  // "4BHK" → "4 BHK"; "4 BHK" → "4 BHK"; pass through if already normalised
-  const s = raw.trim();
-  const m = s.match(/^(\d+)\s*BHK(.*)/i);
-  if (m) return (`${m[1]} BHK${m[2]}`).trim();
-  return s;
+// Handles both BHK ("4 BHK") and BR ("4 BR") formats, and extracts
+// amenities + design_type from qualifiers embedded in the subtype column.
+function parseSubtype(raw: string): {
+  config: string;
+  type_override?: string;
+  amenities: string[];
+  design_type?: string;
+} {
+  let s = raw.trim();
+  const amenities: string[] = [];
+  let design_type: string | undefined;
+  let type_override: string | undefined;
+
+  // ── Type qualifiers that override the property type ─────────────────────
+  if (/\browhouse\b/i.test(s)) {
+    type_override = 'Rowhouse';
+    s = s.replace(/\browhouse\b/i, '').trim();
+  }
+  if (/\bvilla\b/i.test(s)) {
+    type_override = 'Villa';
+    s = s.replace(/\bvilla\b/i, '').trim();
+  }
+
+  // ── Amenity qualifiers ──────────────────────────────────────────────────
+  if (/large\s*(by|backyard|b\.?y\.?)/i.test(s)) {
+    amenities.push('Large Backyard');
+    s = s.replace(/large\s*(by|backyard|b\.?y\.?)/i, '').trim();
+  }
+  if (/(with\s+small\s+backyard|small\s*(by|backyard)|standard\s*(by|backyard))/i.test(s)) {
+    amenities.push('Small Backyard');
+    s = s.replace(/(with\s+small\s+backyard|small\s*(by|backyard)|standard\s*(by|backyard))/i, '').trim();
+  }
+  if (/(with\s*pool|w\/\s*pool|large\s*sp)/i.test(s)) {
+    amenities.push('Private Pool');
+    s = s.replace(/(with\s*pool|w\/\s*pool|large\s*sp)/i, '').trim();
+  }
+
+  // ── Design-type qualifiers (in parentheses or suffix) ──────────────────
+  const parenMatch = s.match(/\(([^)]+)\)/);
+  if (parenMatch) {
+    const q = parenMatch[1].trim();
+    const lower = q.toLowerCase();
+    if (lower === 'standard')          design_type = 'Standard';
+    else if (lower === 'medium')       design_type = 'Medium';
+    else if (lower === 'no backyard')  design_type = 'No Backyard';
+    else                               design_type = q;
+    s = s.replace(/\([^)]+\)/, '').trim();
+  }
+
+  // "Type A", "Type B", etc.
+  const typeLetterMatch = s.match(/\btype\s+([A-Z])\b/i);
+  if (typeLetterMatch) {
+    design_type = `Type ${typeLetterMatch[1].toUpperCase()}`;
+    s = s.replace(/\btype\s+[A-Z]\b/i, '').trim();
+  }
+
+  // ── BHK / BR count → canonical "N BHK" ────────────────────────────────
+  s = s.replace(/[-]+$/, '').trim(); // strip trailing dashes
+  const m = s.match(/^(\d+)\s*(BHK|BR)\b/i);
+  const config = m ? `${m[1]} BHK` : s.trim();
+
+  return { config, type_override, amenities, design_type };
 }
 
 function normRent(raw: unknown): number | null {
@@ -111,27 +189,22 @@ function cellRaw(ws: xlsx.WorkSheet, r: number, c: number): unknown {
 }
 
 // ── Template detection ──────────────────────────────────────────────────────
-// Returns true when the worksheet matches the Danat Qatar "Units Import" template.
 
 export function isDanatQatarSheet(sheetName: string, ws: xlsx.WorkSheet): boolean {
   const name = sheetName.toLowerCase().replace(/\s+/g, ' ').trim();
   if (name !== 'units import') return false;
 
-  // Verify header row (row 0) for the distinctive column set
   const h0 = cellStr(ws, 0, COL.property).toLowerCase();
   const h5 = cellStr(ws, 0, COL.subtype).toLowerCase();
   const h3 = cellStr(ws, 0, COL.area_location).toLowerCase();
 
-  return (
-    h0.includes('property name') &&
-    h5.includes('subtype') &&
-    h3.includes('area')
-  );
+  return h0.includes('property name') && h5.includes('subtype') && h3.includes('area');
 }
 
-// ── Main extractor ──────────────────────────────────────────────────────────
+// ── Main extractor (async — queries Code Registry for zone codes) ───────────
 
-export function parseDanatQatar(ws: xlsx.WorkSheet): Record<string, unknown>[] {
+export async function parseDanatQatar(ws: xlsx.WorkSheet): Promise<Record<string, unknown>[]> {
+  const zones = await loadZones();
   const range = xlsx.utils.decode_range(ws['!ref'] ?? 'A1');
   const results: Record<string, unknown>[] = [];
 
@@ -139,7 +212,6 @@ export function parseDanatQatar(ws: xlsx.WorkSheet): Record<string, unknown>[] {
     const property = cellStr(ws, r, COL.property);
     const unit_no  = cellStr(ws, r, COL.unit_no);
 
-    // Skip empty rows and summary/subtotal rows
     if (!property || !unit_no) continue;
     if (/^(total|sub[\s-]?total)/i.test(property)) continue;
 
@@ -150,23 +222,26 @@ export function parseDanatQatar(ws: xlsx.WorkSheet): Record<string, unknown>[] {
     const statRaw  = cellStr(ws, r, COL.status);
     const rentRaw  = cellRaw(ws, r, COL.rent);
 
-    const { zone, zone_code } = deriveZone(areaRaw);
+    const { zone, zone_code } = resolveZoneFromList(areaRaw, zones);
+    const { config, type_override, amenities, design_type } = parseSubtype(subRaw);
 
+    const resolvedType = normType(type_override ?? typeRaw);
     const record: Record<string, unknown> = {
       property,
       unit_no,
-      type:         normType(typeRaw)     || undefined,
-      config:       normConfig(subRaw)    || undefined,
+      type:         resolvedType   || undefined,
+      config:       config         || undefined,
       furnishing:   normFurnishing(furnRaw) || undefined,
-      status:       normStatus(statRaw)   || undefined,
-      rent:         normRent(rentRaw)     ?? undefined,
+      status:       normStatus(statRaw)    || undefined,
+      rent:         normRent(rentRaw)      ?? undefined,
       realtor_name: 'Danat Qatar',
     };
 
-    if (zone)      record.zone      = zone;
-    if (zone_code) record.zone_code = zone_code;
+    if (zone)                      record.zone       = zone;
+    if (zone_code !== undefined)   record.zone_code  = zone_code;
+    if (amenities.length > 0)      record.amenities  = amenities;
+    if (design_type)               record.design_type = design_type;
 
-    // Strip undefined values to match Claude extraction output shape
     for (const k of Object.keys(record)) {
       if (record[k] === undefined) delete record[k];
     }
