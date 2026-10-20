@@ -50,6 +50,24 @@ type MatchedRecord = {
   _conflictResolved: Record<string, unknown>;
 };
 
+type DirectEntryRow = {
+  _id: string;
+  property: string;
+  unit_no: string;
+  zone_code: string;
+  zone: string;
+  realtor_name: string;
+  realtor_moci: string;
+  type: string;
+  config: string;
+  furnishing: string;
+  agent_code: string;
+  status: string;
+  rent: string;
+  bathrooms: string;
+  parking: string;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function confidenceBadge(matchType: string, confidence: number) {
@@ -159,6 +177,47 @@ function ConflictResolver({
       })}
     </div>
   );
+}
+
+function makeDirectRow(agentCode: string): DirectEntryRow {
+  return {
+    _id: Math.random().toString(36).slice(2),
+    property: '', unit_no: '', zone_code: '', zone: '',
+    realtor_name: '', realtor_moci: '',
+    type: '', config: '', furnishing: '',
+    agent_code: agentCode,
+    status: 'Available', rent: '', bathrooms: '', parking: '',
+  };
+}
+
+function validateDirectRows(rows: DirectEntryRow[]): Record<string, string[]> {
+  const REQUIRED = ['property', 'unit_no', 'zone_code', 'realtor_name', 'type', 'config', 'furnishing', 'agent_code'] as const;
+  const errors: Record<string, string[]> = {};
+  rows.forEach(row => {
+    const missing = REQUIRED.filter(f => !String((row as Record<string, unknown>)[f] ?? '').trim());
+    if (missing.length) errors[row._id] = [...missing];
+  });
+  return errors;
+}
+
+function toDirectApiRecord(r: DirectEntryRow): Record<string, unknown> {
+  return {
+    property:      r.property.trim(),
+    unit_no:       r.unit_no.trim(),
+    zone_code:     Number(r.zone_code) || null,
+    zone:          r.zone.trim(),
+    realtor_name:  r.realtor_name.trim(),
+    realtor_moci:  r.realtor_moci.trim(),
+    type:          r.type,
+    config:        r.config.trim(),
+    furnishing:    r.furnishing,
+    status:        r.status || 'Available',
+    rent:          r.rent ? Number(r.rent) : null,
+    bathrooms:     r.bathrooms ? Number(r.bathrooms) : null,
+    parking:       r.parking || null,
+    agent_code:    r.agent_code,
+    _entry_source: 'direct',
+  };
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -352,6 +411,13 @@ export default function IngestPipeline() {
   const [batchErrorSummary, setBatchErrorSummary] = useState<{ row: number; field: string; value: unknown; error: string }[]>([]);
   const [batchTotalRows, setBatchTotalRows] = useState(0);
 
+  // ── Direct Data Entry (Stage 0) ───────────────────────────────────────────
+  const [showDirectEntry, setShowDirectEntry] = useState(false);
+  const [directRows, setDirectRows] = useState<DirectEntryRow[]>([]);
+  const [directErrors, setDirectErrors] = useState<Record<string, string[]>>({});
+  const [showOptionalCols, setShowOptionalCols] = useState(false);
+  const [directSubmitting, setDirectSubmitting] = useState(false);
+
   // ── Stage 0: Upload & Extract ─────────────────────────────────────────────
 
   const runMatch = useCallback(async (units: Record<string, unknown>[]) => {
@@ -413,6 +479,47 @@ export default function IngestPipeline() {
       setIsProcessing(false);
     }
   }, []);
+
+  const handleDirectSubmit = useCallback(async () => {
+    const errors = validateDirectRows(directRows);
+    if (Object.keys(errors).length > 0) {
+      setDirectErrors(errors);
+      return;
+    }
+    const ts = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    setFileName(`Direct Entry · ${directRows.length} record(s) · ${ts}`);
+    setFileSize(0);
+    setDirectSubmitting(true);
+    try {
+      await runMatch(directRows.map(toDirectApiRecord));
+    } finally {
+      setDirectSubmitting(false);
+    }
+  }, [directRows, runMatch]);
+
+  // Lazy-load zones + agents when Direct Entry panel opens (before any file upload)
+  useEffect(() => {
+    if (!showDirectEntry) return;
+    if (zones.length === 0) {
+      fetch('/api/zones').then(r => r.json()).then(d => setZones(d.zones ?? [])).catch(() => {});
+    }
+    supabase.auth.getSession().then(({ data }) => {
+      const token = data.session?.access_token ?? '';
+      const h = { Authorization: `Bearer ${token}` };
+      if (!agentCode) {
+        fetch('/api/auth/me', { headers: h })
+          .then(r => r.json())
+          .then(d => { setAgentCode(d.agent_code ?? ''); setSelectedAgentCode(d.agent_code ?? ''); setUserRole(d.role ?? ''); })
+          .catch(() => {});
+      }
+      if (agents.length === 0) {
+        fetch('/api/master-code/agents', { headers: h })
+          .then(r => r.json())
+          .then(d => setAgents(d.agents ?? []))
+          .catch(() => {});
+      }
+    });
+  }, [showDirectEntry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Inline cell editing for Validation table ──────────────────────────────
 
@@ -1099,6 +1206,164 @@ export default function IngestPipeline() {
                 </svg>
                 Download Template
               </a>
+            </div>
+
+            {/* ── Direct Data Entry ──────────────────────────────────────────── */}
+            <div className="mt-5 rounded-xl border border-gray-200 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm select-none">✎</span>
+                  <span className="text-sm font-semibold text-gray-800">Direct Data Entry</span>
+                  {directRows.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">{directRows.length}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {showDirectEntry && (
+                    <button
+                      onClick={() => setDirectRows(prev => [...prev, makeDirectRow(effectiveAgentCode)])}
+                      className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                      style={{ background: '#0ea5e9', color: '#fff' }}
+                    >+ Add Row</button>
+                  )}
+                  <button
+                    onClick={() => setShowDirectEntry(v => !v)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100 font-medium"
+                  >{showDirectEntry ? '▾ Collapse' : '▸ Expand'}</button>
+                </div>
+              </div>
+
+              {showDirectEntry && (
+                <div className="p-4">
+                  {directRows.length === 0 ? (
+                    <p className="text-center py-6 text-xs text-gray-400">No rows yet — click <strong>+ Add Row</strong> to begin manual entry.</p>
+                  ) : (
+                    <>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs border-collapse" style={{ minWidth: 900 }}>
+                          <thead>
+                            <tr className="bg-gray-50 border-b border-gray-200">
+                              <th className="px-2 py-2 text-left font-semibold text-gray-400 w-8">#</th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-600">Property<span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-600">Unit No<span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-600">Zone #<span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-500">Zone</th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-600">Realtor<span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-500">MOCI</th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-600">Type<span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-600">Config<span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-600">Furnishing<span className="text-red-500 ml-0.5">*</span></th>
+                              <th className="px-2 py-2 text-left font-semibold text-gray-600">Agent<span className="text-red-500 ml-0.5">*</span></th>
+                              {showOptionalCols && <>
+                                <th className="px-2 py-2 text-left font-semibold text-gray-500">Rent</th>
+                                <th className="px-2 py-2 text-left font-semibold text-gray-500">Status</th>
+                                <th className="px-2 py-2 text-left font-semibold text-gray-500">Bath</th>
+                                <th className="px-2 py-2 text-left font-semibold text-gray-500">Parking</th>
+                              </>}
+                              <th className="px-2 py-2 w-8"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {directRows.map((row, i) => {
+                              const rowErr = directErrors[row._id] ?? [];
+                              const hasErr = (f: string) => rowErr.includes(f);
+                              const errCls = (f: string) => `w-full text-xs rounded border px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400 ${hasErr(f) ? 'border-red-400 bg-red-50' : 'border-gray-200'}`;
+                              const update = (f: keyof DirectEntryRow, v: string) => {
+                                setDirectErrors(prev => {
+                                  const next = { ...prev };
+                                  if (next[row._id]) {
+                                    const remaining = next[row._id].filter(x => x !== f);
+                                    if (remaining.length) next[row._id] = remaining; else delete next[row._id];
+                                  }
+                                  return next;
+                                });
+                                setDirectRows(prev => prev.map(r => {
+                                  if (r._id !== row._id) return r;
+                                  if (f === 'zone_code' && v) {
+                                    const zm = zones.find(z => z.zone_code === Number(v));
+                                    return { ...r, zone_code: v, zone: zm?.district_name ?? r.zone };
+                                  }
+                                  return { ...r, [f]: v };
+                                }));
+                              };
+                              return (
+                                <tr key={row._id} className={`border-b border-gray-100 ${rowErr.length > 0 ? 'bg-red-50/40' : 'hover:bg-gray-50/50'}`}>
+                                  <td className="px-2 py-1.5 text-gray-400 font-mono text-[11px]">{i + 1}</td>
+                                  <td className="px-1 py-1"><input className={errCls('property')} value={row.property} onChange={e => update('property', e.target.value)} placeholder="Al Dana" /></td>
+                                  <td className="px-1 py-1"><input className={errCls('unit_no')} value={row.unit_no} onChange={e => update('unit_no', e.target.value)} placeholder="A-101" /></td>
+                                  <td className="px-1 py-1" style={{ width: 72 }}><input className={errCls('zone_code')} value={row.zone_code} onChange={e => update('zone_code', e.target.value)} placeholder="66" type="number" /></td>
+                                  <td className="px-1 py-1" style={{ minWidth: 80 }}><input className="w-full text-xs rounded border border-gray-200 px-1.5 py-1 bg-gray-50 text-gray-500 focus:outline-none" value={row.zone} readOnly placeholder="auto" /></td>
+                                  <td className="px-1 py-1"><input className={errCls('realtor_name')} value={row.realtor_name} onChange={e => update('realtor_name', e.target.value)} placeholder="Realtor name" /></td>
+                                  <td className="px-1 py-1" style={{ width: 90 }}><input className="w-full text-xs rounded border border-gray-200 px-1.5 py-1 focus:outline-none" value={row.realtor_moci} onChange={e => update('realtor_moci', e.target.value)} placeholder="MOCI #" /></td>
+                                  <td className="px-1 py-1" style={{ width: 110 }}>
+                                    <select className={errCls('type')} value={row.type} onChange={e => update('type', e.target.value)}>
+                                      <option value="">Select…</option>
+                                      {TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                                    </select>
+                                  </td>
+                                  <td className="px-1 py-1" style={{ width: 72 }}><input className={errCls('config')} value={row.config} onChange={e => update('config', e.target.value)} placeholder="2BR" /></td>
+                                  <td className="px-1 py-1" style={{ width: 140 }}>
+                                    <select className={errCls('furnishing')} value={row.furnishing} onChange={e => update('furnishing', e.target.value)}>
+                                      <option value="">Select…</option>
+                                      {FURNISHING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                                    </select>
+                                  </td>
+                                  <td className="px-1 py-1" style={{ width: 130 }}>
+                                    <select className={errCls('agent_code')} value={row.agent_code} onChange={e => update('agent_code', e.target.value)}>
+                                      <option value="">Select…</option>
+                                      {agents.map(a => <option key={a.agent_code} value={a.agent_code}>{a.agent_code} — {a.full_name}</option>)}
+                                    </select>
+                                  </td>
+                                  {showOptionalCols && <>
+                                    <td className="px-1 py-1" style={{ width: 90 }}><input className="w-full text-xs rounded border border-gray-200 px-1.5 py-1 focus:outline-none" value={row.rent} onChange={e => update('rent', e.target.value)} placeholder="QAR" type="number" /></td>
+                                    <td className="px-1 py-1" style={{ width: 140 }}>
+                                      <select className="w-full text-xs rounded border border-gray-200 px-1.5 py-1 focus:outline-none" value={row.status} onChange={e => update('status', e.target.value)}>
+                                        <option value="Available">Available</option>
+                                        <option value="Occupied">Occupied</option>
+                                        <option value="Under_Maintenance">Under Maintenance</option>
+                                      </select>
+                                    </td>
+                                    <td className="px-1 py-1" style={{ width: 60 }}><input className="w-full text-xs rounded border border-gray-200 px-1.5 py-1 focus:outline-none" value={row.bathrooms} onChange={e => update('bathrooms', e.target.value)} placeholder="2" type="number" step="0.5" /></td>
+                                    <td className="px-1 py-1" style={{ width: 80 }}>
+                                      <select className="w-full text-xs rounded border border-gray-200 px-1.5 py-1 focus:outline-none" value={row.parking} onChange={e => update('parking', e.target.value)}>
+                                        <option value="">—</option>
+                                        <option value="Yes">Yes</option>
+                                        <option value="No">No</option>
+                                      </select>
+                                    </td>
+                                  </>}
+                                  <td className="px-1 py-1">
+                                    <button onClick={() => setDirectRows(prev => prev.filter(r => r._id !== row._id))} className="text-gray-400 hover:text-red-500 p-1 rounded transition-colors" title="Remove row">✕</button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+                        <button
+                          onClick={() => setShowOptionalCols(v => !v)}
+                          className="text-xs text-blue-600 hover:underline"
+                        >{showOptionalCols ? '▴ Hide optional columns' : '▾ Show optional columns  (Rent · Status · Bath · Parking)'}</button>
+                        <button
+                          onClick={handleDirectSubmit}
+                          disabled={directRows.length === 0 || directSubmitting || isProcessing}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          style={{ background: '#0ea5e9', color: '#fff' }}
+                        >
+                          {(directSubmitting || isProcessing) ? (
+                            <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /><span>Processing…</span></>
+                          ) : (
+                            `Submit ${directRows.length} Row${directRows.length !== 1 ? 's' : ''} to Pipeline →`
+                          )}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
