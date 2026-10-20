@@ -1208,6 +1208,27 @@ export default function IngestPipeline() {
               </a>
             </div>
 
+            {/* ── Field Requirements Manual link ────────────────────────────── */}
+            <div className="mt-4 flex items-center justify-end">
+              <a
+                href="https://claude.ai/artifact/DcxDWxePHMBwsRfvyLYUH1"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+                style={{ color: '#6b7280' }}
+                onMouseOver={e => (e.currentTarget.style.color = '#0ea5e9')}
+                onMouseOut={e => (e.currentTarget.style.color = '#6b7280')}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0">
+                  <path d="M12 6.25278V19.2528M12 6.25278C10.8321 5.47686 9.24649 5 7.5 5C5.75351 5 4.16789 5.47686 3 6.25278V19.2528C4.16789 18.4769 5.75351 18 7.5 18C9.24649 18 10.8321 18.4769 12 19.2528M12 6.25278C13.1679 5.47686 14.7535 5 16.5 5C18.2465 5 19.8321 5.47686 21 6.25278V19.2528C19.8321 18.4769 18.2465 18 16.5 18C14.7535 18 13.1679 18.4769 12 19.2528"/>
+                </svg>
+                AXIOM · Data Field Requirements Manual
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 shrink-0 opacity-60">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
+                </svg>
+              </a>
+            </div>
+
             {/* ── Direct Data Entry ──────────────────────────────────────────── */}
             <div className="mt-5 rounded-xl border border-gray-200 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
