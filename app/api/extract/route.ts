@@ -7,6 +7,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import { isDanatQatarSheet, parseDanatQatar } from '../../../lib/parsers/danatQatar';
+import { isRetajSheet, parseRetaj } from '../../../lib/parsers/retaj';
 
 const execAsync = promisify(exec);
 
@@ -160,6 +161,10 @@ export async function POST(req: NextRequest) {
 
       // ── Source-specific parsers (no AI call; output matches Claude shape) ──
       for (const name of wb.SheetNames) {
+        if (isRetajSheet(name, wb.Sheets[name])) {
+          units = parseRetaj(wb.Sheets[name]);
+          break;
+        }
         if (isDanatQatarSheet(name, wb.Sheets[name])) {
           units = await parseDanatQatar(wb.Sheets[name]);
           break;
