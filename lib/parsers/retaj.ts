@@ -7,6 +7,7 @@
 // Normalises subtype format (2BHK → 2 BHK), casing, and status values only.
 
 import * as xlsx from 'xlsx';
+import { cellStr, cellRaw, normStatus, normFurnishing, normType, normConfig, normRent } from './normalisers';
 
 // ── Column indices (0-based) ────────────────────────────────────────────────
 const COL = {
@@ -25,75 +26,6 @@ const COL = {
   media_url: 12,  // Media Storage URL
   realtor:   13,  // Realtor Name
 } as const;
-
-// ── Cell helpers ────────────────────────────────────────────────────────────
-
-function cellStr(ws: xlsx.WorkSheet, r: number, c: number): string {
-  const cell = ws[xlsx.utils.encode_cell({ r, c })] as xlsx.CellObject | undefined;
-  return (cell?.v ?? '').toString().trim();
-}
-
-function cellRaw(ws: xlsx.WorkSheet, r: number, c: number): unknown {
-  const cell = ws[xlsx.utils.encode_cell({ r, c })] as xlsx.CellObject | undefined;
-  return cell?.v ?? '';
-}
-
-// ── Normalisation helpers ───────────────────────────────────────────────────
-
-function normFurnishing(raw: string): string {
-  const s = raw.trim().toUpperCase();
-  if (['FURNISHED', 'FULLY FURNISHED', 'FF', 'FULLY-FURNISHED', 'FULL FURNISHED'].includes(s)) return 'Fully Furnished';
-  if (s.startsWith('SEMI') || ['SF', 'SEMI-FURNISHED', 'SEMIFURNISHED'].includes(s)) return 'Semi-Furnished';
-  if (['UF', 'UNFURNISHED', 'UN-FURNISHED'].includes(s)) return 'Unfurnished';
-  return raw.trim();
-}
-
-function normStatus(raw: string): string {
-  switch (raw.trim().toLowerCase()) {
-    case 'available':          return 'Available';
-    case 'vacant':             return 'Available';
-    case 'leased':             return 'Leased';
-    case 'reserved':           return 'Reserved';
-    case 'under_maintenance':  return 'Under_Maintenance';
-    case 'under maintenance':  return 'Under_Maintenance';
-    default:                   return raw.trim();
-  }
-}
-
-function normType(raw: string): string {
-  const s = raw.trim().toUpperCase();
-  if (['APARTMENT', 'APT', 'APT.', 'FLAT'].includes(s)) return 'Apartment';
-  if (['VILLA', 'VIL'].includes(s))                      return 'Villa';
-  if (s === 'STUDIO')                                    return 'Studio';
-  if (s === 'OFFICE')                                    return 'Office';
-  if (s === 'TOWNHOUSE')                                 return 'Townhouse';
-  if (s === 'DUPLEX')                                    return 'Duplex';
-  return raw.trim();
-}
-
-// Handles "2BHK" (no space), "2 BHK", "2 BR", "Studio", "STUDIO" → canonical "2 BHK" / "Studio"
-function normConfig(raw: string): string {
-  const s = raw.trim();
-  if (!s) return s;
-  if (/^studio$/i.test(s)) return 'Studio';
-  // "NBHK" compact → "N BHK"
-  const compact = s.match(/^(\d+)\s*BHK$/i);
-  if (compact) return `${compact[1]} BHK`;
-  // "N BR" → "N BHK"
-  const br = s.match(/^(\d+)\s*BR$/i);
-  if (br) return `${br[1]} BHK`;
-  // "N BHK" already correct — normalise spacing
-  const spaced = s.match(/^(\d+)\s+BHK$/i);
-  if (spaced) return `${spaced[1]} BHK`;
-  return s;
-}
-
-function normRent(raw: unknown): number | null {
-  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
-  const cleaned = String(raw).replace(/[^\d.]/g, '');
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? null : n;
-}
 
 function normZoneCode(raw: unknown): number | undefined {
   if (raw === null || raw === undefined || String(raw).trim() === '') return undefined;

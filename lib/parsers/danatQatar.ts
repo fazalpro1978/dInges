@@ -12,6 +12,7 @@
 
 import * as xlsx from 'xlsx';
 import { registry } from '../registryClient';
+import { cellStr, cellRaw, normStatus, normFurnishing, normType, normRent } from './normalisers';
 
 // ── Column indices (0-based) ────────────────────────────────────────────────
 const COL = {
@@ -71,40 +72,6 @@ function resolveZoneFromList(
   }
 
   return { zone, zone_code: undefined };
-}
-
-// ── Normalisation helpers ───────────────────────────────────────────────────
-
-function normStatus(raw: string): string {
-  switch (raw.trim().toLowerCase()) {
-    case 'available':         return 'Available';
-    case 'vacant':            return 'Available';      // Danat Qatar PDF term
-    case 'upcoming':          return 'Under_Maintenance'; // confirmed rule
-    case 'leased':            return 'Leased';
-    case 'reserved':          return 'Reserved';
-    case 'under_maintenance': return 'Under_Maintenance';
-    default:                  return raw.trim();
-  }
-}
-
-function normFurnishing(raw: string): string {
-  const s = raw.trim().toUpperCase();
-  if (['FURNISHED', 'FULLY FURNISHED', 'FF', 'FULLY-FURNISHED', 'FULL FURNISHED'].includes(s)) return 'Fully Furnished';
-  if (s.startsWith('SEMI') || ['SF', 'SEMI-FURNISHED', 'SEMIFURNISHED'].includes(s)) return 'Semi-Furnished';
-  if (['UF', 'UNFURNISHED', 'UN-FURNISHED'].includes(s)) return 'Unfurnished';
-  return raw.trim();
-}
-
-function normType(raw: string): string {
-  const s = raw.trim().toUpperCase();
-  if (['APARTMENT', 'APT', 'APT.', 'FLAT'].includes(s)) return 'Apartment';
-  if (['VILLA', 'VIL'].includes(s))                      return 'Villa';
-  if (s === 'STUDIO')                                    return 'Studio';
-  if (s === 'OFFICE')                                    return 'Office';
-  if (s === 'TOWNHOUSE')                                 return 'Townhouse';
-  if (s === 'DUPLEX')                                    return 'Duplex';
-  if (s === 'ROWHOUSE')                                  return 'Rowhouse';
-  return raw.trim();
 }
 
 // Handles both BHK ("4 BHK") and BR ("4 BR") formats, and extracts
@@ -169,23 +136,6 @@ function parseSubtype(raw: string): {
   const config = m ? `${m[1]} BHK` : s.trim();
 
   return { config, type_override, amenities, design_type };
-}
-
-function normRent(raw: unknown): number | null {
-  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
-  const cleaned = String(raw).replace(/[^\d.]/g, '');
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? null : n;
-}
-
-function cellStr(ws: xlsx.WorkSheet, r: number, c: number): string {
-  const cell = ws[xlsx.utils.encode_cell({ r, c })] as xlsx.CellObject | undefined;
-  return (cell?.v ?? '').toString().trim();
-}
-
-function cellRaw(ws: xlsx.WorkSheet, r: number, c: number): unknown {
-  const cell = ws[xlsx.utils.encode_cell({ r, c })] as xlsx.CellObject | undefined;
-  return cell?.v ?? '';
 }
 
 // ── Template detection ──────────────────────────────────────────────────────

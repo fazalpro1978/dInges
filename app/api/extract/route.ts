@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.stream({
         model: MODEL,
-        max_tokens: 32000,
+        max_tokens: 64000,
         messages: [{
           role: 'user',
           content: [
@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.stream({
         model: MODEL,
-        max_tokens: 32000,
+        max_tokens: 64000,
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${stdout}`,
@@ -222,7 +222,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.stream({
         model: MODEL,
-        max_tokens: 32000,
+        max_tokens: 64000,
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}`,

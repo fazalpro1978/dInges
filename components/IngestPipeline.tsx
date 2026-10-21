@@ -14,6 +14,7 @@ import { buildMasterPrefix } from '@/lib/buildMasterCode';
 import { Badge, actionBadge } from './StructuredImportShared';
 import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema';
 import supabase from '../lib/supabaseClient';
+import type { PreflightResult } from '../app/api/preflight/route';
 
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
 
@@ -277,6 +278,11 @@ export default function IngestPipeline() {
   const [forceCompleting, setForceCompleting] = useState(false);
   const [confirmForceClose, setConfirmForceClose] = useState(false);
   const [schemaErrors, setSchemaErrors] = useState<Array<{ stagedId: string; rowIndex?: number; errors: { field: string; label: string; rule: string; value?: unknown }[] }>>([]);
+
+  // Pre-flight state: null = no file selected yet; populated after preflight call
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null);
+  const [isPreflighting, setIsPreflighting] = useState(false);
+  const [pendingFileForExtract, setPendingFileForExtract] = useState<File | null>(null);
 
   // Pipeline termination
   const [terminateConfirm, setTerminateConfirm] = useState(false);
@@ -759,15 +765,50 @@ export default function IngestPipeline() {
     setForceCompleting(false);
   }, [runId, approveResult]);
 
+  // ── AccessGate: returns true if the user is allowed to upload ──────────────
+  const checkUploadAccess = useCallback(async (): Promise<boolean> => {
+    if (['superuser', 'administrator'].includes(userRole)) return true;
+    const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').maybeSingle();
+    if (!profile?.axiom_upload_authorised) {
+      setError('Upload requires authorisation. Contact your administrator.');
+      return false;
+    }
+    return true;
+  }, [userRole]);
+
+  // ── runExtract: call /api/extract after preflight approval ──────────────────
+  const runExtract = useCallback(async (file: File) => {
+    setError(null);
+    setIsProcessing(true);
+    setPreflight(null);
+    setPendingFileForExtract(null);
+    setFileName(file.name);
+    setFileSize(file.size);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/extract', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Extraction failed');
+      const { units } = data as { units: Record<string, unknown>[] };
+      await runMatch(units);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error');
+      setIsProcessing(false);
+    }
+  }, [runMatch]);
+
   const handleFile = useCallback(async (file: File) => {
     const ext = file.name.toLowerCase().split('.').pop() ?? '';
+
+    // CSV → structured mapper (no preflight needed)
     if (ext === 'csv') {
+      if (!(await checkUploadAccess())) return;
       setError(null);
       setFileName(file.name);
       setFileSize(file.size);
       setPendingFile(file);
       setStructuredStage('mapping');
-      // Persist file so navigation-away doesn't lose the mapping screen
       const reader = new FileReader();
       reader.onload = e => {
         try {
@@ -778,25 +819,27 @@ export default function IngestPipeline() {
       return;
     }
 
-    setError(null);
-    setIsProcessing(true);
-    setFileName(file.name);
-    setFileSize(file.size);
+    // AccessGate
+    if (!(await checkUploadAccess())) return;
 
+    // Pre-flight analysis
+    setError(null);
+    setIsPreflighting(true);
+    setPreflight(null);
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch('/api/extract', { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Extraction failed');
-
-      const { units } = data as { units: Record<string, unknown>[] };
-      await runMatch(units);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unknown error');
-      setIsProcessing(false);
+      const res = await fetch('/api/preflight', { method: 'POST', body: form });
+      const result: PreflightResult = await res.json();
+      setPendingFileForExtract(file);
+      setPreflight(result);
+    } catch {
+      // If preflight fails, proceed directly to extract
+      runExtract(file);
+    } finally {
+      setIsPreflighting(false);
     }
-  }, [runMatch]);
+  }, [checkUploadAccess, runExtract]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -1155,17 +1198,76 @@ export default function IngestPipeline() {
             <h2 className="text-base font-semibold text-gray-900 mb-1">Upload Property Data File</h2>
             <p className="text-sm text-gray-500 mb-6">Supports XLSX, XLS, CSV, PDF, PNG, JPG, WEBP</p>
 
+            {/* ── Pre-flight result panel ──────────────────────────────────── */}
+            {preflight && pendingFileForExtract && !isProcessing && (
+              <div className={`mb-6 rounded-xl border p-5 ${preflight.riskLevel === 'safe' ? 'border-green-200 bg-green-50' : preflight.riskLevel === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'}`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <span className="text-xl mt-0.5">{preflight.riskLevel === 'safe' ? '✅' : preflight.riskLevel === 'warn' ? '⚠️' : '🔴'}</span>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Pre-flight Analysis</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{preflight.fileName}</p>
+                      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
+                        <span className="text-xs text-gray-700"><span className="font-medium">Format:</span> {preflight.detectedFormat}</span>
+                        {preflight.totalRows !== null && (
+                          <span className="text-xs text-gray-700"><span className="font-medium">Rows:</span> {preflight.totalRows}</span>
+                        )}
+                        {preflight.parserType !== 'ai-extraction' && (
+                          <span className="text-xs text-green-700 font-medium">Deterministic parser — no AI call</span>
+                        )}
+                        {preflight.parserType === 'ai-extraction' && preflight.estimatedOutputTokens !== null && (
+                          <span className="text-xs text-gray-500">~{Math.round(preflight.estimatedOutputTokens / 1000)}K est. tokens</span>
+                        )}
+                      </div>
+                      {preflight.warnings.length > 0 && (
+                        <ul className="mt-2 space-y-0.5">
+                          {preflight.warnings.map((w, i) => (
+                            <li key={i} className="text-xs text-amber-800">{w}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 shrink-0">
+                    <button
+                      onClick={() => runExtract(pendingFileForExtract)}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold text-white transition-colors"
+                      style={{ background: preflight.riskLevel === 'danger' ? '#dc2626' : '#0ea5e9' }}
+                    >
+                      {preflight.riskLevel === 'danger' ? 'Proceed Anyway' : 'Proceed ›'}
+                    </button>
+                    <button
+                      onClick={() => { setPreflight(null); setPendingFileForExtract(null); if (fileRef.current) fileRef.current.value = ''; }}
+                      className="px-4 py-2 rounded-lg text-xs font-medium text-gray-600 border border-gray-300 bg-white hover:bg-gray-50 transition-colors"
+                    >
+                      Change File
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div
               onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={onDrop}
-              onClick={() => fileRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'}`}
+              onClick={() => !preflight && fileRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-12 text-center transition-colors ${preflight ? 'border-gray-200 cursor-default' : isDragging ? 'border-blue-500 bg-blue-50 cursor-pointer' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50 cursor-pointer'}`}
             >
               {isProcessing ? (
                 <div>
                   <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                   <p className="text-sm text-gray-600">Extracting & matching records…</p>
+                </div>
+              ) : isPreflighting ? (
+                <div>
+                  <div className="w-8 h-8 border-3 border-gray-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderWidth: 3 }} />
+                  <p className="text-sm text-gray-500">Analysing file…</p>
+                </div>
+              ) : preflight ? (
+                <div>
+                  <div className="text-3xl mb-2 opacity-30">📂</div>
+                  <p className="text-xs text-gray-400">File selected — review analysis above</p>
                 </div>
               ) : (
                 <div>
