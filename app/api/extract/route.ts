@@ -6,6 +6,8 @@ import { writeFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import Anthropic from '@anthropic-ai/sdk';
+
+export const maxDuration = 300; // seconds — required for large AI extraction responses
 import { isDanatQatarSheet, parseDanatQatar } from '../../../lib/parsers/danatQatar';
 import { isRetajSheet, parseRetaj } from '../../../lib/parsers/retaj';
 
