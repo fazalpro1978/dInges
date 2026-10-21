@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       const b64      = buf.toString('base64');
       const mediaType = (ext === 'jpg' ? 'image/jpeg' : `image/${ext}`) as 'image/jpeg' | 'image/png' | 'image/webp';
 
-      const msg = await client.messages.create({
+      const msg = await client.messages.stream({
         model: MODEL,
         max_tokens: 32000,
         messages: [{
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
             { type: 'text', text: SCHEMA_PROMPT },
           ],
         }],
-      });
+      }).finalMessage();
 
       const text = msg.content.find(b => b.type === 'text')?.text ?? '[]';
       units = parseUnits(text);
@@ -142,14 +142,14 @@ export async function POST(req: NextRequest) {
       const { stdout } = await execAsync(`pdftotext -layout "${tmp}" -`).catch(() => ({ stdout: '' }));
       unlinkSync(tmp);
 
-      const msg = await client.messages.create({
+      const msg = await client.messages.stream({
         model: MODEL,
         max_tokens: 32000,
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${stdout}`,
         }],
-      });
+      }).finalMessage();
 
       const text = msg.content.find(b => b.type === 'text')?.text ?? '[]';
       units = parseUnits(text);
@@ -218,14 +218,14 @@ export async function POST(req: NextRequest) {
         rows.push(data.map(r => (r as unknown[]).join('\t')).join('\n'));
       });
 
-      const msg = await client.messages.create({
+      const msg = await client.messages.stream({
         model: MODEL,
         max_tokens: 32000,
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}`,
         }],
-      });
+      }).finalMessage();
 
       const text = msg.content.find(b => b.type === 'text')?.text ?? '[]';
       units = parseUnits(text);
