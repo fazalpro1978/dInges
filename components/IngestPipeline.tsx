@@ -767,7 +767,16 @@ export default function IngestPipeline() {
 
   // ── AccessGate: returns true if the user is allowed to upload ──────────────
   const checkUploadAccess = useCallback(async (): Promise<boolean> => {
-    if (['superuser', 'administrator'].includes(userRole)) return true;
+    // Use cached role when available; re-fetch if still loading
+    let role = userRole;
+    if (!role) {
+      try {
+        const d = await fetch('/api/auth/me').then(r => r.json());
+        role = d.role ?? '';
+        if (role) setUserRole(role);
+      } catch { /* fall through to profile check */ }
+    }
+    if (['superuser', 'administrator'].includes(role)) return true;
     const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').maybeSingle();
     if (!profile?.axiom_upload_authorised) {
       setError('Upload requires authorisation. Contact your administrator.');
