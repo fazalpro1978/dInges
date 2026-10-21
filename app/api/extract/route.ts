@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 8096,
+        max_tokens: 32000,
         messages: [{
           role: 'user',
           content: [
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 8096,
+        max_tokens: 32000,
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${stdout}`,
@@ -220,7 +220,7 @@ export async function POST(req: NextRequest) {
 
       const msg = await client.messages.create({
         model: MODEL,
-        max_tokens: 8096,
+        max_tokens: 32000,
         messages: [{
           role: 'user',
           content: `${SCHEMA_PROMPT}\n\nFILE CONTENT:\n${rows.join('\n')}`,
