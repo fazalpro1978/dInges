@@ -16,6 +16,82 @@ import { MASTER_FIELDS, BATCH_FIELDS, EXTENDED_FIELDS } from '@/lib/importSchema
 import supabase from '../lib/supabaseClient';
 import type { PreflightResult } from '../app/api/preflight/route';
 
+// ── Upload format tips per parser/risk combination ────────────────────────────
+function UploadFormatTips({ pf }: { pf: PreflightResult }) {
+  const [open, setOpen] = React.useState(pf.riskLevel !== 'safe');
+
+  const isDeterministic = pf.parserType !== 'ai-extraction';
+  const formatLabels: Record<string, string> = {
+    retaj:          'Retaj AXIOM Import Template',
+    'danat-qatar':  'Danat Qatar Template',
+    cap:            'CAP Properties Qatar',
+  };
+
+  if (isDeterministic) {
+    return (
+      <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 flex items-start gap-2.5">
+        <span className="text-green-500 mt-0.5 shrink-0">⚡</span>
+        <p className="text-xs text-green-800">
+          <span className="font-semibold">{formatLabels[pf.parserType] ?? pf.detectedFormat} detected.</span>{' '}
+          This format uses a built-in parser — no AI call needed. Processing is instant regardless of file size.
+        </p>
+      </div>
+    );
+  }
+
+  // AI extraction path — show tips
+  return (
+    <div className={`mt-3 rounded-lg border ${pf.riskLevel === 'danger' ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'}`}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm">💡</span>
+          <span className={`text-xs font-semibold ${pf.riskLevel === 'danger' ? 'text-amber-900' : 'text-blue-900'}`}>
+            How to optimise your upload
+          </span>
+        </div>
+        <span className="text-xs text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          <div className="flex gap-2.5">
+            <span className="text-green-500 shrink-0 mt-0.5">1</span>
+            <div>
+              <p className="text-xs font-semibold text-gray-800">Use the AXIOM Import Template <span className="text-green-600">(fastest — recommended)</span></p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Copy your data into the pre-formatted AXIOM template. The pipeline recognises it instantly — no AI call,
+                no wait time, any number of rows. Download it from the banner below.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2.5">
+            <span className="text-amber-500 shrink-0 mt-0.5">2</span>
+            <div>
+              <p className="text-xs font-semibold text-gray-800">Split large files into batches of ≤80 rows</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Files with &lt;80 data rows process in under 30 seconds with no truncation risk. Split your sheet
+                by property group and upload each batch separately.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2.5">
+            <span className="text-gray-400 shrink-0 mt-0.5">3</span>
+            <div>
+              <p className="text-xs font-semibold text-gray-800">Proceed with streaming mode</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                For this file ({pf.totalRows} rows, ~{pf.estimatedOutputTokens ? Math.round(pf.estimatedOutputTokens / 1000) : '?'}K tokens),
+                streaming mode will be used. Expect 1–3 minutes. Keep the tab open until processing completes.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 type StagedRecord = { id: string; row_index: number; [key: string]: unknown };
 
 type RecordDecision = 'import' | 'skip' | 'replace' | 'backfill';
@@ -1210,6 +1286,7 @@ export default function IngestPipeline() {
 
             {/* ── Pre-flight result panel ──────────────────────────────────── */}
             {preflight && pendingFileForExtract && !isProcessing && (
+              <>
               <div className={`mb-6 rounded-xl border p-5 ${preflight.riskLevel === 'safe' ? 'border-green-200 bg-green-50' : preflight.riskLevel === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'}`}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
@@ -1255,6 +1332,8 @@ export default function IngestPipeline() {
                   </div>
                 </div>
               </div>
+              <UploadFormatTips pf={preflight} />
+              </>
             )}
 
             <div

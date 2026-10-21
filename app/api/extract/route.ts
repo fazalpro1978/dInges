@@ -10,6 +10,7 @@ import Anthropic from '@anthropic-ai/sdk';
 export const maxDuration = 300; // seconds — required for large AI extraction responses
 import { isDanatQatarSheet, parseDanatQatar } from '../../../lib/parsers/danatQatar';
 import { isRetajSheet, parseRetaj } from '../../../lib/parsers/retaj';
+import { isCapSheet, parseCap } from '../../../lib/parsers/cap';
 
 const execAsync = promisify(exec);
 
@@ -169,6 +170,10 @@ export async function POST(req: NextRequest) {
         }
         if (isDanatQatarSheet(name, wb.Sheets[name])) {
           units = await parseDanatQatar(wb.Sheets[name]);
+          break;
+        }
+        if (isCapSheet(name, wb.Sheets[name])) {
+          units = await parseCap(wb.Sheets[name]);
           break;
         }
       }

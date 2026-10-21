@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as xlsx from 'xlsx';
 import { isRetajSheet } from '../../../lib/parsers/retaj';
 import { isDanatQatarSheet } from '../../../lib/parsers/danatQatar';
+import { isCapSheet } from '../../../lib/parsers/cap';
 import { AI_SAFE_ROWS, AI_WARN_ROWS, TOKENS_PER_ROW } from '../../../lib/parsers/normalisers';
 
 export const maxDuration = 30;
@@ -12,7 +13,7 @@ export type PreflightResult = {
   sheets: Array<{ name: string; rows: number }>;
   totalRows: number | null;
   detectedFormat: string;
-  parserType: 'retaj' | 'danat-qatar' | 'ai-extraction';
+  parserType: 'retaj' | 'danat-qatar' | 'cap' | 'ai-extraction';
   estimatedOutputTokens: number | null;
   riskLevel: 'safe' | 'warn' | 'danger';
   warnings: string[];
@@ -69,17 +70,23 @@ export async function POST(req: NextRequest) {
     } else if (isDanatQatarSheet(name, ws)) {
       detectedFormat = 'Danat Qatar Template';
       parserType = 'danat-qatar';
+    } else if (isCapSheet(name, ws)) {
+      detectedFormat = 'CAP Properties Qatar';
+      parserType = 'cap';
     }
     sheets.push({ name, rows: countDataRows(ws) });
   }
 
   const totalRows = sheets.reduce((sum, s) => sum + s.rows, 0);
   const estimatedOutputTokens = parserType === 'ai-extraction' ? totalRows * TOKENS_PER_ROW : 0;
+  const isDeterministic = parserType !== 'ai-extraction';
 
   let riskLevel: PreflightResult['riskLevel'] = 'safe';
   const warnings: string[] = [];
 
-  if (parserType === 'ai-extraction') {
+  if (isDeterministic) {
+    // always safe
+  } else {
     if (totalRows > AI_WARN_ROWS) {
       riskLevel = 'danger';
       warnings.push(`${totalRows} rows detected. Large files risk output truncation. Processing in streaming mode — may take 1–3 minutes.`);
