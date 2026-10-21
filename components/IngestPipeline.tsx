@@ -765,23 +765,24 @@ export default function IngestPipeline() {
     setForceCompleting(false);
   }, [runId, approveResult]);
 
-  // ── AccessGate: returns true if the user is allowed to upload ──────────────
+  // ── AccessGate: delegates to /api/auth/me which computes access server-side ─
+  // A 401/403 from the server is the definitive unauthorized signal.
+  // A successful 200 response (any role returned) means the user is authorized.
   const checkUploadAccess = useCallback(async (): Promise<boolean> => {
-    // Use cached role when available; re-fetch if still loading
-    let role = userRole;
-    if (!role) {
-      try {
-        const d = await fetch('/api/auth/me').then(r => r.json());
-        role = d.role ?? '';
-        if (role) setUserRole(role);
-      } catch { /* fall through to profile check */ }
+    if (['superuser', 'administrator'].includes(userRole)) return true;
+    const { data: session } = await supabase.auth.getSession();
+    const token = session.session?.access_token ?? '';
+    if (!token) {
+      setError('Session expired. Please refresh the page and sign in again.');
+      return false;
     }
-    if (['superuser', 'administrator'].includes(role)) return true;
-    const { data: profile } = await supabase.from('profiles').select('axiom_upload_authorised').maybeSingle();
-    if (!profile?.axiom_upload_authorised) {
+    const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
       setError('Upload requires authorisation. Contact your administrator.');
       return false;
     }
+    const d = await res.json();
+    if (d.role) setUserRole(d.role);
     return true;
   }, [userRole]);
 
