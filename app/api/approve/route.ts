@@ -107,6 +107,12 @@ export async function POST(req: NextRequest) {
         if (t === 'SHOP') payload.type = 'Shop';
       }
 
+      // Boolean fields — REIMS units table has NOT NULL constraints on these.
+      // Default to false when absent/null so bulk inserts don't fail with NOT NULL violations.
+      if (payload.water_electricity_limit_applicable == null) payload.water_electricity_limit_applicable = false;
+      if (payload.month_free_applicable == null)              payload.month_free_applicable = false;
+      if (payload.kahramaa_applicable == null)                payload.kahramaa_applicable = false;
+
       const { valid, errors } = validateCanonical(payload);
 
       if (!valid) {
