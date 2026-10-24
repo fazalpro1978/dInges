@@ -148,6 +148,102 @@ function parseQarAmount(raw: unknown): number | null {
   return normRent(raw);
 }
 
+// ── Amenity normalisation ────────────────────────────────────────────────────
+// Maps CAP freeform amenity strings to REIMS canonical values.
+// Anything not in this map (sports courts, section labels like "Brand New !!")
+// is silently dropped — better to import clean data than bad data.
+
+const AMENITY_MAP: Record<string, string[]> = {
+  // Pools
+  'rooftop swimming pool':     ['Shared Pool'],
+  'rooftop pool':              ['Shared Pool'],
+  'swimming pool':             ['Shared Pool'],
+  'shared pool':               ['Shared Pool'],
+  'pool':                      ['Shared Pool'],
+  'private pool':              ['Private Pool'],
+  "children's pool":           ["Children's Pool"],
+  'kids pool':                 ["Children's Pool"],
+  // Gym
+  'gym':                       ['Shared Gym'],
+  'indoor & outdoor gym':      ['Shared Gym'],
+  'indoor and outdoor gym':    ['Shared Gym'],
+  'indoor/outdoor gym':        ['Shared Gym'],
+  'gym & kids play area':      ['Shared Gym', "Children's Play Area"],
+  'gym and kids play area':    ['Shared Gym', "Children's Play Area"],
+  'shared gym':                ['Shared Gym'],
+  'private gym':               ['Private Gym'],
+  // BBQ
+  'bbq area':                  ['Barbecue Area'],
+  'bbq':                       ['Barbecue Area'],
+  'barbecue area':             ['Barbecue Area'],
+  'barbeque area':             ['Barbecue Area'],
+  // Children
+  "children's play area":      ["Children's Play Area"],
+  'kids play area':            ["Children's Play Area"],
+  'childrens play area':       ["Children's Play Area"],
+  "children's playground":     ["Children's Play Area"],
+  // Parking
+  'covered parking':           ['Covered Parking'],
+  // Security
+  'security':                  ['Security'],
+  '24/7 security':             ['Security'],
+  '24 hour security':          ['Security'],
+  'cctv':                      ['Security'],
+  // Lobby
+  'lobby':                     ['Lobby in Building'],
+  'lobby in building':         ['Lobby in Building'],
+  // Spa
+  'shared spa':                ['Shared Spa'],
+  'spa':                       ['Shared Spa'],
+  // WiFi
+  'wifi':                      ['WiFi'],
+  'wi-fi':                     ['WiFi'],
+  'free wifi':                 ['WiFi'],
+  // Other canonical
+  'balcony':                   ['Balcony'],
+  'built-in wardrobes':        ['Built-in Wardrobes'],
+  'built in wardrobes':        ['Built-in Wardrobes'],
+  'central a/c':               ['Central A/C'],
+  'central ac':                ['Central A/C'],
+  'central air conditioning':  ['Central A/C'],
+  'private jacuzzi':           ['Private Jacuzzi'],
+  'jacuzzi':                   ['Private Jacuzzi'],
+  'kitchen appliances':        ['Kitchen Appliances'],
+  'maids room':                ['Maids Room'],
+  "maid's room":               ['Maids Room'],
+  'pets allowed':              ['Pets Allowed'],
+  'private garden':            ['Private Garden'],
+  'garden':                    ['Private Garden'],
+  'study':                     ['Study'],
+  'view of water':             ['View of Water'],
+  'waterfront view':           ['View of Water'],
+  'sea view':                  ['View of Water'],
+  'concierge':                 ['Concierge'],
+  'maid service':              ['Maid Service'],
+  'walk-in closet':            ['Walk-in Closet'],
+  'walk in closet':            ['Walk-in Closet'],
+  'view of landmark':          ['View of Landmark'],
+  'office':                    ['Office'],
+  // Sports/recreation with no REIMS equivalent → intentionally absent
+  // (Pickle Ball Court, Snooker & Table Tennis, Activity Zone with Foozball, etc.)
+};
+
+function normalizeCapAmenities(raw: string): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const part of raw.split(/[,;&\n]+/)) {
+    const key = part.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!key) continue;
+    const mapped = AMENITY_MAP[key];
+    if (!mapped) continue; // unrecognised or marketing text → drop silently
+    for (const canonical of mapped) {
+      if (!seen.has(canonical)) { seen.add(canonical); result.push(canonical); }
+    }
+  }
+  return result;
+}
+
 // ── Sheet detection ──────────────────────────────────────────────────────────
 // Scan first 15 rows for a mini-header: col 0 = "property", col 1 = "location",
 // col 3 = "description". Retaj/Danat Qatar both use "Units Import" — exclude.
@@ -224,9 +320,7 @@ export async function parseCap(ws: xlsx.WorkSheet): Promise<Record<string, unkno
     if (contactRaw) remarkParts.push(contactRaw);
     const operator_remarks = remarkParts.length ? remarkParts.join(' · ') : undefined;
 
-    const amenities = amenitiesRaw
-      ? amenitiesRaw.split(/[,;]/).map(a => a.trim()).filter(Boolean)
-      : undefined;
+    const amenities = amenitiesRaw ? normalizeCapAmenities(amenitiesRaw) : undefined;
 
     const limitAmt = parseQarAmount(limitRaw);
 
