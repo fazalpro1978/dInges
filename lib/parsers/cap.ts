@@ -153,6 +153,12 @@ function parseQarAmount(raw: unknown): number | null {
 // Anything not in this map (sports courts, section labels like "Brand New !!")
 // is silently dropped — better to import clean data than bad data.
 
+// Section labels / marketing text to discard regardless of anything else.
+const AMENITY_BLACKLIST = new Set([
+  'brand new !!', 'brand new', 'brand new properties !!',
+  'new', 'available', 'coming soon', 'new launch', 'newly renovated',
+]);
+
 const AMENITY_MAP: Record<string, string[]> = {
   // Pools
   'rooftop swimming pool':     ['Shared Pool'],
@@ -233,12 +239,18 @@ function normalizeCapAmenities(raw: string): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const part of raw.split(/[,;&\n]+/)) {
-    const key = part.trim().toLowerCase().replace(/\s+/g, ' ');
-    if (!key) continue;
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase().replace(/\s+/g, ' ');
+    if (AMENITY_BLACKLIST.has(key)) continue; // marketing label / section header → drop
     const mapped = AMENITY_MAP[key];
-    if (!mapped) continue; // unrecognised or marketing text → drop silently
-    for (const canonical of mapped) {
-      if (!seen.has(canonical)) { seen.add(canonical); result.push(canonical); }
+    if (mapped !== undefined) {
+      for (const canonical of mapped) {
+        if (!seen.has(canonical)) { seen.add(canonical); result.push(canonical); }
+      }
+    } else {
+      // No canonical mapping — keep as-is (custom amenity passthrough)
+      if (!seen.has(trimmed)) { seen.add(trimmed); result.push(trimmed); }
     }
   }
   return result;

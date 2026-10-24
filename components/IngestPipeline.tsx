@@ -181,12 +181,16 @@ const VIEW_OPTIONS = [
 ];
 
 const AMENITIES_LIST = [
+  // ── REIMS canonical ──────────────────────────────────────────────────────
   'Balcony', 'Barbecue Area', 'Built-in Wardrobes', 'Central A/C', 'Covered Parking',
   'Private Gym', 'Private Jacuzzi', 'Kitchen Appliances', 'Maids Room', 'Pets Allowed',
   'Private Garden', 'Private Pool', 'Shared Pool', 'Study', 'View of Water',
   'Security', 'Concierge', 'Shared Spa', 'Shared Gym', 'Maid Service',
   'Walk-in Closet', "View of Landmark", "Children's Play Area", 'Lobby in Building',
   "Children's Pool", 'WiFi', 'Office',
+  // ── Custom / extended (CAP + other freeform sources) ─────────────────────
+  'Rooftop Swimming Pool', 'Indoor & Outdoor Gym', 'Pickle Ball Court',
+  'Foozball', 'Snooker', 'Table Tennis', 'Tennis Court',
 ] as const;
 
 // All fields shown in the Validation table — used to drive the dynamic bulk-fill toolbar.
