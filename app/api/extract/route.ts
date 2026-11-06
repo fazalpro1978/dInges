@@ -108,7 +108,7 @@ Normalisation rules:
 - contract_end_date: populate from "Evacuation Date" column (YYYY-MM-DD format) — this is when the current lease ends and the unit becomes available.
 - dates: YYYY-MM-DD format
 - rent/charges: numbers only, no currency symbols — strip any "+ N Month(s) Free" suffix before extracting the rent number
-- realtor_name: The COMPANY or BROKERAGE name that owns/manages the listing. Look for a dedicated "Company", "Agent", "Broker", "Real Estate" column or the document issuer name. NEVER put a person's first name or watchman/caretaker name here. If no company name is identifiable, omit entirely.
+- realtor_name: The COMPANY or BROKERAGE name that owns/manages the listing. Look for a dedicated "Company", "Agent", "Broker", "Real Estate" column or the document issuer name. NEVER put a person's first name or watchman/caretaker name here. If no company name is identifiable, omit entirely. Known trading-name → registered-name mappings: "CAP Properties" → "Capital One Real Estate".
 - area_sqft: numeric size from "Size Sq.", "Size (sqm)", "Area", "Sq.m" column — store the number as-is.
 - floor: numeric floor number from "Floor", "Fl." column — integer only.
 - contact_details: Extract from any Watchman, Caretaker, Contact, Supervisor, or "Watchman Number" / "Watchman No." column. Format as "{Name} {Phone}". This is NOT the realtor. Omit label text.
