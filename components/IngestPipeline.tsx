@@ -369,6 +369,8 @@ export default function IngestPipeline() {
   // Tracks whether any amenities bulk-add has been applied so the revert button
   // knows there is something to undo.
   const [amenitiesBulkDirty, setAmenitiesBulkDirty] = useState(false);
+  // Row-level selection for selective bulk-add in the Extended Fields table.
+  const [selectedExtRows, setSelectedExtRows] = useState<Set<number>>(new Set());
   // Tracks which property groups are collapsed in the multi-zone accordion (empty = all expanded)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   // Snapshot of resolvedData.amenities per rowIndex captured on stage-2 entry.
@@ -2463,6 +2465,25 @@ export default function IngestPipeline() {
                             className="text-[11px] px-2.5 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-40"
                           >Add to all accepted rows</button>
                           <button
+                            disabled={!((bulkFill['_amenities_bulk'] as unknown as string[] | undefined)?.length) || selectedExtRows.size === 0}
+                            title={selectedExtRows.size ? `Add selected amenities to ${selectedExtRows.size} checked row${selectedExtRows.size !== 1 ? 's' : ''}` : 'Check rows below to enable'}
+                            onClick={() => {
+                              const toAdd: string[] = (bulkFill['_amenities_bulk'] as unknown as string[] | undefined) ?? [];
+                              setMatched(prev => prev.map(m => {
+                                if (!selectedExtRows.has(m.rowIndex)) return m;
+                                const cur: string[] = Array.isArray(m._conflictResolved['amenities'])
+                                  ? m._conflictResolved['amenities'] as string[]
+                                  : Array.isArray(m.resolvedData['amenities'])
+                                    ? m.resolvedData['amenities'] as string[]
+                                    : [];
+                                return { ...m, _conflictResolved: { ...m._conflictResolved, amenities: Array.from(new Set([...cur, ...toAdd])) } };
+                              }));
+                              setAmenitiesBulkDirty(true);
+                              setSelectedExtRows(new Set());
+                            }}
+                            className="text-[11px] px-2.5 py-0.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded disabled:opacity-40"
+                          >Add to {selectedExtRows.size || 0} selected row{selectedExtRows.size !== 1 ? 's' : ''}</button>
+                          <button
                             disabled={!amenitiesBulkDirty}
                             title="Revert all rows to the amenities extracted from the uploaded file"
                             onClick={() => {
@@ -2485,9 +2506,22 @@ export default function IngestPipeline() {
                     <table className="w-full text-xs min-w-[900px]">
                       <thead>
                         <tr className="bg-blue-50/60 border-b border-blue-100 text-blue-600 font-semibold">
-                          <th className="px-3 py-2 text-left w-8 sticky left-0 bg-blue-50/60">#</th>
-                          <th className="px-2 py-2 text-left min-w-[130px] sticky left-8 bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Property</th>
-                          <th className="px-2 py-2 text-left w-20 sticky left-[178px] bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Unit No.</th>
+                          <th className="px-2 py-2 text-left w-8 sticky left-0 bg-blue-50/60">
+                            <input type="checkbox"
+                              className="accent-indigo-600 cursor-pointer"
+                              checked={accepted.length > 0 && selectedExtRows.size === accepted.length}
+                              ref={el => { if (el) el.indeterminate = selectedExtRows.size > 0 && selectedExtRows.size < accepted.length; }}
+                              onChange={() => setSelectedExtRows(
+                                selectedExtRows.size === accepted.length
+                                  ? new Set()
+                                  : new Set(accepted.map(r => r.rowIndex))
+                              )}
+                              title="Select / deselect all rows"
+                            />
+                          </th>
+                          <th className="px-2 py-2 text-left w-6 sticky left-8 bg-blue-50/60 text-blue-400 font-normal">#</th>
+                          <th className="px-2 py-2 text-left min-w-[130px] sticky left-[62px] bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Property</th>
+                          <th className="px-2 py-2 text-left w-20 sticky left-[212px] bg-blue-50/60 shadow-[2px_0_4px_-1px_rgba(0,0,0,0.06)]">Unit No.</th>
                           <th className="px-2 py-2 text-left w-16">Floor</th>
                           <th className="px-2 py-2 text-left w-24">Size (sqm)</th>
                           <th className="px-2 py-2 text-left min-w-[220px]">Amenities</th>
@@ -2499,10 +2533,21 @@ export default function IngestPipeline() {
                       </thead>
                       <tbody className="divide-y divide-blue-50">
                         {accepted.map((r, i) => (
-                          <tr key={r.rowIndex} className="hover:bg-blue-50/40 text-gray-700">
-                            <td className="px-3 py-1.5 text-gray-400 sticky left-0 bg-white">{i + 1}</td>
-                            <td className="px-2 py-1.5 font-semibold text-gray-900 sticky left-8 bg-white shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'property') || <span className="text-gray-300">—</span>}</td>
-                            <td className="px-2 py-1.5 font-mono text-blue-700 sticky left-[178px] bg-white shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'unit_no') || <span className="text-gray-300">—</span>}</td>
+                          <tr key={r.rowIndex} className={`hover:bg-blue-50/40 text-gray-700 ${selectedExtRows.has(r.rowIndex) ? 'bg-indigo-50/60' : ''}`}>
+                            <td className="px-2 py-1.5 sticky left-0 bg-inherit">
+                              <input type="checkbox"
+                                className="accent-indigo-600 cursor-pointer"
+                                checked={selectedExtRows.has(r.rowIndex)}
+                                onChange={() => setSelectedExtRows(prev => {
+                                  const next = new Set(prev);
+                                  next.has(r.rowIndex) ? next.delete(r.rowIndex) : next.add(r.rowIndex);
+                                  return next;
+                                })}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5 text-gray-400 sticky left-8 bg-inherit">{i + 1}</td>
+                            <td className="px-2 py-1.5 font-semibold text-gray-900 sticky left-[62px] bg-inherit shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'property') || <span className="text-gray-300">—</span>}</td>
+                            <td className="px-2 py-1.5 font-mono text-blue-700 sticky left-[212px] bg-inherit shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">{getV(r,'unit_no') || <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-1.5">{getV(r,'floor') ? <span className="text-gray-800 font-medium">{getV(r,'floor')}</span> : <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-1.5">{getV(r,'area_sqft') ? <span className="text-gray-800 font-medium">{getV(r,'area_sqft')} sqm</span> : <span className="text-gray-300">—</span>}</td>
                             <td className="px-2 py-1.5 align-top">
