@@ -81,14 +81,42 @@ Normalisation rules:
 - config: parse BHK or BR pattern. "2BHK" or "2 BR" → config: "2 BHK"; "3 BHK + 2 BATHROOM" → config: "3 BHK". Strip any qualifiers (Standard, Medium, Large BY, with pool, with backyard, Type A, Type B, etc.) from the bedroom count before setting config — qualifiers go to amenities and design_type instead.
 - bathrooms: parse from remarks e.g. "2BHK + 2 BATHROOM" → bathrooms: 2; "2BHK + 1 BATHROOM" → bathrooms: 1
 - design_type: extract layout/design qualifiers from the No. of Bedrooms or config field: "(Standard)" → "Standard"; "(Medium)" → "Medium"; "Type A"/"Type B"/"Type C" → "Type A"/"Type B"/"Type C"; "Mock up unit" → "Mock up unit"; "Giardino" → "Giardino"; "No Backyard" → "No Backyard". Omit if no qualifier.
-- amenities: extract from No. of Bedrooms or remarks. "with pool" or "w/ pool" or "Large SP" → "Private Pool"; "Large BY" or "Large Backyard" → "Large Backyard"; "with small backyard" or "Standard BY" → "Small Backyard"; "with small backyard" → "Small Backyard". Return as array of strings.
+- amenities: string[] — an array of amenity tags present for the unit. Allowed values (use these exact strings only, omit any not applicable):
+  "Balcony", "Barbecue Area", "Built-in Wardrobes", "Central A/C", "Covered Parking",
+  "Private Gym", "Private Jacuzzi", "Kitchen Appliances", "Maids Room", "Pets Allowed",
+  "Private Garden", "Private Pool", "Shared Pool", "Study", "View of Water",
+  "Security", "Concierge", "Shared Spa", "Shared Gym", "Maid Service",
+  "Walk-in Closet", "View of Landmark", "Children's Play Area", "Lobby in Building",
+  "Children's Pool", "WiFi", "Office", "Large Backyard", "Small Backyard", "Rowhouse",
+  "Rooftop Swimming Pool", "Indoor & Outdoor Gym", "Pickle Ball Court",
+  "Snooker Table", "Table Tennis", "Activity Zone", "Foozball"
+  Rules:
+  (1) config "+Maid" suffix → "Maids Room"; strip from config
+  (2) config "+Off"/"+off" suffix → "Office"; strip from config
+  (3) WIFI/WiFi/Wi-Fi column "Yes" or "YES" → "WiFi"
+  (4) Balcony column "Yes" → "Balcony"
+  (5) unit_no "/ Balcony" suffix → "Balcony"; strip suffix from unit_no
+  (6) unit_no "/ No Balcony" or "No Balcony" suffix → NO amenity; strip suffix from unit_no
+  (7) config "- Large BY" / "Large BY" / "(Large BY)" → "Large Backyard"; strip from config
+  (8) config "with small backyard" / "small backyard" / "- Small BY" → "Small Backyard"; strip from config
+  (9) config "Rowhouse" → "Rowhouse" AND set type = "Villa"; strip from config
+  (10) config "w/ pool" / "with pool" (villa context, individual unit) → "Private Pool"; strip from config
+  (11) config "- Large SP" / "SP" suffix where SP = Shared Pool → "Shared Pool"; strip from config
+  (12) VIEW column value is "Swimming Pool" → add "Shared Pool" to amenities (shared pool serves the whole property)
+  (13) Omit the field entirely if no amenities are identified — do not include an empty array
 - DUAL PRICING: when a unit has two rent values listed (e.g., one for Semi-Furnished and one for Fully Furnished), set rent to the LOWER value (Semi-Furnished price) and rent_ff to the HIGHER value (Fully Furnished price).
 - contract_end_date: populate from "Evacuation Date" column (YYYY-MM-DD format) — this is when the current lease ends and the unit becomes available.
 - dates: YYYY-MM-DD format
 - rent/charges: numbers only, no currency symbols — strip any "+ N Month(s) Free" suffix before extracting the rent number
-- If a field is not present, omit it (do not include null values)
-- For side-by-side multi-unit layouts, extract each unit as a separate record
-- Ignore headers, logos, footers, marketing text, and subtotal rows — only extract actual unit data
+- realtor_name: The COMPANY or BROKERAGE name that owns/manages the listing. Look for a dedicated "Company", "Agent", "Broker", "Real Estate" column or the document issuer name. NEVER put a person's first name or watchman/caretaker name here. If no company name is identifiable, omit entirely.
+- area_sqft: numeric size from "Size Sq.", "Size (sqm)", "Area", "Sq.m" column — store the number as-is.
+- floor: numeric floor number from "Floor", "Fl." column — integer only.
+- contact_details: Extract from any Watchman, Caretaker, Contact, Supervisor, or "Watchman Number" / "Watchman No." column. Format as "{Name} {Phone}". This is NOT the realtor. Omit label text.
+- view: Extract from any "VIEW", "View", "Orientation", "Facing", "Outlook" column. Normalise to the closest value from this list: Back View | Beach View | Canal View | City View | Clubhouse View | Community View | Corner View | Countryside View | Courtyard View | Desert View | Downtown View | Front View | Full View | Garden View | Golf Course View | Greenery View | Internal View | Lake View | Lagoon View | Landmark View | Main Road View | Marina View | Mountain View | Nature View | Neighbourhood View | Ocean View | Open View | Panoramic View | Park View | Partial View | Playground View | Pool View | Porto Arabia View | River View | Sea View | Side View | Skyline View | Sports View | Street View | Sunrise View | Sunset View | Swimming Pool View | Unobstructed View | Waterfront View. Omit if no close match.
+- property: The BUILDING or PROPERTY name. The "Bldg. Code / Area" or "Building Code" column is the property field. The document issuer name is the REALTOR, not the property.
+- Ignore: SN/serial numbers, section sub-headers, row colour banding, logos, footers, marketing text, offer details, Viewing Time column. Do NOT output standalone boolean maid_room or wifi fields — absorb into amenities[] instead.
+- If a field is not present, omit it entirely (do not include null values)
+- For multi-column layouts (units side by side), extract each unit as a separate record
 
 Return raw JSON array only. No markdown, no explanation.`;
 

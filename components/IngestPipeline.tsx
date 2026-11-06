@@ -187,6 +187,8 @@ const AMENITIES_LIST = [
   'Security', 'Concierge', 'Shared Spa', 'Shared Gym', 'Maid Service',
   'Walk-in Closet', "View of Landmark", "Children's Play Area", 'Lobby in Building',
   "Children's Pool", 'WiFi', 'Office',
+  'Rooftop Swimming Pool', 'Indoor & Outdoor Gym', 'Pickle Ball Court',
+  'Snooker Table', 'Table Tennis', 'Activity Zone', 'Foozball',
 ] as const;
 
 // All fields shown in the Validation table — used to drive the dynamic bulk-fill toolbar.
