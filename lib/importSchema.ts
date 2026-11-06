@@ -19,6 +19,8 @@ export const AMENITIES_LIST = [
   'Walk-in Closet', 'View of Landmark', "Children's Play Area", 'Lobby in Building',
   "Children's Pool", 'WiFi', 'Office',
   'Large Backyard', 'Small Backyard', 'Rowhouse',
+  'Rooftop Swimming Pool', 'Indoor & Outdoor Gym', 'Pickle Ball Court',
+  'Snooker Table', 'Table Tennis', 'Activity Zone', 'Foozball',
 ] as const;
 
 // Extended fields: non-blocking optional attributes surfaced in the AXIOM Validation
