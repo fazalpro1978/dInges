@@ -12,6 +12,23 @@ function requireApiKey(req: NextRequest): boolean {
   return key === process.env.INGEST_API_KEY;
 }
 
+export async function PATCH(req: NextRequest) {
+  if (!requireApiKey(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const body = await req.json().catch(() => null);
+  if (!body?.id || !body?.payload) {
+    return NextResponse.json({ error: 'id and payload required' }, { status: 400 });
+  }
+  const { error } = await admin
+    .from('vetted_records')
+    .update({ payload: body.payload })
+    .eq('id', body.id)
+    .is('acknowledged_at', null); // never patch already-imported records
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
+
 export async function GET(req: NextRequest) {
   if (!requireApiKey(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
