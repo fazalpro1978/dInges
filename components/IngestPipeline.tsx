@@ -332,7 +332,7 @@ export default function IngestPipeline() {
   const effectiveAgentCode = selectedAgentCode || agentCode;
   const [mcState, setMcState] = useState<MCState>({
     category: 'R', entity_code: '', check_status: 'idle',
-    existing_matches: [], unit_conflicts: [], override_confirmed: false,
+    existing_matches: [], unit_conflicts: [], conflict_keys: [], override_confirmed: false,
     override_selected_units: [], override_reason: '',
     generated_code: null, date_seg: '', time_seg: '', seq_num: 100, locked: false,
   });
@@ -677,7 +677,7 @@ export default function IngestPipeline() {
       });
       if (best === 0) matched = undefined;
     }
-    if (matched) updateMc({ entity_code: matched.entity_code, check_status: 'idle', existing_matches: [], unit_conflicts: [], generated_code: null });
+    if (matched) updateMc({ entity_code: matched.entity_code, check_status: 'idle', existing_matches: [], unit_conflicts: [], conflict_keys: [], generated_code: null });
   }, [entityCodes, mcState.locked, updateMc, STOPWORDS]);
 
   const handleMcApply = useCallback(async () => {
@@ -793,14 +793,17 @@ export default function IngestPipeline() {
     const token = await supabase.auth.getSession().then(r => r.data.session?.access_token ?? '');
     const propertyRef = matched[0]?.resolvedData?.property as string | undefined;
 
-    // Audit log for override units
-    if (mcState.override_selected_units.length > 0) {
+    // Audit log: per-unit when units were chosen in the conflict modal, otherwise one row for the code issued under a prefix-level override
+    const overrideCodes = mcState.override_selected_units.length > 0
+      ? mcState.override_selected_units
+      : (mcState.override_confirmed && mcState.override_reason ? [master_code] : []);
+    if (overrideCodes.length > 0) {
       fetch('/api/master-code/log-override', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           prefix: pfx,
-          smart_codes: mcState.override_selected_units,
+          smart_codes: overrideCodes,
           reason: mcState.override_reason,
           property_ref: propertyRef ?? null,
         }),
@@ -1726,6 +1729,11 @@ export default function IngestPipeline() {
                   entityCodes={entityCodes}
                   agents={agents}
                   recordCount={matched.length - excludedIdx.size}
+                  realtorName={String(matched.find((_, i) => !excludedIdx.has(i))?._conflictResolved.realtor_name ?? matched[0]?.resolvedData.realtor_name ?? '')}
+                  batchUnits={matched.filter((_, i) => !excludedIdx.has(i)).map(m => ({
+                    property: String(m._conflictResolved.property ?? m.resolvedData.property ?? ''),
+                    unit_no:  String(m._conflictResolved.unit_no  ?? m.resolvedData.unit_no  ?? ''),
+                  }))}
                   onStateChange={updateMc}
                   onAgentChange={setSelectedAgentCode}
                   onApply={handleMcApply}
@@ -1963,7 +1971,8 @@ export default function IngestPipeline() {
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {matched.map((r, i) => {
                 const computedSC = (r._conflictResolved.smart_code as string | null) ?? null;
-                const isConflicting = r._conflictResolved.__patch_only === true;
+                const cardKey = `${String(r._conflictResolved.property ?? r.resolvedData.property ?? '').toLowerCase().trim()}||${String(r._conflictResolved.unit_no ?? r.resolvedData.unit_no ?? '').toLowerCase().trim()}`;
+                const isConflicting = r._conflictResolved.__patch_only === true || mcState.conflict_keys.includes(cardKey);
                 const isUpdated = r.delta_status === 'ST_UPDATED';
                 return (
                 <div key={i} className={`border rounded-lg p-3 ${

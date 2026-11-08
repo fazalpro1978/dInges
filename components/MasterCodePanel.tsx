@@ -10,7 +10,8 @@ export type MCState = {
   entity_code:      string;
   check_status:     'idle' | 'checking' | 'clear' | 'existing';
   existing_matches: Array<{ master_code: string; created_at: string; property_ref?: string | null }>;
-  unit_conflicts:   string[];   // smart_codes already in units (e.g. ['RAARAA66-311'])
+  unit_conflicts:   string[];   // smart_codes of batch units already in REIMS (matched by realtor + property + unit_no)
+  conflict_keys:    string[];   // lower-cased 'property||unit_no' of those units, used to flag cards red
   override_confirmed: boolean;  // Admin/SU confirmed override after conflict
   override_selected_units: string[];  // subset of unit_conflicts chosen for override
   override_reason:  string;     // mandatory audit reason
@@ -28,6 +29,8 @@ type Props = {
   entityCodes:     EntityCode[];
   agents:          AgentEntry[];
   recordCount:     number;
+  realtorName?:    string;
+  batchUnits?:     Array<{ property: string; unit_no: string }>;
   onStateChange:   (next: Partial<MCState>) => void;
   onAgentChange:   (code: string) => void;
   onApply:         () => void;
@@ -37,7 +40,7 @@ type Props = {
 
 export default function MasterCodePanel({
   state, agentCode, zoneCode, entityCodes, agents, recordCount,
-  onStateChange, onAgentChange, onApply, onOpenOverride, hideApply = false,
+  realtorName, batchUnits = [], onStateChange, onAgentChange, onApply, onOpenOverride, hideApply = false,
 }: Props) {
   const prefix = buildMasterPrefix({
     category: state.category,
@@ -57,8 +60,10 @@ export default function MasterCodePanel({
     try {
       const token = await (await import('@/lib/supabaseClient')).default.auth.getSession()
         .then(r => r.data.session?.access_token ?? '');
-      const res = await fetch(`/api/master-code/check?prefix=${prefix}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch('/api/master-code/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ prefix, realtor_name: realtorName ?? '', units: batchUnits }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -70,12 +75,14 @@ export default function MasterCodePanel({
         check_status:     data.hasConflict ? 'existing' : 'clear',
         existing_matches: data.matches ?? [],
         unit_conflicts:   data.unitConflicts ?? [],
+        conflict_keys:    data.conflictKeys ?? [],
       });
     } catch {
       onStateChange({ check_status: 'idle' });
     }
   };
 
+  const [ackReason, setAckReason] = React.useState('');
   const hasUnitConflicts = state.unit_conflicts.length > 0;
   const conflictIsBlocking = state.check_status === 'existing' && !state.override_confirmed;
 
@@ -120,7 +127,7 @@ export default function MasterCodePanel({
               <button
                 key={cat}
                 disabled={state.locked}
-                onClick={() => onStateChange({ category: cat, check_status: 'idle', existing_matches: [], unit_conflicts: [], override_confirmed: false, generated_code: null })}
+                onClick={() => onStateChange({ category: cat, check_status: 'idle', existing_matches: [], unit_conflicts: [], conflict_keys: [], override_confirmed: false, override_reason: '', generated_code: null })}
                 className={`flex-1 text-[10px] font-semibold py-1 rounded border transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
                   state.category === cat
                     ? cat === 'R'
@@ -141,7 +148,7 @@ export default function MasterCodePanel({
           <select
             value={state.entity_code}
             disabled={state.locked}
-            onChange={e => onStateChange({ entity_code: e.target.value, check_status: 'idle', existing_matches: [], unit_conflicts: [], override_confirmed: false, generated_code: null })}
+            onChange={e => onStateChange({ entity_code: e.target.value, check_status: 'idle', existing_matches: [], unit_conflicts: [], conflict_keys: [], override_confirmed: false, override_reason: '', generated_code: null })}
             className="w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 mt-0.5 disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
             <option value="">— Select —</option>
@@ -163,7 +170,7 @@ export default function MasterCodePanel({
               const val = e.target.value;
               onAgentChange(val);
               // Defer state reset so the native select closes cleanly before re-render
-              setTimeout(() => onStateChange({ check_status: 'idle', existing_matches: [], unit_conflicts: [], override_confirmed: false, generated_code: null }), 0);
+              setTimeout(() => onStateChange({ check_status: 'idle', existing_matches: [], unit_conflicts: [], conflict_keys: [], override_confirmed: false, override_reason: '', generated_code: null }), 0);
             }}
             className="w-full border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400 mt-0.5 disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
@@ -272,11 +279,19 @@ export default function MasterCodePanel({
             ) : state.override_confirmed ? null : (
               <div className="space-y-1.5">
                 <p className="text-[10px] text-amber-700 font-medium">
-                  A previous batch used this prefix. Confirm this is a new upload for the same property to continue.
+                  A previous batch used this prefix (no unit in this upload matches an existing REIMS unit). State why this is a new upload to continue.
                 </p>
+                <textarea
+                  value={ackReason}
+                  onChange={e => setAckReason(e.target.value)}
+                  placeholder="Reason for override (min. 10 characters)"
+                  rows={2}
+                  className="w-full text-[11px] border border-amber-300 rounded p-1.5 bg-white text-gray-800 placeholder:text-gray-400"
+                />
                 <button
-                  onClick={() => onStateChange({ override_confirmed: true })}
-                  className="w-full text-xs px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-semibold"
+                  disabled={ackReason.trim().length < 10}
+                  onClick={() => onStateChange({ override_confirmed: true, override_reason: ackReason.trim() })}
+                  className="w-full text-xs px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white rounded font-semibold"
                 >Acknowledge &amp; Override</button>
               </div>
             )
