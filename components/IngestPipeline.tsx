@@ -273,7 +273,8 @@ function validateDirectRows(rows: DirectEntryRow[]): Record<string, string[]> {
   const REQUIRED = ['property', 'unit_no', 'zone_code', 'realtor_name', 'type', 'config', 'furnishing', 'agent_code'] as const;
   const errors: Record<string, string[]> = {};
   rows.forEach(row => {
-    const missing = REQUIRED.filter(f => !String((row as Record<string, unknown>)[f] ?? '').trim());
+    const missing: string[] = REQUIRED.filter(f => !String((row as Record<string, unknown>)[f] ?? '').trim());
+    if (!(Number(row.rent) > 0)) missing.push('rent');
     if (missing.length) errors[row._id] = [...missing];
   });
   return errors;
@@ -288,7 +289,7 @@ function toDirectApiRecord(r: DirectEntryRow): Record<string, unknown> {
     realtor_name:  r.realtor_name.trim(),
     realtor_moci:  r.realtor_moci.trim(),
     type:          r.type,
-    config:        r.config.trim(),
+    config:        /^\d+$/.test(r.config.trim()) ? `${r.config.trim()} BHK` : r.config.trim(),
     furnishing:    r.furnishing,
     status:        r.status || 'Available',
     rent:          r.rent ? Number(r.rent) : null,
@@ -747,6 +748,7 @@ export default function IngestPipeline() {
     };
 
     // SequenceGenerator + NaturalKeyDeduplication: assign unique smart_code via atomic RPC
+    const smartCodeFailures: string[] = [];
     const updatedMatched = await Promise.all(
       matched.map(async (m, i) => {
         if (excludedIdx.has(i)) return m;
@@ -760,7 +762,7 @@ export default function IngestPipeline() {
         }
 
         const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
-        const { data: assignment } = await supabase.rpc('cr_assign_smart_code', {
+        const { data: assignment, error: scErr } = await supabase.rpc('cr_assign_smart_code', {
           p_category:  mcState.category,
           p_entity:    mcState.entity_code,
           p_agent:     (effectiveAgentCode || '00').slice(0, 2),
@@ -771,7 +773,10 @@ export default function IngestPipeline() {
           p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
           p_zone_name: zoneName,
         });
-        if (!assignment) return { ...m, _conflictResolved: { ...m._conflictResolved, master_code: mc } };
+        if (scErr || !assignment) {
+          smartCodeFailures.push(`${String(m._conflictResolved.property ?? m.resolvedData.property ?? '')} ${String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '')}: ${scErr?.message ?? 'no smart code returned'}`);
+          return m;
+        }
         if (assignment.action === 'patch') {
           return {
             ...m,
@@ -786,6 +791,10 @@ export default function IngestPipeline() {
         return { ...m, _conflictResolved: { ...m._conflictResolved, master_code: mc, smart_code: assignment.smart_code } };
       })
     );
+    if (smartCodeFailures.length > 0) {
+      setError(`Smart Code generation failed for ${smartCodeFailures.length} record(s) — nothing was locked or registered. ${smartCodeFailures.slice(0, 3).join(' | ')}`);
+      return;
+    }
     setMatched(updatedMatched);
     updateMc({ generated_code: master_code, date_seg, time_seg, seq_num: mcState.seq_num + 1, locked: true });
 
@@ -1069,6 +1078,13 @@ export default function IngestPipeline() {
         .filter((a): a is NonNullable<typeof a> => a !== null);
 
       if (approvals.length === 0) throw new Error('No records selected to send to REIMS');
+
+      const noSmartCode = approvals.filter(a => a.decision === 'approved'
+        && !(a.resolvedData as Record<string, unknown> | undefined)?.smart_code
+        && !(a.resolvedData as Record<string, unknown> | undefined)?.__patch_only);
+      if (noSmartCode.length > 0) {
+        throw new Error(`${noSmartCode.length} record(s) have no 14-digit Smart Code — go back to Match & Review and generate the Master Code again before sending to REIMS.`);
+      }
 
       const approveRes = await fetch('/api/approve', {
         method: 'POST',
@@ -1520,7 +1536,7 @@ export default function IngestPipeline() {
                                       {TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                                     </select>
                                   </td>
-                                  <td className="px-1 py-1" style={{ width: 72 }}><input className={errCls('config')} value={row.config} onChange={e => update('config', e.target.value)} placeholder="2BR" /></td>
+                                  <td className="px-1 py-1" style={{ width: 72 }}><input className={errCls('config')} value={row.config} onChange={e => update('config', e.target.value)} placeholder="2 BHK" /></td>
                                   <td className="px-1 py-1" style={{ width: 140 }}>
                                     <select className={errCls('furnishing')} value={row.furnishing} onChange={e => update('furnishing', e.target.value)}>
                                       <option value="">Select…</option>
@@ -1534,7 +1550,7 @@ export default function IngestPipeline() {
                                     </select>
                                   </td>
                                   {showOptionalCols && <>
-                                    <td className="px-1 py-1" style={{ width: 90 }}><input className="w-full text-xs rounded border border-gray-200 px-1.5 py-1 focus:outline-none" value={row.rent} onChange={e => update('rent', e.target.value)} placeholder="QAR" type="number" /></td>
+                                    <td className="px-1 py-1" style={{ width: 90 }}><input className={errCls('rent')} value={row.rent} onChange={e => update('rent', e.target.value)} placeholder="QAR" type="number" min={1} /></td>
                                     <td className="px-1 py-1" style={{ width: 140 }}>
                                       <select className="w-full text-xs rounded border border-gray-200 px-1.5 py-1 focus:outline-none" value={row.status} onChange={e => update('status', e.target.value)}>
                                         <option value="Available">Available</option>
