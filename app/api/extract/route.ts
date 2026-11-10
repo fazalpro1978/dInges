@@ -11,6 +11,8 @@ export const maxDuration = 300; // seconds — required for large AI extraction 
 import { isDanatQatarSheet, parseDanatQatar } from '../../../lib/parsers/danatQatar';
 import { isRetajSheet, parseRetaj } from '../../../lib/parsers/retaj';
 import { isCapSheet, parseCap } from '../../../lib/parsers/cap';
+import { isRetajVacantSheet, parseRetajVacant } from '../../../lib/parsers/retajVacant';
+import { registry } from '../../../lib/registryClient';
 
 const execAsync = promisify(exec);
 
@@ -84,7 +86,7 @@ Normalisation rules:
 - design_type: extract layout/design qualifiers from the No. of Bedrooms or config field: "(Standard)" → "Standard"; "(Medium)" → "Medium"; "Type A"/"Type B"/"Type C" → "Type A"/"Type B"/"Type C"; "Mock up unit" → "Mock up unit"; "Giardino" → "Giardino"; "No Backyard" → "No Backyard". Omit if no qualifier.
 - amenities: string[] — an array of amenity tags present for the unit. Allowed values (use these exact strings only, omit any not applicable):
   "Balcony", "Barbecue Area", "Built-in Wardrobes", "Central A/C", "Covered Parking",
-  "Private Gym", "Private Jacuzzi", "Kitchen Appliances", "Maids Room", "Pets Allowed",
+  "Private Gym", "Private Jacuzzi", "Kitchen Appliances", "Maids Room", "Store Room", "Pets Allowed",
   "Private Garden", "Private Pool", "Shared Pool", "Study", "View of Water",
   "Security", "Concierge", "Shared Spa", "Shared Gym", "Maid Service",
   "Walk-in Closet", "View of Landmark", "Children's Play Area", "Lobby in Building",
@@ -192,7 +194,17 @@ export async function POST(req: NextRequest) {
       const wb   = xlsx.read(buf, { type: 'buffer', cellDates: true });
 
       // ── Source-specific parsers (no AI call; output matches Claude shape) ──
+      const hiddenSheets = new Set(
+        (wb.Workbook?.Sheets ?? []).filter(s => s.Hidden).map(s => s.name),
+      );
       for (const name of wb.SheetNames) {
+        if (hiddenSheets.has(name)) continue;
+        if (isRetajVacantSheet(name, wb.Sheets[name])) {
+          const { data: zr } = await registry.from('cr_zone_codes').select('zone_code, district_name');
+          const zoneNames = new Map<number, string>((zr ?? []).map((z: { zone_code: number; district_name: string }) => [z.zone_code, z.district_name]));
+          units = parseRetajVacant(wb.Sheets[name], zoneNames);
+          break;
+        }
         if (isRetajSheet(name, wb.Sheets[name])) {
           units = parseRetaj(wb.Sheets[name]);
           break;
