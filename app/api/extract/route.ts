@@ -14,6 +14,7 @@ import { isCapSheet, parseCap } from '../../../lib/parsers/cap';
 import { isRetajVacantSheet, parseRetajVacant } from '../../../lib/parsers/retajVacant';
 import { registry } from '../../../lib/registryClient';
 import { applyMissingFieldDefaults } from '../../../lib/parsers/normalisers';
+import { isCanonicalSheet, parseCanonical } from '../../../lib/parsers/canonical';
 
 const execAsync = promisify(exec);
 
@@ -31,7 +32,8 @@ contract_start_date, contract_end_date, location_map_url, media_url, notes,
 month_free_applicable, month_free_days,
 kahramaa_applicable, kahramaa_amount,
 water_electricity, water_electricity_limit_applicable, water_electricity_limit_amount,
-operator_remarks, maintenance_notes
+operator_remarks, maintenance_notes,
+agency_fee_applicable, agency_fee_amount, agency_fee_paid_by
 
 REMARKS SPANNING MULTIPLE COLUMNS: When a spreadsheet spreads remarks/notes across
 several adjacent columns (e.g. columns G, H, I all contain partial remarks for the
@@ -69,6 +71,10 @@ subtotal rows, not unit records.
 - media_url: URL pointing to a photo folder, media storage, or document library for this unit (e.g. Google Drive, OneDrive, Dropbox link). Often found in a column labelled PHOTOS, Media, Images, or similar — the cell may display a label like "PHOTOS" with a hyperlink behind it; the hyperlink URL is provided in square brackets after the cell value, e.g. "PHOTOS [https://drive.google.com/…]". Extract the URL. null if absent.
 - rent RANGES: when the price cell holds a range of two numbers (e.g. "4750-5250", "4,200 - 4,500") — as opposed to two labelled prices for different furnishing levels — OMIT rent and add to operator_remarks: "Rent range provided: {low} - {high} — enter rent manually".
 - BILLS / utilities abbreviations (any column): "NOT INC", "NOT INCLUDED", "EXCLUDING …" → kahramaa_applicable: true and water_electricity: "Excluded". "INC", "INC.", "INCLUDING ALL", "INCLUDING KAHRAMA ONLY", "INC W & E" → kahramaa_applicable: false and water_electricity: "Included".
+- QUANTITY lists: when each row carries a QTY / Quantity / No. of units count and NO unit numbers, output one record per unit (QTY records for that row). Number them unit_no "TBC-01", "TBC-02", … sequentially per property across ALL rows of the same property (a property that appears in several rows or tables continues the sequence), and add "Unit number not provided in source — placeholder assigned" to operator_remarks.
+- "NO INCLUSIONS" (any case) → kahramaa_applicable: true and water_electricity: "Excluded". "Electricity and Water are Included" / "Electricity, Water … Included" → kahramaa_applicable: false and water_electricity: "Included"; "Free Shared Internet" → add "WiFi" to amenities.
+- legal_duration: a lease period or minimum term stated for the row or its table ("2 YEARS Lease Period", "Minimum term is two (2) years", "3 YEARS lease period") → "2 years" / "3 years" style. Omit if none is stated.
+- agency commission: when a note says a commission equal to one week's rent applies ("commission equal to one week's rent", "Equivalent to 1 week commission") to the rows it covers → agency_fee_applicable: true, agency_fee_amount: rent ÷ 4 rounded to 2 decimals (omit the amount when rent is omitted, e.g. a rent range), agency_fee_paid_by: "Real Estate Company". Do NOT set these for rows the note does not cover.
 - maintenance_notes: when the file has a Building Number / Building No. / Bldg Num column, set "Building No. {value}". Omit otherwise.
 - Listing-category text such as "staff only" / "STAFF ONLY" (any spelling) → add "STAFF ONLY" to operator_remarks and still extract the unit.
 - month_free_applicable: true if the rent cell OR the remarks/notes column contains any "month free" incentive — any phrasing like "1 Month Free", "2 Months free", "one month free", "+ 1 Free Month", "1ST MONTH FREE", "FIRST MONTH FREE", etc. false otherwise.
@@ -100,7 +106,7 @@ Normalisation rules:
   "Rooftop Swimming Pool", "Indoor & Outdoor Gym", "Pickle Ball Court",
   "Snooker Table", "Table Tennis", "Activity Zone", "Foozball"
   Rules:
-  (1) config "+Maid" suffix → "Maids Room"; strip from config. config "+Store"/"+ Store" → "Store Room"; strip from config
+  (1) config "+Maid" suffix → "Maids Room"; strip from config. config "+Store"/"+ Store" → "Store Room"; strip from config. A bare "+1" after the bedroom count ("2BR+1", "4BR+1") → "Maids Room"; strip from config
   (2) config "+Off"/"+off" suffix → "Office"; strip from config
   (3) WIFI/WiFi/Wi-Fi column "Yes" or "YES" → "WiFi"
   (4) Balcony column "Yes" → "Balcony"
@@ -128,6 +134,14 @@ Normalisation rules:
 - For multi-column layouts (units side by side), extract each unit as a separate record
 
 Return raw JSON array only. No markdown, no explanation.`;
+
+// Any record carrying a zone_code but no zone name gets the registry district name.
+async function fillZoneNames(units: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+  if (!units.some(u => u.zone_code && !u.zone)) return units;
+  const { data } = await registry.from('cr_zone_codes').select('zone_code, district_name');
+  const names = new Map<number, string>((data ?? []).map((z: { zone_code: number; district_name: string }) => [z.zone_code, z.district_name]));
+  return units.map(u => (u.zone_code && !u.zone && names.get(Number(u.zone_code))) ? { ...u, zone: names.get(Number(u.zone_code)) } : u);
+}
 
 function getClient() {
   const opts: ConstructorParameters<typeof Anthropic>[0] = { apiKey: process.env.ANTHROPIC_API_KEY };
@@ -205,6 +219,10 @@ export async function POST(req: NextRequest) {
       );
       for (const name of wb.SheetNames) {
         if (hiddenSheets.has(name)) continue;
+        if (isCanonicalSheet(name, wb.Sheets[name])) {
+          units = parseCanonical(wb.Sheets[name]);
+          break;
+        }
         if (isRetajVacantSheet(name, wb.Sheets[name])) {
           const { data: zr } = await registry.from('cr_zone_codes').select('zone_code, district_name');
           const zoneNames = new Map<number, string>((zr ?? []).map((z: { zone_code: number; district_name: string }) => [z.zone_code, z.district_name]));
@@ -225,7 +243,7 @@ export async function POST(req: NextRequest) {
         }
       }
       if (units.length > 0) {
-        units = units.map(applyMissingFieldDefaults);
+        units = await fillZoneNames(units.map(applyMissingFieldDefaults));
         return NextResponse.json({ units, fileName: file.name, count: units.length });
       }
 
@@ -290,7 +308,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Unsupported file type: .${ext}` }, { status: 400 });
     }
 
-    units = units.map(applyMissingFieldDefaults);
+    units = await fillZoneNames(units.map(applyMissingFieldDefaults));
     return NextResponse.json({ units, fileName: file.name, count: units.length });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Extraction failed' }, { status: 500 });
