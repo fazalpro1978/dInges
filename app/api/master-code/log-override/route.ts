@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     overridden_by: auth.uid,
   }));
 
-  const { error } = await registry.from('cr_code_overrides').insert(rows);
+  const { error } = await registry.from('cr_master_code_overrides').insert(rows);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ logged: rows.length }, { status: 201 });
