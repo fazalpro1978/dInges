@@ -85,3 +85,47 @@ export function normRent(raw: unknown): number | null {
   const n = parseFloat(cleaned);
   return isNaN(n) ? null : n;
 }
+
+// ── Utilities from "Bills" wording ──────────────────────────────────────────
+// "NOT INC" / "NOT INCLUDED" / "EXCLUDING …" → Kahramaa deposit applicable, water & electricity Excluded.
+// Any other "INC…" wording (INC, INC., INCLUDING ALL, INCLUDING KAHRAMA ONLY, INC W & E) → not applicable, Included.
+export function normBills(raw: string): { kahramaa_applicable: boolean; water_electricity: 'Included' | 'Excluded' } | null {
+  const s = raw.trim().toUpperCase();
+  if (!s) return null;
+  if (/^(NOT\s*INC|EXCLUDING|EXCL\b)/.test(s)) return { kahramaa_applicable: true, water_electricity: 'Excluded' };
+  if (/INC/.test(s)) return { kahramaa_applicable: false, water_electricity: 'Included' };
+  return null;
+}
+
+// ── Defaults for fields a source file never provides ────────────────────────
+// Bathrooms follow the bedroom count; parking and kitchen default to Yes. Every default adds a
+// "<Field> Details Not Provided, Please Cross Check" line to operator_remarks so a person verifies it.
+// Set AXIOM_MISSING_FIELD_DEFAULTS=off to disable without a code change.
+export function defaultBathrooms(config?: string): number | undefined {
+  if (!config) return undefined;
+  if (config === 'Studio') return 1.5;
+  if (config === 'Duplex') return 2.5;
+  const n = Number(/^(\d+) BHK$/.exec(config)?.[1]);
+  if (!n) return undefined;
+  return n === 1 ? 1 : n === 2 ? 1.5 : n === 3 ? 2.5 : n === 4 ? 3.5 : 4;
+}
+
+const COMMERCIAL_TYPES = new Set(['office', 'shop', 'retail', 'warehouse', 'showroom', 'industrial']);
+const isBlank = (v: unknown) => v === undefined || v === null || String(v).trim() === '';
+
+export function applyMissingFieldDefaults(u: Record<string, unknown>): Record<string, unknown> {
+  if (process.env.AXIOM_MISSING_FIELD_DEFAULTS === 'off') return u;
+  if (COMMERCIAL_TYPES.has(String(u.type ?? '').trim().toLowerCase())) return u;
+  const notes: string[] = [];
+  if (isBlank(u.bathrooms)) {
+    const b = defaultBathrooms(typeof u.config === 'string' ? u.config : undefined);
+    if (b !== undefined) { u.bathrooms = b; notes.push('Bathroom Details Not Provided, Please Cross Check'); }
+  }
+  if (isBlank(u.parking)) { u.parking = 'Yes'; notes.push('Parking Details Not Provided, Please Cross Check'); }
+  if (isBlank(u.kitchen)) { u.kitchen = 'Yes'; notes.push('Kitchen Details Not Provided, Please Cross Check'); }
+  if (notes.length) {
+    const existing = String(u.operator_remarks ?? '').trim();
+    u.operator_remarks = [existing, ...notes.filter(n => !existing.includes(n))].filter(Boolean).join(' · ');
+  }
+  return u;
+}

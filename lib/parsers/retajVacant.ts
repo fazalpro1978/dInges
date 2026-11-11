@@ -4,7 +4,7 @@
 // Rules confirmed by the user on 2026-11-10 — see project memory "retaj_vacant_list".
 
 import * as xlsx from 'xlsx';
-import { normFurnishing } from './normalisers';
+import { normFurnishing, normBills, applyMissingFieldDefaults } from './normalisers';
 
 type Cell = xlsx.CellObject & { r?: string; l?: { Target?: string } };
 const at = (ws: xlsx.WorkSheet, r: number, c: number) => ws[xlsx.utils.encode_cell({ r, c })] as Cell | undefined;
@@ -88,15 +88,6 @@ function parseConfig(raw: string): { config?: string; type: string; amenities: s
   return { type: 'Apartment', amenities, shop: false };
 }
 
-function defaultBathrooms(config?: string): number | undefined {
-  if (!config) return undefined;
-  if (config === 'Studio') return 1.5;
-  if (config === 'Duplex') return 2.5;
-  const n = Number(/^(\d+) BHK$/.exec(config)?.[1]);
-  if (!n) return undefined;
-  return n === 1 ? 1 : n === 2 ? 1.5 : n === 3 ? 2.5 : n === 4 ? 3.5 : 4;
-}
-
 const isHttp = (s: string) => /^https?:\/\//i.test(s);
 const linkOf = (cell?: Cell): string | undefined => {
   const v = String(cell?.v ?? '').trim();
@@ -164,16 +155,8 @@ export function parseRetajVacant(ws: xlsx.WorkSheet, zoneNames: Map<number, stri
     else { const n = Number(priceCore.replace(/[^\d.]/g, '')); if (n > 0) rent = n; }
 
     // Bills → Kahramaa / water & electricity
-    const bills = txt(carry.bills).toUpperCase();
-    let kahramaa: boolean | undefined;
-    let waterElec: string | undefined;
-    if (/^NOT\s*INC/.test(bills)) { kahramaa = true; waterElec = 'Excluded'; }
-    else if (/INC/.test(bills))   { kahramaa = false; waterElec = 'Included'; }
+    const bills = normBills(txt(carry.bills));
 
-    // Defaults for fields the file never provides, each flagged for cross-checking
-    const bathrooms = defaultBathrooms(cfg.config);
-    if (bathrooms !== undefined) remarks.push('Bathroom Details Not Provided, Please Cross Check');
-    remarks.push('Parking Details Not Provided, Please Cross Check', 'Kitchen Details Not Provided, Please Cross Check');
 
     const area = txt(carry.area);
     const zone_code = AREA_ZONE.find(([re]) => re.test(area))?.[1];
@@ -191,17 +174,14 @@ export function parseRetajVacant(ws: xlsx.WorkSheet, zoneNames: Map<number, stri
         type: cfg.type,
         listing_type: 'Rent',
         status: red ? 'Reserved' : 'Available',
-        parking: 'Yes',
-        kitchen: 'Yes',
-        operator_remarks: remarks.join(' · '),
       };
+      if (remarks.length) u.operator_remarks = remarks.join(' · ');
       if (cfg.config) u.config = cfg.config;
       if (['Fully Furnished', 'Semi-Furnished', 'Unfurnished'].includes(furnishing)) u.furnishing = furnishing;
       if (rent !== undefined) u.rent = rent;
-      if (bathrooms !== undefined) u.bathrooms = bathrooms;
       if (cfg.amenities.length) u.amenities = cfg.amenities;
       if (monthFree !== undefined) { u.month_free_applicable = true; u.month_free_days = monthFree; }
-      if (kahramaa !== undefined) { u.kahramaa_applicable = kahramaa; u.water_electricity = waterElec; }
+      if (bills) { u.kahramaa_applicable = bills.kahramaa_applicable; u.water_electricity = bills.water_electricity; }
       if (zone_code !== undefined) {
         u.zone_code = zone_code;
         u.zone = zoneNames.get(zone_code) ?? area;
@@ -212,7 +192,7 @@ export function parseRetajVacant(ws: xlsx.WorkSheet, zoneNames: Map<number, stri
       if (buildingNo) u.maintenance_notes = `Building No. ${buildingNo}`;
       if (map) u.location_map_url = map;
       if (photos) u.media_url = photos;
-      units.push(u);
+      units.push(applyMissingFieldDefaults(u));
     }
   }
   return units;

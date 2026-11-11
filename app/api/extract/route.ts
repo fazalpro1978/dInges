@@ -13,6 +13,7 @@ import { isRetajSheet, parseRetaj } from '../../../lib/parsers/retaj';
 import { isCapSheet, parseCap } from '../../../lib/parsers/cap';
 import { isRetajVacantSheet, parseRetajVacant } from '../../../lib/parsers/retajVacant';
 import { registry } from '../../../lib/registryClient';
+import { applyMissingFieldDefaults } from '../../../lib/parsers/normalisers';
 
 const execAsync = promisify(exec);
 
@@ -30,7 +31,7 @@ contract_start_date, contract_end_date, location_map_url, media_url, notes,
 month_free_applicable, month_free_days,
 kahramaa_applicable, kahramaa_amount,
 water_electricity, water_electricity_limit_applicable, water_electricity_limit_amount,
-operator_remarks
+operator_remarks, maintenance_notes
 
 REMARKS SPANNING MULTIPLE COLUMNS: When a spreadsheet spreads remarks/notes across
 several adjacent columns (e.g. columns G, H, I all contain partial remarks for the
@@ -57,6 +58,7 @@ FURNISHING rules — set "furnishing" ONLY when explicitly stated; never infer i
   and fittings." Set status: "Available".
 - Source text "Ready for move in": this indicates status only → status: "Available".
   Do NOT set furnishing based on this phrase.
+- Source text "UF", "uf", "Unfurnished", "Un-Furnished" → furnishing: "Unfurnished"
 - No furnishing mention at all → omit furnishing entirely (do not default to Unfurnished).
 
 SKIP ROWS: Ignore any row where the property/building name cell contains
@@ -65,6 +67,10 @@ subtotal rows, not unit records.
 
 - location_map_url: Direct map link for this unit or its building. Extract from any column labelled "Map", "Map URL", "Location Map", "Google Maps", "Location Link", "Maps Link", or similar — the cell may display a label like "MAP" or "Location" with a hyperlink behind it; the hyperlink URL is provided in square brackets after the cell value, e.g. "MAP [https://maps.google.com/…]". Accept any Google Maps, Apple Maps, or other mapping service URL. Omit if no map link is present in the source.
 - media_url: URL pointing to a photo folder, media storage, or document library for this unit (e.g. Google Drive, OneDrive, Dropbox link). Often found in a column labelled PHOTOS, Media, Images, or similar — the cell may display a label like "PHOTOS" with a hyperlink behind it; the hyperlink URL is provided in square brackets after the cell value, e.g. "PHOTOS [https://drive.google.com/…]". Extract the URL. null if absent.
+- rent RANGES: when the price cell holds a range of two numbers (e.g. "4750-5250", "4,200 - 4,500") — as opposed to two labelled prices for different furnishing levels — OMIT rent and add to operator_remarks: "Rent range provided: {low} - {high} — enter rent manually".
+- BILLS / utilities abbreviations (any column): "NOT INC", "NOT INCLUDED", "EXCLUDING …" → kahramaa_applicable: true and water_electricity: "Excluded". "INC", "INC.", "INCLUDING ALL", "INCLUDING KAHRAMA ONLY", "INC W & E" → kahramaa_applicable: false and water_electricity: "Included".
+- maintenance_notes: when the file has a Building Number / Building No. / Bldg Num column, set "Building No. {value}". Omit otherwise.
+- Listing-category text such as "staff only" / "STAFF ONLY" (any spelling) → add "STAFF ONLY" to operator_remarks and still extract the unit.
 - month_free_applicable: true if the rent cell OR the remarks/notes column contains any "month free" incentive — any phrasing like "1 Month Free", "2 Months free", "one month free", "+ 1 Free Month", "1ST MONTH FREE", "FIRST MONTH FREE", etc. false otherwise.
 - month_free_days: integer number of free months (e.g. "7000 + 1 Month Free" → 1, "10,000 + 2 Months free" → 2, "one month free" → 1, "2 MONTHS FREE" → 2). Extract from rent cell first, then remarks as fallback. Omit if month_free_applicable is false.
 - kahramaa_applicable: false when ANY column (remarks, utilities, terms, kahramaa column, or any dedicated column) contains "INCLUDING KAHRAMAA", "INCLUDING KAHRAMA", "Including Kahrama", "Including Kahramaa", "INCLUDING ALL BILLS", "ALL BILLS INCLUDED", or any phrasing that utilities are included in the rent (tenant does NOT pay a separate kahramaa deposit). true when "EXCLUDING KAHRAMAA" or "KAHRAMAA NOT INCLUDED" appears anywhere. Omit only if kahramaa is not mentioned in any column.
@@ -94,7 +100,7 @@ Normalisation rules:
   "Rooftop Swimming Pool", "Indoor & Outdoor Gym", "Pickle Ball Court",
   "Snooker Table", "Table Tennis", "Activity Zone", "Foozball"
   Rules:
-  (1) config "+Maid" suffix → "Maids Room"; strip from config
+  (1) config "+Maid" suffix → "Maids Room"; strip from config. config "+Store"/"+ Store" → "Store Room"; strip from config
   (2) config "+Off"/"+off" suffix → "Office"; strip from config
   (3) WIFI/WiFi/Wi-Fi column "Yes" or "YES" → "WiFi"
   (4) Balcony column "Yes" → "Balcony"
@@ -219,6 +225,7 @@ export async function POST(req: NextRequest) {
         }
       }
       if (units.length > 0) {
+        units = units.map(applyMissingFieldDefaults);
         return NextResponse.json({ units, fileName: file.name, count: units.length });
       }
 
@@ -283,6 +290,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Unsupported file type: .${ext}` }, { status: 400 });
     }
 
+    units = units.map(applyMissingFieldDefaults);
     return NextResponse.json({ units, fileName: file.name, count: units.length });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Extraction failed' }, { status: 500 });
