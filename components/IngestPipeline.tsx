@@ -758,9 +758,17 @@ export default function IngestPipeline() {
         const zoneName    = getRecordZoneName(m);
         const mc          = masterCodeByZone[zc] ?? master_code;
 
+        // Persist the zone the master code / smart code were built from onto the record itself, so Validation and the
+        // REIMS payload always agree with the prefix (a hand-picked zone lives only in propZones until now).
+        const zoneFields: Record<string, unknown> = {};
+        if (Number(zc) > 0) zoneFields.zone_code = Number(zc);
+        if (zoneName)       zoneFields.zone = zoneName;
+        const srcZone = String(m._conflictResolved.zone_source ?? m.resolvedData.zone_source ?? m.resolvedData.zone ?? '').trim();
+        if (srcZone && srcZone !== zoneName) zoneFields.zone_source = srcZone;
+
         // ST_UPDATED: preserve existing REIMS smart_code — only the MC timestamp refreshes at apply
         if (m.delta_status === 'ST_UPDATED' && m.existingSnapshot?.smart_code) {
-          return { ...m, _conflictResolved: { ...m._conflictResolved, master_code: mc, smart_code: m.existingSnapshot.smart_code } };
+          return { ...m, _conflictResolved: { ...m._conflictResolved, ...zoneFields, master_code: mc, smart_code: m.existingSnapshot.smart_code } };
         }
 
         const typeCode = await resolveTypeCode(m._conflictResolved.config ?? m.resolvedData.config);
@@ -785,13 +793,14 @@ export default function IngestPipeline() {
             ...m,
             _conflictResolved: {
               ...m._conflictResolved,
+              ...zoneFields,
               master_code: mc,
               smart_code: assignment.smart_code,
               __patch_only: true,
             },
           };
         }
-        return { ...m, _conflictResolved: { ...m._conflictResolved, master_code: mc, smart_code: assignment.smart_code } };
+        return { ...m, _conflictResolved: { ...m._conflictResolved, ...zoneFields, master_code: mc, smart_code: assignment.smart_code } };
       })
     );
     if (smartCodeFailures.length > 0) {
@@ -1090,6 +1099,18 @@ export default function IngestPipeline() {
         .filter((a): a is NonNullable<typeof a> => a !== null);
 
       if (approvals.length === 0) throw new Error('No records selected to send to REIMS');
+
+      const zoneProblems = approvals.filter(a => {
+        if (a.decision !== 'approved') return false;
+        const d = (a.resolvedData ?? {}) as Record<string, unknown>;
+        const z = Number(d.zone_code);
+        if (!(z > 0)) return true;
+        const mcode = String(d.master_code ?? '');
+        return mcode.length === 16 && mcode.slice(6, 8) !== String(z).padStart(2, '0').slice(-2);
+      });
+      if (zoneProblems.length > 0) {
+        throw new Error(`${zoneProblems.length} record(s) have a missing zone or a zone that does not match their Master Code prefix — go back to Match & Review, assign the zone and generate again, or correct Zone # in Validation.`);
+      }
 
       const noSmartCode = approvals.filter(a => a.decision === 'approved'
         && !(a.resolvedData as Record<string, unknown> | undefined)?.smart_code

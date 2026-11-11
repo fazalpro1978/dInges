@@ -202,7 +202,11 @@ export function parseRetajVacant(ws: xlsx.WorkSheet, zoneNames: Map<number, stri
       if (cfg.amenities.length) u.amenities = cfg.amenities;
       if (monthFree !== undefined) { u.month_free_applicable = true; u.month_free_days = monthFree; }
       if (kahramaa !== undefined) { u.kahramaa_applicable = kahramaa; u.water_electricity = waterElec; }
-      if (zone_code !== undefined) { u.zone_code = zone_code; u.zone = zoneNames.get(zone_code) ?? area; }
+      if (zone_code !== undefined) {
+        u.zone_code = zone_code;
+        u.zone = zoneNames.get(zone_code) ?? area;
+        if (area && u.zone !== area) u.zone_source = area;
+      }
       else if (area) u.zone = area;
       if (/\d{6,}/.test(phone)) u.contact_details = phone;
       if (buildingNo) u.maintenance_notes = `Building No. ${buildingNo}`;
