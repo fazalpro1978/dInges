@@ -761,6 +761,12 @@ export default function IngestPipeline() {
         // Persist the zone the master code / smart code were built from onto the record itself, so Validation and the
         // REIMS payload always agree with the prefix (a hand-picked zone lives only in propZones until now).
         const zoneFields: Record<string, unknown> = {};
+        const ownRealtor = String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? '').trim();
+        const recRealtor = ownRealtor || bulkRealtor.name.trim();
+        if (!ownRealtor && recRealtor) {
+          zoneFields.realtor_name = recRealtor;
+          if (bulkRealtor.moci) zoneFields.realtor_moci = bulkRealtor.moci;
+        }
         if (Number(zc) > 0) zoneFields.zone_code = Number(zc);
         if (zoneName)       zoneFields.zone = zoneName;
         const srcZone = String(m._conflictResolved.zone_source ?? m.resolvedData.zone_source ?? m.resolvedData.zone ?? '').trim();
@@ -778,7 +784,7 @@ export default function IngestPipeline() {
           p_agent:     (effectiveAgentCode || '00').slice(0, 2),
           p_zone_code: zc,
           p_type_code: typeCode,
-          p_realtor:   String(m._conflictResolved.realtor_name ?? m.resolvedData.realtor_name ?? ''),
+          p_realtor:   recRealtor,
           p_property:  String(m._conflictResolved.property    ?? m.resolvedData.property    ?? ''),
           p_unit_no:   String(m._conflictResolved.unit_no     ?? m.resolvedData.unit_no     ?? ''),
           p_zone_name: zoneName,
@@ -859,7 +865,7 @@ export default function IngestPipeline() {
         }
       }).catch(err => console.error('[MC Register] network error', err))
     ));
-  }, [mcState, effectiveAgentCode, bulkZone.code, bulkZone.name, propZones, matched, excludedIdx]);
+  }, [mcState, effectiveAgentCode, bulkZone.code, bulkZone.name, bulkRealtor.name, bulkRealtor.moci, propZones, matched, excludedIdx]);
 
   // ── Poll run status when at REIMS Queue stage ─────────────────────────────
 
@@ -1110,6 +1116,12 @@ export default function IngestPipeline() {
       });
       if (zoneProblems.length > 0) {
         throw new Error(`${zoneProblems.length} record(s) have a missing zone or a zone that does not match their Master Code prefix — go back to Match & Review, assign the zone and generate again, or correct Zone # in Validation.`);
+      }
+
+      const noRealtor = approvals.filter(a => a.decision === 'approved'
+        && !String((a.resolvedData as Record<string, unknown> | undefined)?.realtor_name ?? '').trim());
+      if (noRealtor.length > 0) {
+        throw new Error(`${noRealtor.length} record(s) have no realtor — go back to Match & Review, pick the realtor and generate again (or set Realtor in Validation).`);
       }
 
       const noSmartCode = approvals.filter(a => a.decision === 'approved'
@@ -1805,7 +1817,7 @@ export default function IngestPipeline() {
                   entityCodes={entityCodes}
                   agents={agents}
                   recordCount={matched.length - excludedIdx.size}
-                  realtorName={String(matched.find((_, i) => !excludedIdx.has(i))?._conflictResolved.realtor_name ?? matched[0]?.resolvedData.realtor_name ?? '')}
+                  realtorName={String(matched.find((_, i) => !excludedIdx.has(i))?._conflictResolved.realtor_name ?? matched[0]?.resolvedData.realtor_name ?? bulkRealtor.name ?? '')}
                   batchUnits={matched.filter((_, i) => !excludedIdx.has(i)).map(m => ({
                     property: String(m._conflictResolved.property ?? m.resolvedData.property ?? ''),
                     unit_no:  String(m._conflictResolved.unit_no  ?? m.resolvedData.unit_no  ?? ''),
