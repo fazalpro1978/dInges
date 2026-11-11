@@ -339,6 +339,7 @@ export default function IngestPipeline() {
   });
   const updateMc = (next: Partial<MCState>) => setMcState(prev => ({ ...prev, ...next }));
   const [overrideModalOpen, setOverrideModalOpen] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
   const [legacyPrefix, setLegacyPrefix] = useState(false);
   useEffect(() => { setLegacyPrefix(new URLSearchParams(window.location.search).get('legacyPrefix') === '1'); }, []);
 
@@ -775,7 +776,8 @@ export default function IngestPipeline() {
           p_zone_name: zoneName,
         });
         if (scErr || !assignment) {
-          smartCodeFailures.push(`${String(m._conflictResolved.property ?? m.resolvedData.property ?? '')} ${String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '')}: ${scErr?.message ?? 'no smart code returned'}`);
+          if (scErr) console.error('[Smart Code RPC]', scErr);
+          smartCodeFailures.push(`${String(m._conflictResolved.property ?? m.resolvedData.property ?? '')} ${String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '')}: ${scErr ? [scErr.message, scErr.code && `[${scErr.code}]`, scErr.details, scErr.hint].filter(Boolean).join(' ') : 'no smart code returned'}`);
           return m;
         }
         if (assignment.action === 'patch') {
@@ -793,7 +795,8 @@ export default function IngestPipeline() {
       })
     );
     if (smartCodeFailures.length > 0) {
-      setError(`Smart Code generation failed for ${smartCodeFailures.length} record(s) — nothing was locked or registered. ${smartCodeFailures.slice(0, 3).join(' | ')}`);
+      const distinct = Array.from(new Set(smartCodeFailures.map(f => f.split(': ').slice(1).join(': '))));
+      setError(`Smart Code generation failed for ${smartCodeFailures.length} record(s) — nothing was locked or registered. Reason${distinct.length > 1 ? 's' : ''}: ${distinct.slice(0, 3).join(' | ')} (first: ${smartCodeFailures[0].split(': ')[0]})`);
       return;
     }
     setMatched(updatedMatched);
@@ -1245,6 +1248,9 @@ export default function IngestPipeline() {
 
   const { openNav } = useNav();
 
+  // Bring a new error into view — the banner sits at the top of the page, far above the Generate button
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [error]);
+
   // A change to the zone assignment invalidates any prefix check already run
   useEffect(() => {
     if (!zoneGroups || mcState.locked || mcState.check_status === 'idle') return;
@@ -1307,7 +1313,7 @@ export default function IngestPipeline() {
 
       <main className="max-w-[1700px] mx-auto px-4 py-8">
         {error && (
-          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+          <div ref={errorRef} className="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
             {error}
           </div>
         )}
@@ -1853,6 +1859,9 @@ export default function IngestPipeline() {
                       </button>
                     </div>
                   </div>
+                  {error && (
+                    <div className="px-4 py-2 border-b border-red-200 bg-red-50 text-xs text-red-700">{error}</div>
+                  )}
                   {/* Gate status strip */}
                   {!canGenerateMC && (
                     <div className="flex items-center gap-2 px-4 py-1.5 border-b border-amber-200" style={{ background: '#fffbeb' }}>
