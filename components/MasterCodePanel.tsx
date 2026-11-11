@@ -36,11 +36,13 @@ type Props = {
   onApply:         () => void;
   onOpenOverride?: () => void;
   hideApply?:      boolean;  // suppress Apply button for multi-zone batches (use accordion Generate instead)
+  // Multi-zone batches: one entry per real zone in the batch. When set, the single bulk-zone prefix is not used.
+  zoneGroups?:     Array<{ zone_code: string; count: number; units: Array<{ property: string; unit_no: string }> }>;
 };
 
 export default function MasterCodePanel({
   state, agentCode, zoneCode, entityCodes, agents, recordCount,
-  realtorName, batchUnits = [], onStateChange, onAgentChange, onApply, onOpenOverride, hideApply = false,
+  realtorName, batchUnits = [], onStateChange, onAgentChange, onApply, onOpenOverride, hideApply = false, zoneGroups,
 }: Props) {
   const prefix = buildMasterPrefix({
     category: state.category,
@@ -49,9 +51,53 @@ export default function MasterCodePanel({
     zone_code: zoneCode,
   });
 
-  const prefixOk = prefix !== null;
+  const multiZone = !!zoneGroups && zoneGroups.length > 0;
+  const groupPrefixes = (zoneGroups ?? []).map(g => ({
+    ...g,
+    prefix: g.zone_code && Number(g.zone_code) > 0
+      ? buildMasterPrefix({ category: state.category, entity_code: state.entity_code, agent_code: agentCode, zone_code: g.zone_code })
+      : null,
+  }));
+  const [zoneStatus, setZoneStatus] = React.useState<Record<string, 'clear' | 'existing'>>({});
+  React.useEffect(() => { if (state.check_status === 'idle') setZoneStatus({}); }, [state.check_status]);
+
+  const prefixOk = multiZone ? groupPrefixes.every(g => g.prefix !== null) : prefix !== null;
+
+  const runCheckAll = async () => {
+    if (!prefixOk) return;
+    const { getNowSegments } = await import('@/lib/buildMasterCode');
+    const { date_seg, time_seg } = getNowSegments();
+    onStateChange({ check_status: 'checking', date_seg, time_seg });
+    try {
+      const token = await (await import('@/lib/supabaseClient')).default.auth.getSession()
+        .then(r => r.data.session?.access_token ?? '');
+      const results = await Promise.all(groupPrefixes.map(async g => {
+        const res = await fetch('/api/master-code/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ prefix: g.prefix, realtor_name: realtorName ?? '', units: g.units }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'check failed');
+        return { g, data };
+      }));
+      const status: Record<string, 'clear' | 'existing'> = {};
+      results.forEach(({ g, data }) => { status[g.prefix as string] = data.hasConflict ? 'existing' : 'clear'; });
+      setZoneStatus(status);
+      onStateChange({
+        check_status:     results.some(r => r.data.hasConflict) ? 'existing' : 'clear',
+        existing_matches: results.flatMap(r => r.data.matches ?? []),
+        unit_conflicts:   results.flatMap(r => r.data.unitConflicts ?? []),
+        conflict_keys:    results.flatMap(r => r.data.conflictKeys ?? []),
+      });
+    } catch (e) {
+      console.error('[MC Check] error:', e);
+      onStateChange({ check_status: 'idle' });
+    }
+  };
 
   const runCheck = async () => {
+    if (multiZone) return runCheckAll();
     if (!prefixOk) return;
     const { getNowSegments } = await import('@/lib/buildMasterCode');
     const { date_seg, time_seg } = getNowSegments();
@@ -94,7 +140,8 @@ export default function MasterCodePanel({
   }[state.check_status];
 
   const statusLabel = {
-    idle:     prefixOk ? '⬤ Prefix ready — run check' : '◯ Fill Category + Entity',
+    idle:     prefixOk ? (multiZone ? `⬤ ${groupPrefixes.length} zone prefixes ready — run check` : '⬤ Prefix ready — run check')
+                       : (multiZone ? '◯ Fill Category + Entity + Agent and assign a zone to every group' : '◯ Fill Category + Entity'),
     checking: '⟳ Checking registry…',
     clear:    '✓ No conflicts — ready to apply',
     existing: hasUnitConflicts
@@ -187,10 +234,19 @@ export default function MasterCodePanel({
         <div className="mb-4">
           <label className="text-[9px] text-gray-400 uppercase tracking-wide">Zone</label>
           <div className="flex items-center gap-1 border border-teal-200 bg-teal-50 rounded px-1.5 py-0.5 mt-0.5">
-            <span className="font-mono font-bold text-teal-700 text-xs">
-              {zoneCode ? String(zoneCode).padStart(2, '0') : '—'}
-            </span>
-            <span className="text-teal-500 text-xs">from record</span>
+            {multiZone ? (
+              <>
+                <span className="font-mono font-bold text-teal-700 text-xs">{groupPrefixes.length}</span>
+                <span className="text-teal-500 text-xs">zones in this batch — see prefixes →</span>
+              </>
+            ) : (
+              <>
+                <span className="font-mono font-bold text-teal-700 text-xs">
+                  {zoneCode ? String(zoneCode).padStart(2, '0') : '—'}
+                </span>
+                <span className="text-teal-500 text-xs">from record</span>
+              </>
+            )}
           </div>
         </div>
 
@@ -215,15 +271,43 @@ export default function MasterCodePanel({
         <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-3">Smart Master Code</p>
 
         {/* 8-char prefix */}
+        {multiZone ? (
+          <div className="mb-3">
+            <p className="text-[9px] text-gray-400 mb-1">8-char Prefix — one per zone</p>
+            <div className="space-y-0.5 max-h-40 overflow-y-auto pr-1">
+              {groupPrefixes.map((g, i) => {
+                const st = g.prefix ? zoneStatus[g.prefix] : undefined;
+                return (
+                  <div key={g.zone_code || `unassigned-${i}`} className="flex items-center justify-between gap-2">
+                    <span className={`font-mono font-bold text-xs tracking-widest ${g.prefix ? 'text-gray-700' : 'text-amber-600'}`}>
+                      {g.prefix ? [g.prefix[0], g.prefix.slice(1, 4), g.prefix.slice(4, 6), g.prefix.slice(6, 8)].join(' · ') : 'zone needed'}
+                    </span>
+                    <span className="text-[9px] text-gray-400 whitespace-nowrap">
+                      {g.count} unit{g.count !== 1 ? 's' : ''}
+                      {st === 'clear' && <span className="text-green-600 ml-1">✓</span>}
+                      {st === 'existing' && <span className="text-red-600 ml-1">⚠ exists</span>}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
         <div className="mb-3">
           <p className="text-[9px] text-gray-400 mb-0.5">8-char Prefix</p>
           <p className="font-mono font-bold text-sm tracking-widest text-gray-700">
             {prefixDisplay ?? '————————'}
           </p>
         </div>
+        )}
 
         {/* 16-digit generated code */}
-        {state.generated_code ? (
+        {multiZone ? (
+          <div className="mb-3 p-2 bg-gray-100 border border-dashed border-gray-300 rounded">
+            <p className="text-[9px] text-gray-400 mb-0.5">16-digit Master Code</p>
+            <p className="text-[10px] text-gray-400">One code per zone is generated with “Generate Master Codes”.</p>
+          </div>
+        ) : state.generated_code ? (
           <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded">
             <p className="text-[9px] text-green-600 mb-0.5">Generated</p>
             <p className="font-mono font-bold text-green-800 tracking-wider text-sm break-all">

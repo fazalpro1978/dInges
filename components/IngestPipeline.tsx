@@ -339,6 +339,8 @@ export default function IngestPipeline() {
   });
   const updateMc = (next: Partial<MCState>) => setMcState(prev => ({ ...prev, ...next }));
   const [overrideModalOpen, setOverrideModalOpen] = useState(false);
+  const [legacyPrefix, setLegacyPrefix] = useState(false);
+  useEffect(() => { setLegacyPrefix(new URLSearchParams(window.location.search).get('legacyPrefix') === '1'); }, []);
 
   // Stage 2 → Validation: per-row reject + inline cell editing + dynamic bulk fill
   const [rejectedInValidation, setRejectedInValidation] = useState<Set<number>>(new Set());
@@ -723,7 +725,6 @@ export default function IngestPipeline() {
       category: mcState.category, entity_code: mcState.entity_code,
       agent_code: effectiveAgentCode, zone_code: (bulkZone.code || '00').padStart(2, '0'), date_seg, time_seg,
     });
-    const pfx = master_code.slice(0, 8);
 
     // DynamicTypeMapping: resolve 2-char type code — local map first, DB fallback
     const TYPE_CODE_MAP: Record<string, string> = {
@@ -807,16 +808,24 @@ export default function IngestPipeline() {
       ? mcState.override_selected_units
       : (mcState.override_confirmed && mcState.override_reason ? [master_code] : []);
     if (overrideCodes.length > 0) {
-      fetch('/api/master-code/log-override', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          prefix: pfx,
-          smart_codes: overrideCodes,
-          reason: mcState.override_reason,
-          property_ref: propertyRef ?? null,
-        }),
-      }).catch(err => console.error('[MC Override Log] error', err));
+      const byPrefix: Record<string, string[]> = {};
+      for (const c of overrideCodes) (byPrefix[c.slice(0, 8)] ??= []).push(c);
+      // A prefix-level override covers every zone prefix in the batch
+      if (mcState.override_selected_units.length === 0) {
+        Object.values(masterCodeByZone).forEach(mc => { (byPrefix[mc.slice(0, 8)] ??= []); if (!byPrefix[mc.slice(0, 8)].includes(mc)) byPrefix[mc.slice(0, 8)].push(mc); });
+      }
+      Object.entries(byPrefix).forEach(([prefix, codes]) => {
+        fetch('/api/master-code/log-override', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            prefix,
+            smart_codes: codes,
+            reason: mcState.override_reason,
+            property_ref: propertyRef ?? null,
+          }),
+        }).catch(err => console.error('[MC Override Log] error', err));
+      });
     }
 
     // Register all zone-group master codes
@@ -1217,7 +1226,31 @@ export default function IngestPipeline() {
   const matchPropNames = Object.keys(matchPropGroups);
   const isMultiZone    = matchPropNames.length >= 2;
 
+  // Real zones present in this batch (per property group, then per record). The legacy single-prefix panel
+  // is still available by adding ?legacyPrefix=1 to the URL.
+  const zoneGroupMap: Record<string, { zone_code: string; count: number; units: Array<{ property: string; unit_no: string }> }> = {};
+  matched.forEach((m, i) => {
+    if (excludedIdx.has(i)) return;
+    const prop = String(m._conflictResolved.property ?? m.resolvedData.property ?? '');
+    const raw  = propZones[prop]?.code || m._conflictResolved.zone_code || m.resolvedData.zone_code || '';
+    const n    = Number(raw);
+    const key  = raw !== '' && Number.isFinite(n) && n > 0 ? String(n).padStart(2, '0') : '';
+    (zoneGroupMap[key] ??= { zone_code: key, count: 0, units: [] }).count++;
+    zoneGroupMap[key].units.push({ property: prop, unit_no: String(m._conflictResolved.unit_no ?? m.resolvedData.unit_no ?? '') });
+  });
+  const zoneGroups = isMultiZone && !legacyPrefix
+    ? Object.values(zoneGroupMap).sort((a, b) => (a.zone_code || 'zz').localeCompare(b.zone_code || 'zz'))
+    : undefined;
+  const zoneSignature = zoneGroups ? zoneGroups.map(g => `${g.zone_code}:${g.count}`).join('|') : '';
+
   const { openNav } = useNav();
+
+  // A change to the zone assignment invalidates any prefix check already run
+  useEffect(() => {
+    if (!zoneGroups || mcState.locked || mcState.check_status === 'idle') return;
+    updateMc({ check_status: 'idle', existing_matches: [], unit_conflicts: [], conflict_keys: [], override_confirmed: false, override_reason: '', override_selected_units: [] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoneSignature]);
 
   return (
     <div className="min-h-screen" style={{ background: '#1b1e23' }}>
@@ -1755,6 +1788,7 @@ export default function IngestPipeline() {
                   onApply={handleMcApply}
                   onOpenOverride={() => setOverrideModalOpen(true)}
                   hideApply={isMultiZone}
+                  zoneGroups={zoneGroups}
                 />
               </div>
             </div>
@@ -1764,9 +1798,12 @@ export default function IngestPipeline() {
               const allZonesDone  = matchPropNames.every(p => propZones[p]?.code || propZones[p]?.name);
               const realtorSet    = !!bulkRealtor.name.trim();
               const noConflicts   = unresolvedConflicts === 0;
-              const canGenerateMC = allZonesDone && realtorSet && noConflicts;
+              const mcCheckOk     = !zoneGroups || mcState.check_status === 'clear'
+                || (mcState.check_status === 'existing' && mcState.override_confirmed);
+              const canGenerateMC = allZonesDone && realtorSet && noConflicts && mcCheckOk;
               const gateItems     = [
                 !allZonesDone && 'Assign zone to every group',
+                allZonesDone && !mcCheckOk && (mcState.check_status === 'existing' ? 'Acknowledge the existing-prefix override' : 'Run Check Registry for all zone prefixes'),
                 !realtorSet   && 'Set Bulk Realtor in Record Fields',
                 !noConflicts  && `Resolve ${unresolvedConflicts} conflict${unresolvedConflicts > 1 ? 's' : ''}`,
               ].filter(Boolean) as string[];
@@ -3020,7 +3057,9 @@ export default function IngestPipeline() {
       {/* Override governance modal — rendered at root level to escape any parent stacking context */}
       {overrideModalOpen && (
         <OverrideGovernanceModal
-          prefix={buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: bulkZone.code }) ?? ''}
+          prefix={zoneGroups
+            ? zoneGroups.filter(g => g.zone_code).map(g => buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: g.zone_code })).filter(Boolean).join(', ')
+            : buildMasterPrefix({ category: mcState.category, entity_code: mcState.entity_code, agent_code: effectiveAgentCode, zone_code: bulkZone.code }) ?? ''}
           unitConflicts={mcState.unit_conflicts}
           propertyRef={mcState.existing_matches[0]?.property_ref}
           onCancel={() => setOverrideModalOpen(false)}
