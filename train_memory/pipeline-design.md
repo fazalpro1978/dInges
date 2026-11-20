@@ -3,7 +3,7 @@
 ## Flow
 Upload → Match & Review → Validation → Stage → REIMS queue → Import.
 
-- **Upload** (`/api/extract`): one entry for every file. A trained parser handles known layouts; anything else goes to the AI with the trained rule prompt. Every result then passes through the shared defaults and zone-name fill.
+- **Upload** (`/api/extract`): one entry for every file; hidden sheets are never read. A trained parser handles known layouts; anything else goes to the AI with the trained rule prompt. Every result then passes through the shared defaults and zone-name fill.
 - **Match & Review**: realtor, entity, agent and one zone per property group are chosen. Master Codes are generated per zone.
 - **Validation / Stage**: people complete blanks (for example rents) and review the REIMS impact.
 - **REIMS queue → Import**: the REIMS apply route writes units, operational notes and agency commission.

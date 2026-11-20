@@ -46,6 +46,8 @@ export const GLOBAL_RULES: Rule[] = [
     rule: 'A record with a zone_code but no zone name receives the registry district name; the original file text is kept in zone_source.' },
   { id: 'G12', decidedOn: '2026-11-10', enforcedBy: ['app/api/extract/route.ts'],
     rule: 'Furnishing is never inferred. Maid / "+1" suffix -> Maids Room, "+Store" -> Store Room, unit-level notes such as "staff only" go to operator_remarks.' },
+  { id: 'G14', decidedOn: '2026-11-10', enforcedBy: ['app/api/extract/route.ts'],
+    rule: 'Hidden sheets are never read — neither by the trained parsers nor by the AI path (confirmed for the Retaj workbook\'s hidden Inovia sheet, applied to every file).' },
   { id: 'G13', decidedOn: '2026-11-11', enforcedBy: ['lib/parsers/canonical.ts', 'app/api/extract/route.ts'],
     rule: 'A sheet whose headers are AXIOM field names is read exactly as written (no AI); master and smart codes in it are ignored and always regenerated.' },
 ];

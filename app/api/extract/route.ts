@@ -256,6 +256,7 @@ export async function POST(req: NextRequest) {
 
       const rows: string[] = [];
       wb.SheetNames.forEach(name => {
+        if (hiddenSheets.has(name)) return; // hidden sheets are never read, on the parser or the AI path
         const ws    = wb.Sheets[name];
         const ref   = ws['!ref'];
         let data: unknown[][];
