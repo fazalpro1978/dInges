@@ -15,6 +15,7 @@ import { isRetajVacantSheet, parseRetajVacant } from '../../../lib/parsers/retaj
 import { registry } from '../../../lib/registryClient';
 import { applyMissingFieldDefaults } from '../../../lib/parsers/normalisers';
 import { isCanonicalSheet, parseCanonical } from '../../../lib/parsers/canonical';
+import { HANDLER_PROFILE } from '../../../lib/trainMemory';
 
 const execAsync = promisify(exec);
 
@@ -167,6 +168,7 @@ export async function POST(req: NextRequest) {
 
   try {
     let units: Record<string, unknown>[] = [];
+    let handler = 'ai-schema-prompt'; // which trained profile produced the units (see lib/trainMemory.ts)
 
     // ── Image ──────────────────────────────────────────────────────────────────
     if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
@@ -221,30 +223,35 @@ export async function POST(req: NextRequest) {
         if (hiddenSheets.has(name)) continue;
         if (isCanonicalSheet(name, wb.Sheets[name])) {
           units = parseCanonical(wb.Sheets[name]);
+          handler = 'canonical-sheet';
           break;
         }
         if (isRetajVacantSheet(name, wb.Sheets[name])) {
           const { data: zr } = await registry.from('cr_zone_codes').select('zone_code, district_name');
           const zoneNames = new Map<number, string>((zr ?? []).map((z: { zone_code: number; district_name: string }) => [z.zone_code, z.district_name]));
           units = parseRetajVacant(wb.Sheets[name], zoneNames);
+          handler = 'retaj-vacant-list';
           break;
         }
         if (isRetajSheet(name, wb.Sheets[name])) {
           units = parseRetaj(wb.Sheets[name]);
+          handler = 'retaj-template';
           break;
         }
         if (isDanatQatarSheet(name, wb.Sheets[name])) {
           units = await parseDanatQatar(wb.Sheets[name]);
+          handler = 'danat-qatar-template';
           break;
         }
         if (isCapSheet(name, wb.Sheets[name])) {
           units = await parseCap(wb.Sheets[name]);
+          handler = 'cap-vacant-list';
           break;
         }
       }
       if (units.length > 0) {
         units = await fillZoneNames(units.map(applyMissingFieldDefaults));
-        return NextResponse.json({ units, fileName: file.name, count: units.length });
+        return NextResponse.json({ units, fileName: file.name, count: units.length, source: HANDLER_PROFILE[handler] });
       }
 
       const rows: string[] = [];
@@ -309,7 +316,7 @@ export async function POST(req: NextRequest) {
     }
 
     units = await fillZoneNames(units.map(applyMissingFieldDefaults));
-    return NextResponse.json({ units, fileName: file.name, count: units.length });
+    return NextResponse.json({ units, fileName: file.name, count: units.length, source: HANDLER_PROFILE[handler] });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Extraction failed' }, { status: 500 });
   }

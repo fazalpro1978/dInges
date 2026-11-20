@@ -6,7 +6,8 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:train-memory": "node scripts/check-train-memory.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
