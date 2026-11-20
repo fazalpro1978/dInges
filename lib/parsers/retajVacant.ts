@@ -6,9 +6,9 @@
 import * as xlsx from 'xlsx';
 import { normFurnishing, normBills, applyMissingFieldDefaults } from './normalisers';
 
-type Cell = xlsx.CellObject & { r?: string; l?: { Target?: string } };
-const at = (ws: xlsx.WorkSheet, r: number, c: number) => ws[xlsx.utils.encode_cell({ r, c })] as Cell | undefined;
-const txt = (cell?: Cell) => String(cell?.v ?? '').replace(/\s+/g, ' ').trim();
+export type Cell = xlsx.CellObject & { r?: string; l?: { Target?: string } };
+export const at = (ws: xlsx.WorkSheet, r: number, c: number) => ws[xlsx.utils.encode_cell({ r, c })] as Cell | undefined;
+export const txt = (cell?: Cell) => String(cell?.v ?? '').replace(/\s+/g, ' ').trim();
 
 const HEADER_KEYS = {
   name: /bu?i?ld?ing name/i, num: /bu?i?ld?ing num/i, type: /unit type/i, units: /units available/i,
@@ -38,7 +38,7 @@ export function isRetajVacantSheet(_name: string, ws: xlsx.WorkSheet): boolean {
 
 // Area text → zone_code. Only unambiguous areas are resolved; the registry has several codes for
 // some districts (Al Sadd 38/39, Musheireb 3/4/13) so those are left for the user in Match & Review.
-const AREA_ZONE: Array<[RegExp, number]> = [
+export const AREA_ZONE: Array<[RegExp, number]> = [
   [/^al ?sadd$/i, 38], [/^al ?naser$|^al ?nasr$/i, 39], [/umm ?ghu?wailina/i, 27], [/old ?air ?port|old arport/i, 45],
   [/^lusail$/i, 69], [/al ?ghrafa|al ?gharrafa/i, 51], [/^al ?waab$/i, 55], [/abo ?hamour|abu ?hamour/i, 55],
   [/al ?masilla|al ?messila/i, 36], [/bin ?omran/i, 37], [/fareej ?kulaib|fereej ?kulaib/i, 35], [/old ?sala[t]?a/i, 18],
@@ -58,7 +58,7 @@ function runsOf(cell: Cell | undefined): Run[] {
 }
 
 // Split a dash-joined unit-number cell into tokens, flagging tokens that contain a red character.
-function unitTokens(cell: Cell | undefined): Array<{ no: string; red: boolean }> {
+export function unitTokens(cell: Cell | undefined): Array<{ no: string; red: boolean }> {
   const runs = runsOf(cell);
   const chars: Array<{ ch: string; red: boolean }> = [];
   for (const r of runs) for (const ch of r.text) chars.push({ ch, red: r.red });
@@ -74,7 +74,7 @@ function unitTokens(cell: Cell | undefined): Array<{ no: string; red: boolean }>
   return out;
 }
 
-function parseConfig(raw: string): { config?: string; type: string; amenities: string[]; shop: boolean } {
+export function parseConfig(raw: string): { config?: string; type: string; amenities: string[]; shop: boolean } {
   const s = raw.toLowerCase();
   const amenities: string[] = [];
   if (s.includes('shop')) return { type: 'Shop', amenities, shop: true };
@@ -89,7 +89,7 @@ function parseConfig(raw: string): { config?: string; type: string; amenities: s
 }
 
 const isHttp = (s: string) => /^https?:\/\//i.test(s);
-const linkOf = (cell?: Cell): string | undefined => {
+export const linkOf = (cell?: Cell): string | undefined => {
   const v = String(cell?.v ?? '').trim();
   const t = cell?.l?.Target?.trim() ?? '';
   return isHttp(v) ? v : isHttp(t) ? t : undefined;
@@ -197,3 +197,5 @@ export function parseRetajVacant(ws: xlsx.WorkSheet, zoneNames: Map<number, stri
   }
   return units;
 }
+
+export const resolveAreaZone = (area: string): number | undefined => AREA_ZONE.find(([re]) => re.test(area.trim()))?.[1];

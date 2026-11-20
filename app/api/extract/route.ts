@@ -13,7 +13,8 @@ import { isRetajSheet, parseRetaj } from '../../../lib/parsers/retaj';
 import { isCapSheet, parseCap } from '../../../lib/parsers/cap';
 import { isRetajVacantSheet, parseRetajVacant } from '../../../lib/parsers/retajVacant';
 import { registry } from '../../../lib/registryClient';
-import { applyMissingFieldDefaults } from '../../../lib/parsers/normalisers';
+import { applyMissingFieldDefaults, dedupeUnits } from '../../../lib/parsers/normalisers';
+import { isRetajBlockListSheet, parseRetajBlockList } from '../../../lib/parsers/retajBlockList';
 import { isCanonicalSheet, parseCanonical } from '../../../lib/parsers/canonical';
 import { HANDLER_PROFILE } from '../../../lib/trainMemory';
 
@@ -233,6 +234,13 @@ export async function POST(req: NextRequest) {
           handler = 'retaj-vacant-list';
           break;
         }
+        if (isRetajBlockListSheet(name, wb.Sheets[name])) {
+          const { data: zr } = await registry.from('cr_zone_codes').select('zone_code, district_name');
+          const zoneNames = new Map<number, string>((zr ?? []).map((z: { zone_code: number; district_name: string }) => [z.zone_code, z.district_name]));
+          units = parseRetajBlockList(wb.Sheets[name], zoneNames);
+          handler = 'retaj-block-list';
+          break;
+        }
         if (isRetajSheet(name, wb.Sheets[name])) {
           units = parseRetaj(wb.Sheets[name]);
           handler = 'retaj-template';
@@ -250,8 +258,9 @@ export async function POST(req: NextRequest) {
         }
       }
       if (units.length > 0) {
-        units = await fillZoneNames(units.map(applyMissingFieldDefaults));
-        return NextResponse.json({ units, fileName: file.name, count: units.length, source: HANDLER_PROFILE[handler] });
+        const dd = dedupeUnits(await fillZoneNames(units.map(applyMissingFieldDefaults)));
+        units = dd.units;
+        return NextResponse.json({ units, fileName: file.name, count: units.length, source: HANDLER_PROFILE[handler], duplicatesRemoved: dd.removed, duplicatesFlagged: dd.conflicts });
       }
 
       const rows: string[] = [];
@@ -316,8 +325,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Unsupported file type: .${ext}` }, { status: 400 });
     }
 
-    units = await fillZoneNames(units.map(applyMissingFieldDefaults));
-    return NextResponse.json({ units, fileName: file.name, count: units.length, source: HANDLER_PROFILE[handler] });
+    const dd = dedupeUnits(await fillZoneNames(units.map(applyMissingFieldDefaults)));
+    units = dd.units;
+    return NextResponse.json({ units, fileName: file.name, count: units.length, source: HANDLER_PROFILE[handler], duplicatesRemoved: dd.removed, duplicatesFlagged: dd.conflicts });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Extraction failed' }, { status: 500 });
   }

@@ -48,6 +48,8 @@ export const GLOBAL_RULES: Rule[] = [
     rule: 'Furnishing is never inferred. Maid / "+1" suffix -> Maids Room, "+Store" -> Store Room, unit-level notes such as "staff only" go to operator_remarks.' },
   { id: 'G14', decidedOn: '2026-11-10', enforcedBy: ['app/api/extract/route.ts'],
     rule: 'Hidden sheets are never read — neither by the trained parsers nor by the AI path (confirmed for the Retaj workbook\'s hidden Inovia sheet, applied to every file).' },
+  { id: 'G15', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/normalisers.ts', 'app/api/extract/route.ts'],
+    rule: 'A unit listed twice in one file is imported once when the rows are identical; rows that share property + unit number but differ are kept and flagged "Duplicate unit number in source file — please verify". Nothing is dropped unless it is an exact copy.' },
   { id: 'G13', decidedOn: '2026-11-11', enforcedBy: ['lib/parsers/canonical.ts', 'app/api/extract/route.ts'],
     rule: 'A sheet whose headers are AXIOM field names is read exactly as written (no AI); master and smart codes in it are ignored and always regenerated.' },
 ];
@@ -64,6 +66,17 @@ export const SOURCE_PROFILES: SourceProfile[] = [
       { id: 'RET04', decidedOn: '2026-11-10', enforcedBy: ['lib/parsers/retajVacant.ts'], rule: 'Config: 3bhk / 2 BR -> N BHK, STUDIO -> Studio, DUBLEX -> Duplex; "(small/big/medium)" ignored; +MAID / +STORE / +BALCONY become amenities. FF / UF / SF -> Fully / Unfurnished / Semi-Furnished.' },
       { id: 'RET05', decidedOn: '2026-11-10', enforcedBy: ['lib/parsers/retajVacant.ts'], rule: 'Building number -> maintenance_notes "Building No. N"; "staff only" kind -> imported with operator_remarks STAFF ONLY; security phone -> contact_details (imported units only); realtor left blank to be chosen in AXIOM.' },
       { id: 'RET06', decidedOn: '2026-11-10', enforcedBy: ['lib/parsers/retajVacant.ts'], rule: 'Areas resolve to a zone only when unambiguous (alsadd 38, alnaser 39, …); Corniche, Mushirab and buildings with no area are chosen in Match & Review.' },
+    ],
+  },
+  {
+    id: 'retaj-block-list', name: 'Retaj per-building block list', handler: 'parser',
+    detect: 'Header row with Building, Unit No., Price, Type, Bills and Offer (e.g. the Alshaheen / Al Naser list); hidden sheets skipped',
+    doc: 'train_memory/sources/retaj-block-list.md',
+    rules: [
+      { id: 'RBL01', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajBlockList.ts'], rule: 'Blocks are found from the merged building-level cells; a unit row without its own building name belongs to the block it is merged with.' },
+      { id: 'RBL02', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajBlockList.ts'], rule: 'TYPE carries config and furnishing together ("2BHK - FF"); OFFER "1 MONTH FREE" sets month free (count, REIMS stores days); BILLS follows global rule G02; building number goes to maintenance_notes.' },
+      { id: 'RBL03', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajBlockList.ts'], rule: 'BOOKED under either the AGENT or STATUS column (the source headers are swapped) means Reserved; red font marks shared labels in this layout and is ignored; "X" units import nothing.' },
+      { id: 'RBL04', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajBlockList.ts', 'lib/parsers/retajVacant.ts'], rule: 'The area comes from the sheet title in brackets (e.g. "( ALNASER )") and resolves to a zone only when unambiguous (alnaser 39); a map link is used only where the location cell has one.' },
     ],
   },
   {
@@ -99,6 +112,7 @@ export const SOURCE_PROFILES: SourceProfile[] = [
 export const HANDLER_PROFILE: Record<string, { id: string; name: string }> = {
   'canonical-sheet':    { id: 'canonical-sheet',    name: 'AXIOM field-name sheet (read exactly as written)' },
   'retaj-vacant-list':  { id: 'retaj-vacant-list',  name: 'Retaj Properties vacant list' },
+  'retaj-block-list':   { id: 'retaj-block-list',   name: 'Retaj per-building block list' },
   'retaj-template':     { id: 'retaj-template',     name: 'Retaj "Units Import" template' },
   'danat-qatar-template': { id: 'danat-qatar-template', name: 'Danat Qatar XLSX template' },
   'cap-vacant-list':    { id: 'cap-vacant-list',    name: 'CAP Properties vacant list' },

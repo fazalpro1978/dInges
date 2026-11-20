@@ -129,3 +129,33 @@ export function applyMissingFieldDefaults(u: Record<string, unknown>): Record<st
   }
   return u;
 }
+
+// ── Duplicate unit numbers within one file ──────────────────────────────────
+// Rows identical in every field are the same unit listed twice: keep one. Rows that share property + unit number but differ
+// are kept and each is flagged for a person to verify. Nothing is ever dropped unless it is an exact copy.
+export function dedupeUnits(units: Record<string, unknown>[]): { units: Record<string, unknown>[]; removed: number; conflicts: number } {
+  const key = (u: Record<string, unknown>) =>
+    `${String(u.property ?? '').toLowerCase().replace(/\s+/g, ' ').trim()}||${String(u.unit_no ?? '').toLowerCase().trim()}`;
+  const canon = (u: Record<string, unknown>) =>
+    JSON.stringify(Object.keys(u).sort().reduce((m: Record<string, unknown>, k) => (m[k] = u[k], m), {}));
+  const seen = new Map<string, Set<string>>();
+  const kept: Record<string, unknown>[] = [];
+  let removed = 0;
+  for (const u of units) {
+    if (!u.property || !u.unit_no) { kept.push(u); continue; }
+    const k = key(u), c = canon(u);
+    const s = seen.get(k) ?? seen.set(k, new Set()).get(k)!;
+    if (s.has(c)) { removed++; continue; }
+    s.add(c);
+    kept.push(u);
+  }
+  let conflicts = 0;
+  const NOTE = 'Duplicate unit number in source file — please verify';
+  const out = kept.map(u => {
+    if (!u.property || !u.unit_no || (seen.get(key(u))?.size ?? 0) < 2) return u;
+    conflicts++;
+    const existing = String(u.operator_remarks ?? '').trim();
+    return { ...u, operator_remarks: [existing, NOTE].filter(Boolean).join(' · ') };
+  });
+  return { units: out, removed, conflicts };
+}
