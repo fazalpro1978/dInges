@@ -410,6 +410,7 @@ export default function IngestPipeline() {
             setRejectedInValidation(new Set(s.savedRejectedInValidation ?? []));
             setBulkRealtor(s.savedBulkRealtor ?? { name: '', moci: '' });
             setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
+            setWorkbookNotes(s.savedWorkbookNotes ?? null);
             setRecordActions(s.savedRecordActions ?? {});
             if (s.savedRunId) setRunId(s.savedRunId);
             // Restore propZones; if missing, seed from matched records
@@ -471,12 +472,13 @@ export default function IngestPipeline() {
         savedRejectedInValidation: Array.from(rejectedInValidation),
         savedBulkRealtor: bulkRealtor,
         savedBulkZone: bulkZone,
+        savedWorkbookNotes: workbookNotes,
         savedPropZones: propZones,
         savedRecordActions: recordActions,
         savedRunId: runId,
       }));
     } catch {}
-  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, propZones, excludedIdx, fileName, fileSize, summary, runId]);
+  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, propZones, excludedIdx, fileName, fileSize, summary, runId, workbookNotes]);
 
   // Amenities baseline — snapshot resolvedData.amenities on stage-2 entry so
   // bulk edits can be reverted. Reset when leaving stage 2.
