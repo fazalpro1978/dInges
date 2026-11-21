@@ -280,7 +280,8 @@ export default function MasterCodePanel({
                 return (
                   <div key={g.zone_code || `unassigned-${i}`} className="flex items-center justify-between gap-2">
                     <span className={`font-mono font-bold text-xs tracking-widest ${g.prefix ? 'text-gray-700' : 'text-amber-600'}`}>
-                      {g.prefix ? [g.prefix[0], g.prefix.slice(1, 4), g.prefix.slice(4, 6), g.prefix.slice(6, 8)].join(' · ') : 'zone needed'}
+                      {g.prefix ? [g.prefix[0], g.prefix.slice(1, 4), g.prefix.slice(4, 6), g.prefix.slice(6, 8)].join(' · ')
+                        : !state.entity_code ? 'select entity' : !agentCode ? 'select agent' : 'zone needed'}
                     </span>
                     <span className="text-[9px] text-gray-400 whitespace-nowrap">
                       {g.count} unit{g.count !== 1 ? 's' : ''}

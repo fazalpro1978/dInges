@@ -409,6 +409,7 @@ export default function IngestPipeline() {
             setExcludedIdx(new Set(s.savedExcludedIdx ?? []));
             setRejectedInValidation(new Set(s.savedRejectedInValidation ?? []));
             setBulkRealtor(s.savedBulkRealtor ?? { name: '', moci: '' });
+            if (s.savedEntityCode || s.savedCategory) setMcState(prev => ({ ...prev, entity_code: s.savedEntityCode ?? prev.entity_code, category: s.savedCategory ?? prev.category }));
             setBulkZone(s.savedBulkZone ?? { code: '', name: '' });
             setWorkbookNotes(s.savedWorkbookNotes ?? null);
             setRecordActions(s.savedRecordActions ?? {});
@@ -473,12 +474,14 @@ export default function IngestPipeline() {
         savedBulkRealtor: bulkRealtor,
         savedBulkZone: bulkZone,
         savedWorkbookNotes: workbookNotes,
+        savedEntityCode: mcState.entity_code,
+        savedCategory: mcState.category,
         savedPropZones: propZones,
         savedRecordActions: recordActions,
         savedRunId: runId,
       }));
     } catch {}
-  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, propZones, excludedIdx, fileName, fileSize, summary, runId, workbookNotes]);
+  }, [stage, matched, rejectedInValidation, recordActions, bulkRealtor, bulkZone, propZones, excludedIdx, fileName, fileSize, summary, runId, workbookNotes, mcState.entity_code, mcState.category]);
 
   // Amenities baseline — snapshot resolvedData.amenities on stage-2 entry so
   // bulk edits can be reverted. Reset when leaving stage 2.
