@@ -20,3 +20,5 @@ Unit-number splitting, X / NEXT PAGE skipping, red-font = Reserved, SHOP droppin
 
 ## Result of the first run (Nov 2026)
 81 units (8 Reserved); 6 rents entered by hand; imported to REIMS and verified.
+
+When the same workbook also has detail sheets that the NEXT PAGE cells point to, the workbook reader (`retaj-workbook.md`) joins them; without those sheets the NEXT PAGE rows import nothing, as above.

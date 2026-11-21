@@ -15,6 +15,7 @@ import { isRetajVacantSheet, parseRetajVacant } from '../../../lib/parsers/retaj
 import { registry } from '../../../lib/registryClient';
 import { applyMissingFieldDefaults, dedupeUnits } from '../../../lib/parsers/normalisers';
 import { isRetajBlockListSheet, parseRetajBlockList } from '../../../lib/parsers/retajBlockList';
+import { parseRetajWorkbook, reconcileDetail, dropCurrent } from '../../../lib/parsers/retajWorkbook';
 import { isCanonicalSheet, parseCanonical } from '../../../lib/parsers/canonical';
 import { HANDLER_PROFILE } from '../../../lib/trainMemory';
 
@@ -220,6 +221,30 @@ export async function POST(req: NextRequest) {
       const hiddenSheets = new Set(
         (wb.Workbook?.Sheets ?? []).filter(s => s.Hidden).map(s => s.name),
       );
+      // ── Master + detail workbook: follow "NEXT PAGE" pointers to the detail sheets and join them ──
+      {
+        const { data: zr0 } = await registry.from('cr_zone_codes').select('zone_code, district_name');
+        const zoneNames0 = new Map<number, string>((zr0 ?? []).map((z: { zone_code: number; district_name: string }) => [z.zone_code, z.district_name]));
+        const rw = parseRetajWorkbook(wb, zoneNames0, hiddenSheets);
+        if (rw) {
+          const { data: ex } = await registry.from('units').select('property, unit_no, rent, status, furnishing').ilike('realtor_name', '%retaj%').limit(5000);
+          const existing = (ex ?? []) as { property: string; unit_no: string; rent: number | null; status: string | null; furnishing: string | null }[];
+          const detailDedup = dedupeUnits(rw.detail.map(u => applyMissingFieldDefaults({ ...u })));
+          const rec = reconcileDetail(detailDedup.units, existing);
+          const cur = dropCurrent(rw.master.map(u => applyMissingFieldDefaults({ ...u })), existing);
+          const dd = dedupeUnits(await fillZoneNames([...cur.units, ...rec.units]));
+          return NextResponse.json({
+            units: dd.units, fileName: file.name, count: dd.units.length, source: HANDLER_PROFILE['retaj-workbook'],
+            duplicatesRemoved: detailDedup.removed + dd.removed, duplicatesFlagged: dd.conflicts,
+            workbook: {
+              masterSheet: rw.masterSheet, detailSheets: rw.sheets, masterUnitsAlreadyCurrent: cur.current,
+              masterUnitsOffered: cur.units.length, handedOverAsUpdates: rec.matches.length, newUnits: rec.fresh,
+              needsReview: rec.ambiguous, matches: rec.matches,
+            },
+          });
+        }
+      }
+
       for (const name of wb.SheetNames) {
         if (hiddenSheets.has(name)) continue;
         if (isCanonicalSheet(name, wb.Sheets[name])) {

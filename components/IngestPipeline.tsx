@@ -307,6 +307,12 @@ export default function IngestPipeline() {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  type WorkbookNotes = {
+    masterSheet: string; detailSheets: { sheet: string; units: number }[]; masterUnitsAlreadyCurrent: number; masterUnitsOffered: number;
+    handedOverAsUpdates: number; newUnits: number; needsReview: number;
+    matches: { property: string; unit_no: string; existing_property: string; existing_unit_no: string; existing_rent: number | null; incoming_rent: number | null; incoming_status: string; changes: string[]; existing_duplicate: boolean }[];
+  };
+  const [workbookNotes, setWorkbookNotes] = useState<WorkbookNotes | null>(null);
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -920,6 +926,7 @@ export default function IngestPipeline() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Extraction failed');
       const { units } = data as { units: Record<string, unknown>[] };
+      setWorkbookNotes((data as { workbook?: WorkbookNotes }).workbook ?? null);
       await runMatch(units);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
@@ -1155,6 +1162,7 @@ export default function IngestPipeline() {
   };
 
   const reset = () => {
+    setWorkbookNotes(null);
     try { sessionStorage.removeItem(SESSION_KEY); } catch {}
     try { sessionStorage.removeItem(FILE_KEY); } catch {}
     setBatchErrorSummary([]); setBatchTotalRows(0);
@@ -1702,6 +1710,35 @@ export default function IngestPipeline() {
               <div className="mb-4 bg-purple-50 border border-purple-200 rounded-lg px-4 py-2 text-xs text-purple-700">
                 {unresolvedConflicts} conflict{unresolvedConflicts > 1 ? 's' : ''} must be resolved before proceeding.
               </div>
+            )}
+
+            {workbookNotes && (
+              <details className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-xs text-teal-900" open>
+                <summary className="cursor-pointer font-semibold">
+                  Workbook cross-reference — {workbookNotes.detailSheets.length} detail sheet{workbookNotes.detailSheets.length === 1 ? '' : 's'} followed from “{workbookNotes.masterSheet}”
+                </summary>
+                <ul className="mt-2 space-y-0.5">
+                  <li>{workbookNotes.detailSheets.map(d => `${d.sheet}: ${d.units}`).join(' · ')}</li>
+                  <li><b>{workbookNotes.newUnits}</b> new unit{workbookNotes.newUnits === 1 ? '' : 's'} · <b>{workbookNotes.handedOverAsUpdates}</b> already in REIMS under another naming system, handed over under their existing names so they arrive as updates, not duplicates{workbookNotes.needsReview > 0 ? ` · ${workbookNotes.needsReview} need review` : ''}</li>
+                  <li>{workbookNotes.masterUnitsAlreadyCurrent} master-sheet unit{workbookNotes.masterUnitsAlreadyCurrent === 1 ? ' is' : 's are'} already current in REIMS and not offered again.</li>
+                </ul>
+                {workbookNotes.matches.length > 0 && (
+                  <div className="mt-3 max-h-48 overflow-auto rounded border border-teal-200 bg-white">
+                    <table className="w-full text-[11px]">
+                      <thead className="bg-teal-100 text-left"><tr><th className="px-2 py-1">In the file</th><th className="px-2 py-1">Existing REIMS unit</th><th className="px-2 py-1">Changes</th></tr></thead>
+                      <tbody>
+                        {workbookNotes.matches.map((m, i) => (
+                          <tr key={i} className="border-t border-teal-100">
+                            <td className="px-2 py-1">{m.property} · {m.unit_no}</td>
+                            <td className="px-2 py-1">{m.existing_property} · {m.existing_unit_no}{m.existing_duplicate ? ' (listed twice in REIMS)' : ''}</td>
+                            <td className="px-2 py-1">{m.changes.length ? m.changes.join('; ') : 'no change'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </details>
             )}
 
             {/* ── Delta classification summary ─────────────────────────── */}

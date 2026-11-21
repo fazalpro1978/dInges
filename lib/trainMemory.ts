@@ -50,6 +50,8 @@ export const GLOBAL_RULES: Rule[] = [
     rule: 'Hidden sheets are never read — neither by the trained parsers nor by the AI path (confirmed for the Retaj workbook\'s hidden Inovia sheet, applied to every file).' },
   { id: 'G15', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/normalisers.ts', 'app/api/extract/route.ts'],
     rule: 'A unit listed twice in one file is imported once when the rows are identical; rows that share property + unit number but differ are kept and flagged "Duplicate unit number in source file — please verify". Nothing is dropped unless it is an exact copy.' },
+  { id: 'G16', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajWorkbook.ts', 'app/api/extract/route.ts', 'components/IngestPipeline.tsx'],
+    rule: 'Master + detail workbooks: a pointer cell on the master ("NEXT PAGE (SHEET)") is followed to its detail sheet; unit-level facts (unit number, price, offer, status) come from the detail sheet, building-level facts (area, phone, photos, map, furnishing, bills, building number) from the master. Units already in REIMS under another identifier are handed over under their existing property and unit names so the unchanged matching engine sees updates, never duplicates; master rows already current in REIMS are not offered again. The result is shown on Match & Review.' },
   { id: 'G13', decidedOn: '2026-11-11', enforcedBy: ['lib/parsers/canonical.ts', 'app/api/extract/route.ts'],
     rule: 'A sheet whose headers are AXIOM field names is read exactly as written (no AI); master and smart codes in it are ignored and always regenerated.' },
 ];
@@ -77,6 +79,18 @@ export const SOURCE_PROFILES: SourceProfile[] = [
       { id: 'RBL02', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajBlockList.ts'], rule: 'TYPE carries config and furnishing together ("2BHK - FF"); OFFER "1 MONTH FREE" sets month free (count, REIMS stores days); BILLS follows global rule G02; building number goes to maintenance_notes.' },
       { id: 'RBL03', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajBlockList.ts'], rule: 'BOOKED under either the AGENT or STATUS column (the source headers are swapped) means Reserved; red font marks shared labels in this layout and is ignored; "X" units import nothing.' },
       { id: 'RBL04', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajBlockList.ts', 'lib/parsers/retajVacant.ts'], rule: 'The area comes from the sheet title in brackets (e.g. "( ALNASER )") and resolves to a zone only when unambiguous (alnaser 39); a map link is used only where the location cell has one.' },
+    ],
+  },
+  {
+    id: 'retaj-workbook', name: 'Retaj master workbook with detail sheets', handler: 'parser',
+    detect: 'A visible master sheet (Retaj vacant-list headers) whose NEXT PAGE cells resolve to visible detail sheets',
+    doc: 'train_memory/sources/retaj-workbook.md',
+    rules: [
+      { id: 'RWB01', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajWorkbook.ts'], rule: 'Only sheets the master points to are read (La Crystal, Alshaheen, Jeera/TCA, Alwaab in the first workbook); unreferenced sheets such as La Rose and Commercial are left alone until the user asks for them.' },
+      { id: 'RWB02', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajWorkbook.ts'], rule: 'Join keys: building number (Alshaheen, Alwaab), building name (La Crystal), block range of the unit prefix (Jeera J1-J10 and J30-J40). Alwaab WITH BILLS price goes to a remark; rent is the price excluding bills.' },
+      { id: 'RWB03', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajWorkbook.ts'], rule: 'Existing REIMS units under Retaj\'s own Unit_ID naming (QS016_A105) match incoming units by building plus the last digits of the unit number; matches are handed over under the existing names, ambiguous ones are flagged, and identical existing copies are reported.' },
+      { id: 'RWB04', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajWorkbook.ts'], rule: 'New units in a building with existing units adopt that building\'s existing label pattern (AL SHAHEEN-n, RETAJ WEST ALWAAB W-n).' },
+      { id: 'RWB05', decidedOn: '2026-11-21', enforcedBy: ['lib/parsers/retajWorkbook.ts', 'app/api/extract/route.ts'], rule: 'Master units already current in REIMS (status, rent, furnishing unchanged) are not offered again. Realtor "Retaj Real Estate" and entity RET apply (the older 148-unit import used "Retaj" and RNL).' },
     ],
   },
   {
@@ -113,6 +127,7 @@ export const HANDLER_PROFILE: Record<string, { id: string; name: string }> = {
   'canonical-sheet':    { id: 'canonical-sheet',    name: 'AXIOM field-name sheet (read exactly as written)' },
   'retaj-vacant-list':  { id: 'retaj-vacant-list',  name: 'Retaj Properties vacant list' },
   'retaj-block-list':   { id: 'retaj-block-list',   name: 'Retaj per-building block list' },
+  'retaj-workbook':     { id: 'retaj-workbook',     name: 'Retaj master workbook with detail sheets' },
   'retaj-template':     { id: 'retaj-template',     name: 'Retaj "Units Import" template' },
   'danat-qatar-template': { id: 'danat-qatar-template', name: 'Danat Qatar XLSX template' },
   'cap-vacant-list':    { id: 'cap-vacant-list',    name: 'CAP Properties vacant list' },

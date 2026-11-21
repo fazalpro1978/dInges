@@ -17,7 +17,7 @@ const HEADER_KEYS = {
 } as const;
 type Key = keyof typeof HEADER_KEYS;
 
-function findHeader(ws: xlsx.WorkSheet): { row: number; col: Record<Key, number> } | null {
+export function findHeader(ws: xlsx.WorkSheet): { row: number; col: Record<Key, number> } | null {
   const range = xlsx.utils.decode_range(ws['!ref'] ?? 'A1');
   for (let r = range.s.r; r <= Math.min(range.e.r, range.s.r + 12); r++) {
     const col: Partial<Record<Key, number>> = {};
