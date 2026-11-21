@@ -25,3 +25,7 @@
 
 ## Result on the first workbook
 48 detail units: 26 new, 22 handed over as updates (15 with a changed rent, status or furnishing); 81 master units already current. Shown on Match & Review as a cross-reference report.
+
+## Imported to REIMS (21 Nov 2026)
+26 units inserted, 22 updated, 48 acknowledged; verified field by field against the staged run (0 differences, 0 duplicates, Jeera all zone 56).
+Lessons that became rules: the zone of existing units wins over the area alias (RWB06); config/type conflicts on matched units are reported (RWB07; five Jeera units and Alwaab W2-101 were 2 BHK in REIMS but 1 BHK in the list and were corrected in Validation); the report panel and entity/category are kept across reloads. Two pre-existing exact duplicates in REIMS (QW013_A506, QU002_A402) were deleted by the user before the import.
