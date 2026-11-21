@@ -192,12 +192,13 @@ export function familyKey(property: string, unitNo: string): { fam: string; b: s
   return null;
 }
 
-export type ExistingRow = { property: string; unit_no: string; rent?: number | null; status?: string | null; furnishing?: string | null };
+export type ExistingRow = { property: string; unit_no: string; rent?: number | null; status?: string | null; furnishing?: string | null; zone_code?: number | null };
 export type Match = { property: string; unit_no: string; existing_property: string; existing_unit_no: string; existing_rent: number | null; incoming_rent: number | null; incoming_status: string; changes: string[]; existing_duplicate: boolean };
 
-export function reconcileDetail(detail: DetailUnit[], existing: ExistingRow[]): { units: DetailUnit[]; matches: Match[]; fresh: number; ambiguous: number } {
+export function reconcileDetail(detail: DetailUnit[], existing: ExistingRow[]): { units: DetailUnit[]; matches: Match[]; fresh: number; ambiguous: number; zonesFromExisting: number } {
   const byKey = new Map<string, ExistingRow[]>();
   const labels = new Map<string, Map<string, number>>();
+  const zonesBy = new Map<string, Set<number>>();
   existing.forEach(e => {
     const k = familyKey(e.property, e.unit_no);
     if (!k) return;
@@ -206,6 +207,7 @@ export function reconcileDetail(detail: DetailUnit[], existing: ExistingRow[]): 
     for (const lk of [`${k.fam}|${k.b}`, `${k.fam}|*`]) {
       const m = labels.get(lk) ?? labels.set(lk, new Map()).get(lk)!;
       m.set(e.property, (m.get(e.property) ?? 0) + 1);
+      if (e.zone_code != null && Number(e.zone_code) > 0) (zonesBy.get(lk) ?? zonesBy.set(lk, new Set()).get(lk)!).add(Number(e.zone_code));
     }
   });
   const topLabel = (lk: string): string | undefined => {
@@ -223,10 +225,28 @@ export function reconcileDetail(detail: DetailUnit[], existing: ExistingRow[]): 
     m.forEach((_n, label) => { if (/\d+\s*$/.test(label)) prefixes.add(label.replace(/\d+\s*$/, '')); });
     return prefixes.size === 1 && fam !== 'crystal' && fam !== 'jeera' ? `${Array.from(prefixes)[0]}${b}` : undefined;
   };
+  // The zone REIMS already holds for a building wins over a zone guessed from the area name
+  // (Jeera/TCA is zone 56 in Retaj's own data although "Abu Hamour" appears in zone 55's name).
+  const existingZone = (fam: string, b: string): number | undefined => {
+    for (const lk of [`${fam}|${b}`, `${fam}|*`]) {
+      const z = zonesBy.get(lk);
+      if (z && z.size === 1) return Array.from(z)[0];
+    }
+    return undefined;
+  };
+  let zonesFromExisting = 0;
+  const withZone = (u: DetailUnit, fam: string, b: string): DetailUnit => {
+    const z = existingZone(fam, b);
+    if (z === undefined || Number(u.zone_code) === z) return u;
+    zonesFromExisting++;
+    const { zone: _drop, ...rest } = u;
+    return { ...rest, zone_code: z };
+  };
   const matches: Match[] = [];
   let fresh = 0, ambiguous = 0;
-  const units = detail.map(u => {
-    const k = familyKey(String(u.property), String(u.unit_no));
+  const units = detail.map(raw => {
+    const k = familyKey(String(raw.property), String(raw.unit_no));
+    const u = k ? withZone(raw, k.fam, k.b) : raw;
     if (!k) { fresh++; return u; }
     const hit = byKey.get(`${k.fam}|${k.b}|${k.digits}`) ?? [];
     const label = topLabel(`${k.fam}|${k.b}`) ?? topLabel(`${k.fam}|*`) ?? derive(k.fam, k.b);
@@ -249,7 +269,7 @@ export function reconcileDetail(detail: DetailUnit[], existing: ExistingRow[]): 
     fresh++;
     return label ? { ...u, property: label } : u;
   });
-  return { units, matches, fresh, ambiguous };
+  return { units, matches, fresh, ambiguous, zonesFromExisting };
 }
 
 // Master units that are already in REIMS and unchanged (status, rent, furnishing) are not offered again.

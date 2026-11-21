@@ -309,7 +309,7 @@ export default function IngestPipeline() {
   const [error, setError] = useState<string | null>(null);
   type WorkbookNotes = {
     masterSheet: string; detailSheets: { sheet: string; units: number }[]; masterUnitsAlreadyCurrent: number; masterUnitsOffered: number;
-    handedOverAsUpdates: number; newUnits: number; needsReview: number;
+    handedOverAsUpdates: number; newUnits: number; needsReview: number; zonesTakenFromExisting?: number;
     matches: { property: string; unit_no: string; existing_property: string; existing_unit_no: string; existing_rent: number | null; incoming_rent: number | null; incoming_status: string; changes: string[]; existing_duplicate: boolean }[];
   };
   const [workbookNotes, setWorkbookNotes] = useState<WorkbookNotes | null>(null);
@@ -1725,6 +1725,7 @@ export default function IngestPipeline() {
                 <ul className="mt-2 space-y-0.5">
                   <li>{workbookNotes.detailSheets.map(d => `${d.sheet}: ${d.units}`).join(' · ')}</li>
                   <li><b>{workbookNotes.newUnits}</b> new unit{workbookNotes.newUnits === 1 ? '' : 's'} · <b>{workbookNotes.handedOverAsUpdates}</b> already in REIMS under another naming system, handed over under their existing names so they arrive as updates, not duplicates{workbookNotes.needsReview > 0 ? ` · ${workbookNotes.needsReview} need review` : ''}</li>
+                  {(workbookNotes.zonesTakenFromExisting ?? 0) > 0 && <li>{workbookNotes.zonesTakenFromExisting} unit{workbookNotes.zonesTakenFromExisting === 1 ? '' : 's'} took the zone REIMS already holds for their building.</li>}
                   <li>{workbookNotes.masterUnitsAlreadyCurrent} master-sheet unit{workbookNotes.masterUnitsAlreadyCurrent === 1 ? ' is' : 's are'} already current in REIMS and not offered again.</li>
                 </ul>
                 {workbookNotes.matches.length > 0 && (

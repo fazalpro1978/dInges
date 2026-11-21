@@ -227,8 +227,8 @@ export async function POST(req: NextRequest) {
         const zoneNames0 = new Map<number, string>((zr0 ?? []).map((z: { zone_code: number; district_name: string }) => [z.zone_code, z.district_name]));
         const rw = parseRetajWorkbook(wb, zoneNames0, hiddenSheets);
         if (rw) {
-          const { data: ex } = await registry.from('units').select('property, unit_no, rent, status, furnishing').ilike('realtor_name', '%retaj%').limit(5000);
-          const existing = (ex ?? []) as { property: string; unit_no: string; rent: number | null; status: string | null; furnishing: string | null }[];
+          const { data: ex } = await registry.from('units').select('property, unit_no, rent, status, furnishing, zone_code').ilike('realtor_name', '%retaj%').limit(5000);
+          const existing = (ex ?? []) as { property: string; unit_no: string; rent: number | null; status: string | null; furnishing: string | null; zone_code: number | null }[];
           const detailDedup = dedupeUnits(rw.detail.map(u => applyMissingFieldDefaults({ ...u })));
           const rec = reconcileDetail(detailDedup.units, existing);
           const cur = dropCurrent(rw.master.map(u => applyMissingFieldDefaults({ ...u })), existing);
@@ -239,7 +239,7 @@ export async function POST(req: NextRequest) {
             workbook: {
               masterSheet: rw.masterSheet, detailSheets: rw.sheets, masterUnitsAlreadyCurrent: cur.current,
               masterUnitsOffered: cur.units.length, handedOverAsUpdates: rec.matches.length, newUnits: rec.fresh,
-              needsReview: rec.ambiguous, matches: rec.matches,
+              needsReview: rec.ambiguous, zonesTakenFromExisting: rec.zonesFromExisting, matches: rec.matches,
             },
           });
         }

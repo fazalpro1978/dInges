@@ -16,7 +16,7 @@
 | BLOCK 1-10 / BLOCK 30-40 | JERRA (TCA) | unit prefix J1-J10 / J30-J40 (`J2-108` = building J2, flat 108) |
 
 ## Rules
-- Master supplies: area -> zone (alsadd 38, alnaser 39, alwaab and Abo Hamour 55), security phone -> contact_details, photos -> media_url, map link, furnishing, bills (global rule G02), building number -> maintenance_notes. Detail overrides: price, offer (month free count), status, per-unit furnishing (Jeera FF/UF/SF, UN = Unfurnished).
+- Master supplies: area -> zone (alsadd 38, alnaser 39, alwaab 55), but **the zone REIMS already holds for a building wins** over the area guess: Jeera/TCA is zone **56** in Retaj's own data and in REIMS ("Abo Hamour" is ambiguous), so its 19 units are zone 56, security phone -> contact_details, photos -> media_url, map link, furnishing, bills (global rule G02), building number -> maintenance_notes. Detail overrides: price, offer (month free count), status, per-unit furnishing (Jeera FF/UF/SF, UN = Unfurnished).
 - Alwaab "WITH BILLS" price is noted in remarks; rent is the price excluding bills.
 - Units already in REIMS under Retaj's own Unit_ID naming (for example QS016_A105, QC007_A306, QJR05_A104, QW013_A108) are matched by building plus the last digits of the unit number and handed over under their existing names, so the unchanged matching engine classifies them as updates (rent, status, furnishing). Ambiguous matches are flagged; identical existing copies are reported (REIMS already holds `RETAJ WEST ALWAAB W-4 / QW013_A506` twice).
 - New units in a building with existing units adopt its label pattern (AL SHAHEEN-n, RETAJ WEST ALWAAB W-n).
