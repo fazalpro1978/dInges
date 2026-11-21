@@ -192,7 +192,7 @@ export function familyKey(property: string, unitNo: string): { fam: string; b: s
   return null;
 }
 
-export type ExistingRow = { property: string; unit_no: string; rent?: number | null; status?: string | null; furnishing?: string | null; zone_code?: number | null };
+export type ExistingRow = { property: string; unit_no: string; rent?: number | null; status?: string | null; furnishing?: string | null; zone_code?: number | null; config?: string | null; type?: string | null };
 export type Match = { property: string; unit_no: string; existing_property: string; existing_unit_no: string; existing_rent: number | null; incoming_rent: number | null; incoming_status: string; changes: string[]; existing_duplicate: boolean };
 
 export function reconcileDetail(detail: DetailUnit[], existing: ExistingRow[]): { units: DetailUnit[]; matches: Match[]; fresh: number; ambiguous: number; zonesFromExisting: number } {
@@ -257,6 +257,8 @@ export function reconcileDetail(detail: DetailUnit[], existing: ExistingRow[]): 
       if (u.rent != null && Number(e.rent) !== Number(u.rent)) changes.push(`rent ${e.rent ?? '—'} → ${u.rent}`);
       if (u.status && e.status && String(e.status) !== String(u.status)) changes.push(`status ${e.status} → ${u.status}`);
       if (u.furnishing && e.furnishing && u.furnishing !== e.furnishing) changes.push(`furnishing ${e.furnishing} → ${u.furnishing}`);
+      if (u.config && e.config && u.config !== e.config) changes.push(`config ${e.config} → ${u.config} (REIMS value is kept unless you edit it in Validation)`);
+      if (u.type && e.type && u.type !== e.type) changes.push(`type ${e.type} → ${u.type} (REIMS value is kept unless you edit it in Validation)`);
       matches.push({ property: String(u.property), unit_no: String(u.unit_no), existing_property: e.property, existing_unit_no: e.unit_no,
         existing_rent: e.rent == null ? null : Number(e.rent), incoming_rent: u.rent == null ? null : Number(u.rent), incoming_status: String(u.status), changes, existing_duplicate: sameIdentity });
       return { ...u, property: e.property, unit_no: e.unit_no };
